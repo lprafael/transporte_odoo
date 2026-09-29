@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_transit_gtfs_export_wizard_form" model="ir.ui.view">
+        <field name="name">transit.gtfs.export.wizard.form</field>
+        <field name="model">transit.gtfs.export.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Exportador de Feeds GTFS Estático (Google Transit / Moovit)">
+                <sheet>
+                    <div class="alert alert-info" role="alert" invisible="state == 'done'">
+                        <strong>Estándar General Transit Feed Specification (GTFS):</strong>
+                        Este asistente compila automáticamente los itinerarios, geocercas, cuadros de marcha y frecuencias de Odoo en los archivos requeridos: <code>agency.txt</code>, <code>routes.txt</code>, <code>stops.txt</code>, <code>trips.txt</code>, <code>stop_times.txt</code> y <code>calendar.txt</code>.
+                    </div>
+                    <group invisible="state == 'done'">
+                        <group string="Datos de la Autoridad / Agencia">
+                            <field name="agency_name"/>
+                            <field name="agency_url"/>
+                        </group>
+                        <group string="Configuración Regional">
+                            <field name="agency_timezone"/>
+                            <field name="agency_lang"/>
+                        </group>
+                    </group>
+
+                    <div class="text-center p-4 bg-light rounded" invisible="state != 'done'">
+                        <h3 class="text-success mb-3">✓ Paquete GTFS Generado Exitosamente</h3>
+                        <p class="text-muted">Descargue el archivo .zip comprimido para publicarlo en Google Maps, Moovit o su plataforma MaaS:</p>
+                        <field name="file_data" filename="filename" widget="binary"/>
+                        <field name="filename" invisible="1"/>
+                    </div>
+
+                    <footer>
+                        <button name="action_generate_gtfs"
+                                string="Generar y Empaquetar Archivos GTFS"
+                                type="object"
+                                class="btn-primary"
+                                invisible="state == 'done'"/>
+                        <button string="Cerrar" class="btn-secondary" special="cancel"/>
+                    </footer>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_transit_gtfs_export_wizard" model="ir.actions.act_window">
+        <field name="name">Exportar GTFS Estático</field>
+        <field name="res_model">transit.gtfs.export.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+</odoo>

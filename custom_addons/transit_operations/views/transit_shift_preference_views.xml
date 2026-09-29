@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Vista Lista -->
+    <record id="view_transit_shift_preference_list" model="ir.ui.view">
+        <field name="name">transit.shift.preference.list</field>
+        <field name="model">transit.shift.preference</field>
+        <field name="arch" type="xml">
+            <list string="Licitación de Turnos (Preference Bidding)">
+                <field name="name"/>
+                <field name="driver_id"/>
+                <field name="seniority_years" string="Antigüedad"/>
+                <field name="preferred_shift"/>
+                <field name="preferred_rest_day"/>
+                <field name="preferred_route_id"/>
+                <field name="state" widget="badge"
+                       decoration-info="state == 'draft'"
+                       decoration-warning="state == 'submitted'"
+                       decoration-success="state == 'approved'"
+                       decoration-danger="state == 'rejected'"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Formulario -->
+    <record id="view_transit_shift_preference_form" model="ir.ui.view">
+        <field name="name">transit.shift.preference.form</field>
+        <field name="model">transit.shift.preference</field>
+        <field name="arch" type="xml">
+            <form string="Preferencia de Turno y Descanso">
+                <header>
+                    <button name="action_submit" string="Postular Solicitud" type="object" class="oe_highlight" invisible="state != 'draft'"/>
+                    <button name="action_approve" string="Aprobar en Cuadrante" type="object" class="btn-success" invisible="state != 'submitted'"/>
+                    <button name="action_reject" string="Rechazar" type="object" invisible="state != 'submitted'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,submitted,approved"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" string="Referencia"/>
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="Datos del Conductor">
+                            <field name="driver_id"/>
+                            <field name="seniority_years"/>
+                        </group>
+                        <group string="Preferencias Ergonómicas">
+                            <field name="preferred_shift"/>
+                            <field name="preferred_rest_day"/>
+                            <field name="preferred_route_id"/>
+                        </group>
+                    </group>
+                    <group string="Observaciones y Motivos">
+                        <field name="comments" placeholder="Motivos familiares, proximidad de domicilio o salud ocupacional..."/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana -->
+    <record id="action_transit_shift_preference" model="ir.actions.act_window">
+        <field name="name">Licitación de Turnos (Rostering)</field>
+        <field name="res_model">transit.shift.preference</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Registre las preferencias de turnos y descansos de los choferes para balancear cuadrantes ergonómicos sin discrecionalidad.
+            </p>
+        </field>
+    </record>
+</odoo>

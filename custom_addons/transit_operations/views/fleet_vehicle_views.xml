@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Acción para botón inteligente de despachos (declarada primero para resolver el XMLID) -->
+    <record id="action_transit_dispatch_by_vehicle" model="ir.actions.act_window">
+        <field name="name">Despachos del Bus</field>
+        <field name="res_model">transit.dispatch</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('vehicle_id', '=', active_id)]</field>
+    </record>
+
+    <!-- Herencia del formulario de Vehículo en Flota -->
+    <record id="fleet_vehicle_view_form_inherit_bus" model="ir.ui.view">
+        <field name="name">fleet.vehicle.form.inherit.bus</field>
+        <field name="model">fleet.vehicle</field>
+        <field name="inherit_id" ref="fleet.fleet_vehicle_view_form"/>
+        <field name="arch" type="xml">
+            <!-- Botón inteligente para ver despachos del vehículo -->
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button name="%(action_transit_dispatch_by_vehicle)d" type="action" class="oe_stat_button" icon="fa-road">
+                    <field name="dispatch_count" widget="statinfo" string="Despachos"/>
+                </button>
+            </xpath>
+
+            <!-- Insertar Número de Interno y Concesionaria antes de la matrícula -->
+            <xpath expr="//field[@name='license_plate']" position="before">
+                <field name="concessionaire_id"/>
+                <field name="bus_internal_number" placeholder="Ej: 104"/>
+                <field name="is_electric" widget="boolean_toggle"/>
+            </xpath>
+
+            <!-- Pestaña de Especificaciones de Transporte y Pasajeros -->
+            <xpath expr="//notebook" position="inside">
+                <page string="Especificaciones de Transporte">
+                    <group>
+                        <group string="Capacidad de Pasajeros">
+                            <field name="seating_capacity"/>
+                            <field name="standing_capacity"/>
+                            <field name="total_capacity"/>
+                        </group>
+                        <group string="Equipamiento y Confort">
+                            <field name="has_air_conditioning"/>
+                            <field name="has_wheelchair_ramp"/>
+                            <field name="validator_terminal_id"/>
+                        </group>
+                    </group>
+                    <group string="Documentación y Vencimientos Legales">
+                        <group>
+                            <field name="itv_expiry_date"/>
+                            <field name="itv_status" widget="badge"
+                                   decoration-success="itv_status == 'valid'"
+                                   decoration-warning="itv_status == 'warning'"
+                                   decoration-danger="itv_status == 'expired'"/>
+                        </group>
+                        <group>
+                            <field name="insurance_policy"/>
+                            <field name="insurance_expiry_date"/>
+                            <field name="insurance_status" widget="badge"
+                                   decoration-success="insurance_status == 'valid'"
+                                   decoration-warning="insurance_status == 'warning'"
+                                   decoration-danger="insurance_status == 'expired'"/>
+                        </group>
+                    </group>
+                </page>
+                <page string="Electrificación y Batería (EV)" name="electric" invisible="not is_electric">
+                    <group>
+                        <group string="Sistema de Batería y Autonomía">
+                            <field name="battery_capacity_kwh"/>
+                            <field name="connector_type"/>
+                            <field name="electric_range_km"/>
+                            <field name="avg_energy_consumption_kwh_km"/>
+                        </group>
+                        <group string="Estado de Carga y Salida Garantizada">
+                            <field name="current_soc" widget="progressbar"/>
+                            <field name="min_departure_soc"/>
+                            <field name="current_soh" widget="progressbar"/>
+                            <field name="thermal_preconditioning_ok" widget="boolean_toggle"/>
+                            <field name="charging_status" widget="badge"
+                                   decoration-success="charging_status == 'completed'"
+                                   decoration-warning="charging_status == 'charging'"/>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Herencia de la vista de Lista (Tree) de Vehículos -->
+    <record id="fleet_vehicle_view_tree_inherit_bus" model="ir.ui.view">
+        <field name="name">fleet.vehicle.tree.inherit.bus</field>
+        <field name="model">fleet.vehicle</field>
+        <field name="inherit_id" ref="fleet.fleet_vehicle_view_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='license_plate']" position="before">
+                <field name="bus_internal_number"/>
+            </xpath>
+            <xpath expr="//field[@name='state_id']" position="after">
+                <field name="itv_status" widget="badge"
+                       decoration-success="itv_status == 'valid'"
+                       decoration-warning="itv_status == 'warning'"
+                       decoration-danger="itv_status == 'expired'"/>
+                <field name="insurance_status" widget="badge"
+                       decoration-success="insurance_status == 'valid'"
+                       decoration-warning="insurance_status == 'warning'"
+                       decoration-danger="insurance_status == 'expired'"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

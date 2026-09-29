@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_transit_simulation_wizard_form" model="ir.ui.view">
+        <field name="name">transit.simulation.wizard.form</field>
+        <field name="model">transit.simulation.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Simulador Predictivo What-If para Licitaciones y Redes">
+                <sheet>
+                    <div class="alert alert-primary mb-3" role="alert">
+                        <strong>Modelado Predictivo Tipo Optibus:</strong>
+                        Simule en tiempo real los requerimientos de flota, cuadrantes de choferes, kilometraje en vacío (deadhead) y estructura de costos operativos para formular ofertas de licitación pública hiper-competitivas.
+                    </div>
+
+                    <div class="oe_title">
+                        <label for="name" string="Nombre de la Alternativa / Concurso"/>
+                        <h1><field name="name"/></h1>
+                    </div>
+
+                    <group>
+                        <group string="1. Parámetros Operativos del Corredor">
+                            <field name="target_route_id"/>
+                            <field name="route_distance_km"/>
+                            <field name="commercial_speed_kmh"/>
+                            <field name="peak_headway_minutes"/>
+                            <field name="offpeak_headway_minutes"/>
+                            <field name="daily_operating_hours"/>
+                            <field name="peak_hours_per_day"/>
+                            <field name="reserve_fleet_percentage"/>
+                        </group>
+                        <group string="2. Estructura de Costos y Demanda">
+                            <field name="is_electric" widget="boolean_toggle"/>
+                            <field name="energy_cost_per_km" widget="monetary"/>
+                            <field name="driver_hourly_cost" widget="monetary"/>
+                            <field name="fixed_daily_depot_cost" widget="monetary"/>
+                            <field name="expected_daily_passengers"/>
+                        </group>
+                    </group>
+
+                    <div class="mt-4 p-3 bg-light border rounded">
+                        <h4 class="text-primary mb-3">📊 Resultados de la Simulación Predictiva</h4>
+                        <div class="row text-center mb-3">
+                            <div class="col-md-3 border-end">
+                                <small class="text-muted text-uppercase fw-bold">Flota Total Necesaria</small>
+                                <h2 class="text-primary mt-1 mb-0"><field name="total_fleet_needed"/></h2>
+                                <small class="text-muted"><field name="required_peak_buses"/> pico + <field name="reserve_buses"/> reserva</small>
+                            </div>
+                            <div class="col-md-3 border-end">
+                                <small class="text-muted text-uppercase fw-bold">Choferes en Cuadrante</small>
+                                <h2 class="text-success mt-1 mb-0"><field name="drivers_needed"/></h2>
+                                <small class="text-muted">Turnos ergonómicos</small>
+                            </div>
+                            <div class="col-md-3 border-end">
+                                <small class="text-muted text-uppercase fw-bold">Km Totales Diarios</small>
+                                <h2 class="text-dark mt-1 mb-0"><field name="total_daily_km" digits="[10, 0]"/></h2>
+                                <small class="text-muted"><field name="daily_deadhead_km" digits="[10, 0]"/> km en vacío</small>
+                            </div>
+                            <div class="col-md-3">
+                                <small class="text-muted text-uppercase fw-bold">Tarifa de Equilibrio</small>
+                                <h2 class="text-danger mt-1 mb-0"><field name="breakeven_fare" widget="monetary"/></h2>
+                                <small class="text-muted">Por pasajero transportado</small>
+                            </div>
+                        </div>
+
+                        <group>
+                            <group string="Desglose de Costos Diarios Proyectados">
+                                <field name="daily_energy_cost" widget="monetary"/>
+                                <field name="daily_driver_cost" widget="monetary"/>
+                                <field name="daily_depot_fixed_cost" widget="monetary"/>
+                                <field name="total_daily_operating_cost" widget="monetary" class="fw-bold fs-5 text-primary"/>
+                            </group>
+                            <group string="Indicadores de Eficiencia Operacional">
+                                <field name="cycle_time_minutes"/>
+                                <field name="daily_trips"/>
+                                <field name="breakeven_cost_per_km" widget="monetary"/>
+                            </group>
+                        </group>
+                    </div>
+
+                    <footer>
+                        <button string="Cerrar Simulador" class="btn-secondary" special="cancel"/>
+                    </footer>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_transit_simulation_wizard" model="ir.actions.act_window">
+        <field name="name">Simulador What-If para Licitaciones</field>
+        <field name="res_model">transit.simulation.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+</odoo>

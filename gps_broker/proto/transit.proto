@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package transit.telemetry;
+
+import "google/protobuf/timestamp.proto";
+
+// ============================================================
+// Estándar Resolución GVMT N° 065/2024 - Paraguay
+// Protocolo oficial de transmisión de datos operativos de 
+// transporte público de pasajeros.
+// ============================================================
+
+message Operation {
+  enum OperationType {
+    INICIADO = 0;    // Bus inicia recorrido (salida de cabecera)
+    FINALIZADO = 1;  // Bus concluye servicio (llegada a terminal)
+    OPERANDO = 2;    // Coordenada periódica en ruta (cada 10s)
+    SUSPENDIDO = 3;  // Servicio cancelado / auxilio mecánico
+  }
+
+  // --- Campos Requeridos ---
+  int32 identidad = 1;                     // ID de la entidad emisora
+  string agency_id = 2;                    // Código de la empresa (ej: "004B")
+  string mean_id = 3;                      // Número de coche / interno (ej: "00016")
+  string route_id = 4;                     // Código de ramal / itinerario (ej: "020f")
+  string driver_id = 5;                    // Documento / legajo del conductor
+  OperationType type = 6;                  // Tipo de evento operativo
+  int32 accuracy = 7;                      // Precisión GPS en metros
+  double latitude = 8;                     // Latitud WGS 84
+  double longitude = 9;                    // Longitud WGS 84
+  google.protobuf.Timestamp datetime = 13; // Fecha y hora UTC del satélite
+
+  // --- Campos Opcionales ---
+  double altitude = 10;                    // Altitud sobre el nivel del mar (mts)
+  double bearing = 11;                     // Rumbo/Dirección en grados (0° a 360°)
+  double speed = 12;                       // Velocidad del móvil en km/h
+}

@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Vista Lista / Árbol -->
+    <record id="view_transit_concessionaire_evaluation_list" model="ir.ui.view">
+        <field name="name">transit.concessionaire.evaluation.list</field>
+        <field name="model">transit.concessionaire.evaluation</field>
+        <field name="arch" type="xml">
+            <list string="Evaluaciones de Desempeño Concesionarias">
+                <field name="ranking_position" string="Ranking"/>
+                <field name="concessionaire_id"/>
+                <field name="date_evaluation"/>
+                <field name="subtotal_operation" string="Operación (23%)"/>
+                <field name="subtotal_quality" string="Calidad (22%)"/>
+                <field name="subtotal_security" string="Seguridad (24%)"/>
+                <field name="subtotal_infrastructure" string="Infraest. (18%)"/>
+                <field name="subtotal_administration" string="Admin. (13%)"/>
+                <field name="final_score" string="Puntaje Total" widget="badge"
+                       decoration-success="final_score >= 90.0"
+                       decoration-info="final_score >= 75.0 and final_score &lt; 90.0"
+                       decoration-warning="final_score >= 60.0 and final_score &lt; 75.0"
+                       decoration-danger="final_score &lt; 60.0"/>
+                <field name="is_top_3" string="Top 3" widget="boolean"/>
+                <field name="performance_tier"/>
+                <field name="incentive_bonus" widget="monetary" string="Bono Fondo Acumulación"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Formulario -->
+    <record id="view_transit_concessionaire_evaluation_form" model="ir.ui.view">
+        <field name="name">transit.concessionaire.evaluation.form</field>
+        <field name="model">transit.concessionaire.evaluation</field>
+        <field name="arch" type="xml">
+            <form string="Auditoría y Evaluación Ponderada de Concesionario">
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" string="Referencia de Auditoría"/>
+                        <h1><field name="name"/></h1>
+                    </div>
+                    <group>
+                        <group string="Datos del Concesionario y Período">
+                            <field name="concessionaire_id"/>
+                            <field name="clearing_period_id"/>
+                            <field name="date_evaluation"/>
+                            <field name="auditor_id"/>
+                        </group>
+                        <group string="Resultados Globales Ponderados">
+                            <field name="final_score" widget="badge" class="fs-3 fw-bold"/>
+                            <field name="ranking_position"/>
+                            <field name="is_top_3" widget="boolean_toggle"/>
+                            <field name="performance_tier"/>
+                            <field name="incentive_bonus" widget="monetary"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Pilar 1: Operación (23%)" name="operation">
+                            <group>
+                                <field name="score_punctuality" widget="progressbar"/>
+                                <field name="score_itinerary_compliance" widget="progressbar"/>
+                                <field name="score_ipk_goal" widget="progressbar"/>
+                                <field name="subtotal_operation" class="fw-bold"/>
+                            </group>
+                            <p class="text-muted">
+                                Evalúa: puntualidad y regularidad en salidas, cumplimiento estricto de itinerarios y geocercas, bitácora SAE y metas de IPK.
+                            </p>
+                        </page>
+
+                        <page string="Pilar 2: Calidad de Servicio (22%)" name="quality">
+                            <group>
+                                <field name="score_mechanical_inspection" widget="progressbar"/>
+                                <field name="score_maintenance_plan" widget="progressbar"/>
+                                <field name="score_fleet_age" widget="progressbar"/>
+                                <field name="score_vehicle_cleanliness" widget="progressbar"/>
+                                <field name="subtotal_quality" class="fw-bold"/>
+                            </group>
+                            <p class="text-muted">
+                                Evalúa: aprobación de Revista Mecánica Semestral, mantenimiento preventivo/correctivo, edad del parque vehicular, limpieza y uniforme de conductores.
+                            </p>
+                        </page>
+
+                        <page string="Pilar 3: Seguridad Vial (24%)" name="security">
+                            <group>
+                                <field name="score_accident_rate" widget="progressbar"/>
+                                <field name="score_traffic_infractions" widget="progressbar"/>
+                                <field name="score_citizen_complaints" widget="progressbar"/>
+                                <field name="subtotal_security" class="fw-bold"/>
+                            </group>
+                            <p class="text-muted">
+                                Evalúa: tasa de siniestralidad por cada 100.000 km, volumen de infracciones detectadas por telemetría/tránsito e índice de quejas ciudadanas procedentes.
+                            </p>
+                        </page>
+
+                        <page string="Pilar 4: Infraestructura (18%)" name="infrastructure">
+                            <group>
+                                <field name="score_depot_cleanliness" widget="progressbar"/>
+                                <field name="score_lighting_signage" widget="progressbar"/>
+                                <field name="score_operator_welfare" widget="progressbar"/>
+                                <field name="subtotal_infrastructure" class="fw-bold"/>
+                            </group>
+                            <p class="text-muted">
+                                Evalúa: condiciones físicas de cocheras, patios y talleres: iluminación LED, ventilación, señalética, extintores vigentes y sanitarios higiénicos para operadores.
+                            </p>
+                        </page>
+
+                        <page string="Pilar 5: Organización Administrativa (13%)" name="administration">
+                            <group>
+                                <field name="score_process_manuals" widget="progressbar"/>
+                                <field name="score_audited_financials" widget="progressbar"/>
+                                <field name="score_labor_compliance" widget="progressbar"/>
+                                <field name="subtotal_administration" class="fw-bold"/>
+                            </group>
+                            <p class="text-muted">
+                                Evalúa: manuales de procesos operativos formalizados, estados de resultados auditados presentados en tiempo y forma, contratos formales y salud ocupacional.
+                            </p>
+                        </page>
+
+                        <page string="Dictamen del Comité Técnico Auditor" name="notes">
+                            <field name="evaluation_notes" placeholder="Conclusiones, medidas correctivas requeridas, felicitaciones institucionales o plazos de subsanación..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana -->
+    <record id="action_transit_concessionaire_evaluation" model="ir.actions.act_window">
+        <field name="name">Matriz Ponderada UNE-EN 13816</field>
+        <field name="res_model">transit.concessionaire.evaluation</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Audite y evalúe a las empresas concesionarias según la Matriz Ponderada de 5 Pilares (UNE-EN 13816).
+            </p>
+        </field>
+    </record>
+</odoo>

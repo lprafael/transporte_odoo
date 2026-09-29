@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Propuesta Funcional v3.0.0 | Sistema Integral de Gestion de Flota | Poliverso Transit</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #1e3a8a;
+      --primary-dark: #0f172a;
+      --primary-light: #3b82f6;
+      --accent: #0284c7;
+      --success: #059669;
+      --success-light: #ecfdf5;
+      --warning: #d97706;
+      --warning-light: #fffbeb;
+      --danger: #dc2626;
+      --danger-light: #fef2f2;
+      --electric: #7c3aed;
+      --electric-light: #ede9fe;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-light: #64748b;
+      --bg-page: #f8fafc;
+      --bg-card: #ffffff;
+      --border-color: #e2e8f0;
+      --border-dark: #cbd5e1;
+      --shadow-sm: 0 1px 2px 0 rgba(0,0,0,.05);
+      --shadow-md: 0 4px 6px -1px rgba(0,0,0,.08), 0 2px 4px -2px rgba(0,0,0,.06);
+      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,.08), 0 4px 6px -4px rgba(0,0,0,.04);
+    }
+    *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg-page); color: var(--text-main); line-height: 1.6; font-size: 15px; -webkit-font-smoothing: antialiased; }
+
+    .document-wrapper { max-width: 960px; margin: 2.5rem auto 4rem; background: var(--bg-card); border-radius: 16px; box-shadow: var(--shadow-lg); border: 1px solid var(--border-color); padding: 3.5rem 4rem; position: relative; }
+
+    /* Screen actions */
+    .screen-actions { position: fixed; top: 1.5rem; right: 2rem; z-index: 1000; display: flex; gap: .75rem; align-items: center; background: rgba(15,23,42,.85); backdrop-filter: blur(8px); padding: .5rem .85rem; border-radius: 10px; border: 1px solid rgba(255,255,255,.1); }
+    .btn-print { display: inline-flex; align-items: center; gap: .5rem; background: transparent; border: none; color: #e2e8f0; font-size: .82rem; font-weight: 600; cursor: pointer; padding: .3rem .5rem; border-radius: 6px; transition: background .2s; font-family: 'Inter', sans-serif; }
+    .btn-print:hover { background: rgba(255,255,255,.1); }
+
+    /* Header */
+    .doc-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem; margin-bottom: 2.5rem; padding-bottom: 2rem; border-bottom: 2px solid var(--border-color); }
+    .doc-tag { display: inline-block; background: linear-gradient(135deg, #1e3a8a, #0284c7); color: white; font-size: .75rem; font-weight: 700; padding: .3rem .9rem; border-radius: 20px; letter-spacing: .05em; text-transform: uppercase; margin-bottom: .85rem; }
+    .doc-title { font-family: 'Outfit', sans-serif; font-size: 1.95rem; font-weight: 900; color: var(--primary-dark); line-height: 1.2; letter-spacing: -.025em; margin-bottom: .65rem; }
+    .doc-subtitle { font-size: 1.05rem; color: var(--text-muted); line-height: 1.5; }
+    .doc-header-right { text-align: right; min-width: 220px; background: #f8fafc; padding: 1rem 1.25rem; border-radius: 10px; border: 1px solid var(--border-color); }
+    .meta-item { margin-bottom: .45rem; font-size: .85rem; color: var(--text-muted); }
+    .meta-item:last-child { margin-bottom: 0; }
+    .meta-label { font-weight: 600; color: var(--text-main); display: block; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+
+    /* NEW: Feature badges strip */
+    .feature-strip-2026 { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 2rem; padding: 14px 16px; background: linear-gradient(135deg, #ede9fe, #dbeafe); border: 1px solid #c4b5fd; border-radius: 12px; }
+    .fbadge2 { display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px; border-radius: 16px; font-size: 11px; font-weight: 700; letter-spacing: .03em; }
+    .fbadge2-version { background: #f0fdf4; color: #15803d; border: 1px solid #86efac; }
+    .fbadge2-blue { background: #eff6ff; color: #1d4ed8; border: 1px solid #93c5fd; }
+    .fbadge2-purple { background: #f5f3ff; color: #7c3aed; border: 1px solid #c4b5fd; }
+    .fbadge2-red { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+    .fbadge2-amber { background: #fffbeb; color: #92400e; border: 1px solid #fcd34d; }
+
+    /* Sections */
+    section { margin-bottom: 2.75rem; }
+    h2 { font-family: 'Outfit', sans-serif; font-size: 1.45rem; font-weight: 700; color: var(--primary-dark); margin-bottom: 1.25rem; display: flex; align-items: center; gap: .65rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border-color); letter-spacing: -.01em; }
+    h3 { font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 700; color: var(--primary); margin: 1.25rem 0 .65rem; }
+    .section-icon { font-size: 1.45rem; }
+    p { color: var(--text-muted); margin-bottom: .75rem; font-size: .95rem; }
+
+    /* KPI row */
+    .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+    .kpi-box { background: linear-gradient(135deg, #1e3a8a, #1d4ed8); color: white; border-radius: 12px; padding: 1.25rem 1rem; text-align: center; }
+    .kpi-value { font-family: 'Outfit', sans-serif; font-size: 1.85rem; font-weight: 900; letter-spacing: -.03em; }
+    .kpi-label { font-size: .75rem; opacity: .85; margin-top: 4px; font-weight: 600; }
+
+    /* KPI row new style for electric/compliance */
+    .kpi-row-alt { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+    .kpi-box-green { background: linear-gradient(135deg, #065f46, #059669); color: white; border-radius: 12px; padding: 1.25rem 1rem; text-align: center; }
+    .kpi-box-purple { background: linear-gradient(135deg, #4c1d95, #7c3aed); color: white; border-radius: 12px; padding: 1.25rem 1rem; text-align: center; }
+    .kpi-box-amber { background: linear-gradient(135deg, #78350f, #d97706); color: white; border-radius: 12px; padding: 1.25rem 1rem; text-align: center; }
+    .kpi-box-blue { background: linear-gradient(135deg, #1e3a8a, #0284c7); color: white; border-radius: 12px; padding: 1.25rem 1rem; text-align: center; }
+
+    /* Benefit banner */
+    .benefit-banner { background: linear-gradient(135deg, #0f172a, #1e3a8a); color: white; border-radius: 14px; padding: 1.75rem 2rem; margin-bottom: 1.5rem; }
+    .benefit-banner h3 { color: white; margin: 0 0 .65rem; font-size: 1.1rem; }
+    .benefit-banner p { color: rgba(255,255,255,.88); margin: 0; font-size: .95rem; }
+
+    /* Feature cards grid */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin: 1.25rem 0; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin: 1.25rem 0; }
+    @media(max-width: 640px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+    .feature-card { background: white; border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem 1.35rem; box-shadow: var(--shadow-sm); transition: box-shadow .2s; }
+    .feature-card:hover { box-shadow: var(--shadow-md); }
+    .feature-card-header { display: flex; align-items: flex-start; gap: .75rem; margin-bottom: .65rem; }
+    .feature-card-icon { font-size: 1.5rem; flex-shrink: 0; }
+    .feature-card-title { font-weight: 700; color: var(--text-main); font-size: .95rem; line-height: 1.3; }
+    .feature-card p { font-size: .88rem; }
+
+    /* NEW: Highlight card (for new features) */
+    .feature-card-new { background: linear-gradient(135deg, #f5f3ff, #eff6ff); border: 1px solid #c4b5fd; border-radius: 12px; padding: 1.25rem 1.35rem; box-shadow: var(--shadow-sm); position: relative; }
+    .feature-card-new::before { content: 'NUEVO'; position: absolute; top: 10px; right: 12px; font-size: 9px; font-weight: 800; letter-spacing: .12em; color: #7c3aed; background: rgba(124,58,237,.1); padding: 2px 7px; border-radius: 8px; border: 1px solid rgba(124,58,237,.25); }
+
+    /* Badges */
+    .badge { display: inline-flex; align-items: center; gap: .35rem; font-size: .78rem; font-weight: 600; padding: .2rem .65rem; border-radius: 9999px; text-transform: uppercase; letter-spacing: .03em; }
+    .badge-success { background: var(--success-light); color: var(--success); border: 1px solid #a7f3d0; }
+    .badge-warning { background: var(--warning-light); color: var(--warning); border: 1px solid #fde68a; }
+    .badge-danger { background: var(--danger-light); color: var(--danger); border: 1px solid #fecaca; }
+    .badge-info { background: #eff6ff; color: var(--primary-light); border: 1px solid #bfdbfe; }
+    .badge-purple { background: var(--electric-light); color: var(--electric); border: 1px solid #c4b5fd; }
+
+    /* Callouts */
+    .callout { border-radius: 10px; padding: 1.15rem 1.35rem; margin: 1.25rem 0; display: flex; gap: 1rem; align-items: flex-start; font-size: .92rem; line-height: 1.55; }
+    .callout-info { background: #eff6ff; border-left: 4px solid var(--primary-light); color: #1e3a8a; }
+    .callout-warning { background: #fffbeb; border-left: 4px solid var(--warning); color: #92400e; }
+    .callout-success { background: #f0fdf4; border-left: 4px solid var(--success); color: #166534; }
+    .callout-purple { background: #f5f3ff; border-left: 4px solid var(--electric); color: #4c1d95; }
+
+    /* Tables */
+    .table-container { margin: 1.5rem 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--border-color); }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    thead { background: #f1f5f9; }
+    th { padding: .75rem 1rem; text-align: left; font-weight: 700; color: var(--text-main); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border-dark); }
+    td { padding: .75rem 1rem; border-bottom: 1px solid var(--border-color); vertical-align: top; color: var(--text-muted); }
+    tr:last-child td { border-bottom: none; }
+    tr:nth-child(even) { background: #f8fafc; }
+    td strong { color: var(--text-main); }
+
+    /* Feature list */
+    .feature-list { list-style: none; margin: 1rem 0 0 0; padding: 0; }
+    .feature-list li { position: relative; padding: .45rem 0 .45rem 1.6rem; color: var(--text-muted); font-size: .93rem; line-height: 1.55; }
+    .feature-list li::before { content: "\2713"; position: absolute; left: 0; top: .5rem; color: var(--success); font-weight: 800; font-size: .95rem; }
+    .feature-list li strong { color: var(--text-main); }
+
+    /* NEW: ETA visual demo box */
+    .eta-demo-box { background: #0b0f19; border-radius: 14px; padding: 20px; margin: 1.5rem 0; border: 1px solid rgba(56,189,248,.3); }
+    .eta-demo-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .eta-demo-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(1.4); } }
+    .eta-demo-label { font-size: 11px; font-weight: 700; color: #10b981; text-transform: uppercase; letter-spacing: .08em; }
+    .eta-bus-card { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 14px; }
+    .eta-bus-icon { font-size: 24px; }
+    .eta-bus-info { flex: 1; }
+    .eta-bus-plate { font-size: 13px; font-weight: 800; color: #f8fafc; font-family: 'JetBrains Mono', monospace; letter-spacing: .04em; }
+    .eta-bus-route { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    .eta-time { text-align: center; }
+    .eta-minutes { font-size: 36px; font-weight: 900; letter-spacing: -.04em; line-height: 1; }
+    .eta-min-label { font-size: 11px; color: #94a3b8; }
+
+    /* Compliance gauge visual */
+    .compliance-preview { background: #0d1527; border: 1px solid #1e293b; border-radius: 14px; padding: 20px; margin: 1.5rem 0; }
+    .compliance-header { font-size: 12px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 14px; }
+    .compliance-big { font-size: 56px; font-weight: 900; letter-spacing: -.04em; color: #10b981; line-height: 1; margin-bottom: 6px; }
+    .compliance-sub { font-size: 13px; color: #94a3b8; }
+    .compliance-bars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+    .c-bar-item { text-align: center; }
+    .c-bar-label { font-size: 10px; color: #6b7280; margin-bottom: 4px; font-weight: 700; }
+    .c-bar-pct { font-size: 16px; font-weight: 900; }
+    .c-bar-bg { height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+    .c-bar-fill { height: 100%; border-radius: 3px; }
+
+    /* Page break */
+    .page-break { display: none; }
+    @media print { .page-break { display: block; page-break-before: always; } }
+
+    /* Footer */
+    .doc-footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; color: var(--text-light); font-size: .82rem; }
+
+    /* Print */
+    @media print {
+      body { background: white !important; font-size: 10pt; }
+      .document-wrapper { box-shadow: none !important; border: none !important; padding: 0 !important; max-width: 100%; margin: 0 !important; border-radius: 0 !important; }
+      .screen-actions { display: none !important; }
+      .feature-strip-2026 { background: #f1f5f9 !important; border: 1pt solid #cbd5e1 !important; }
+      .eta-demo-box, .compliance-preview { background: #f8fafc !important; color: #0f172a !important; border: 1pt solid #cbd5e1 !important; }
+      .eta-bus-card { background: #f1f5f9 !important; border: 1pt solid #e2e8f0 !important; }
+      .eta-bus-plate { color: #0f172a !important; }
+      .eta-minutes { color: #059669 !important; }
+      .compliance-big { color: #059669 !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Barra de acciones -->
+  <div class="screen-actions">
+    <button class="btn-print" onclick="window.print()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+      Imprimir / PDF
+    </button>
+  </div>
+
+  <div class="document-wrapper">
+
+    <!-- Portada -->
+    <header class="doc-header">
+      <div class="doc-header-left">
+        <span class="doc-tag">Propuesta Ejecutiva &mdash; v3.0.0 &bull; Septiembre 2026</span>
+        <h1 class="doc-title">Sistema Integral de Gestion de Flota, Trafico y Despacho</h1>
+        <p class="doc-subtitle">
+          Control de Programacion de Viajes, Telemetria GPS en Vivo, ETA Predictivo para Pasajeros, Cumplimiento VMT en Tiempo Real, Seguridad Mecanica, Mantenimiento Preventivo y Facturacion Mensual SIFEN (DNIT Paraguay).
+        </p>
+      </div>
+      <div class="doc-header-right">
+        <div class="meta-item"><span class="meta-label">Destinatario</span><strong>Direccion y Gerencia General</strong></div>
+        <div class="meta-item"><span class="meta-label">Area de Aplicacion</span><strong>Trafico, Flota, Taller y Administracion</strong></div>
+        <div class="meta-item"><span class="meta-label">Normativas</span><strong>Res. GVMT 065/2024 &amp; SIFEN e-Kuatia</strong></div>
+        <div class="meta-item"><span class="meta-label">Alcance</span><strong>Linea 20 Electrica (E1, E2, E3)</strong></div>
+        <div class="meta-item"><span class="meta-label">Version</span><strong>3.0.0 &mdash; Sep 2026</strong></div>
+      </div>
+    </header>
+
+    <!-- Feature badges -->
+    <div class="feature-strip-2026">
+      <span class="fbadge2 fbadge2-version">&#10003; Odoo 18 + FastAPI v3.0.0</span>
+      <span class="fbadge2 fbadge2-blue">&#9889; ETA Predictivo por Parada</span>
+      <span class="fbadge2 fbadge2-purple">&#10003; Cumplimiento VMT Res.065/2024</span>
+      <span class="fbadge2 fbadge2-red">&#128680; Detector de Pegonamiento</span>
+      <span class="fbadge2 fbadge2-amber">&#128652; L20 Electrica &mdash; 692 despachos/dia</span>
+    </div>
+
+    <!-- Resumen ejecutivo -->
+    <section>
+      <div class="benefit-banner">
+        <h3>&#128269; &iquest;Que valor aporta esta plataforma a su empresa de transporte?</h3>
+        <p>
+          Este sistema transforma la operacion diaria: elimina las planillas de papel, erradica los desvios de combustible y recorridos no autorizados, garantiza el cumplimiento estricto de las 692 frecuencias diarias exigidas por el Viceministerio de Transporte (GVMT) y resuelve de forma 100% legal y automatica la facturacion mensual electronica con la DNIT (SIFEN). Ademas, brinda a los pasajeros el tiempo de espera en tiempo real via QR en cada parada.
+        </p>
+      </div>
+
+      <div class="kpi-row">
+        <div class="kpi-box"><div class="kpi-value">100%</div><div class="kpi-label">Control de Despachos</div></div>
+        <div class="kpi-box"><div class="kpi-value">0 min</div><div class="kpi-label">Retraso en Telemetria</div></div>
+        <div class="kpi-box"><div class="kpi-value">1 Clic</div><div class="kpi-label">Programacion Masiva</div></div>
+        <div class="kpi-box"><div class="kpi-value">SIFEN</div><div class="kpi-label">Factura Mensual Legal</div></div>
+        <div class="kpi-box"><div class="kpi-value">ETA</div><div class="kpi-label">Tiempo de Espera</div></div>
+        <div class="kpi-box"><div class="kpi-value">VMT</div><div class="kpi-label">Cumplimiento 065/2024</div></div>
+      </div>
+    </section>
+
+    <!-- 1. Programacion Operativa -->
+    <section>
+      <h2><span class="section-icon">&#128197;</span> 1. Programacion Operativa y Planificacion de Servicios</h2>
+      <p>El sistema permite estructurar y proyectar con total anticipacion la operacion de su empresa para <strong>manana, la proxima semana o el mes entero</strong>, asegurando el orden del trafico y evitando improvisaciones en cabecera:</p>
+
+      <div class="grid-2">
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#9201;</span><div class="feature-card-title">Cuadros de Marcha Maestros (Frecuencias)</div></div>
+          <p>Definicion centralizada de horarios de salida clasificados por dia habil, Sabados, Domingos y Feriados. Establece el intervalo exacto entre cada unidad segun los picos de demanda de pasajeros.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#9889;</span><div class="feature-card-title">Carga Masiva de Servicios (1 Clic)</div></div>
+          <p>Mediante un asistente inteligente, el Jefe de Trafico selecciona el rango de fechas y el sistema genera automaticamente cientos de despachos programados en segundos.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-success">
+        <div>&#128274;</div>
+        <div>
+          <strong>Sistema 100% Autonomo &mdash; Sin Dependencia del VMT:</strong><br>
+          Los cuadros de marcha son definidos y administrados directamente por la empresa dentro del propio ERP. El sistema opera de forma completamente independiente, sin necesidad de conexion a bases de datos externas del Viceministerio. La empresa configura sus propias frecuencias por ramal, dia de semana y horario, con total flexibilidad para modificarlos en cualquier momento.
+        </div>
+      </div>
+
+      <ul class="feature-list">
+        <li><strong>Asignacion Flexible de Recursos:</strong> Genera la malla en estado borrador para que Trafico asigne choferes y coches 24 horas antes.</li>
+        <li><strong>Tiempos de Paso Teoricos por Parada:</strong> Cada servicio hereda automaticamente las 340 paradas oficiales del ramal, calculando el minuto exacto de paso por cada punto geografico.</li>
+        <li><strong>Prevencion de Duplicados:</strong> El sistema bloquea la duplicacion involuntaria de vueltas si un horario ya fue cargado previamente para esa fecha.</li>
+      </ul>
+    </section>
+
+    <!-- 2. Despacho Diario -->
+    <section>
+      <h2><span class="section-icon">&#128678;</span> 2. Control de Despacho Diario y Cumplimiento de Puntualidad</h2>
+      <p>Supervision rigurosa de cada unidad antes de salir a la via publica y control minuto a minuto de la puntualidad de salida y cumplimiento en calle:</p>
+
+      <div class="grid-3">
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128295;</span><div class="feature-card-title">Checklist Pre-Salida</div></div>
+          <p>Inspeccion de 5 puntos obligatorios: Frenos, Neumaticos, Luces, Fluidos y Validador. <strong>Si un item falla, el sistema bloquea la salida de la unidad.</strong></p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128219;</span><div class="feature-card-title">Control de Choferes</div></div>
+          <p>Verificacion automatica del estado de la licencia de conducir. Choferes con registro vencido quedan imposibilitados de despachar servicios.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#127919;</span><div class="feature-card-title">Salida Automatizada</div></div>
+          <p>La salida puede marcarse manualmente por el inspector o de forma <strong>100% automatica por GPS</strong> al cruzar la geocerca de la terminal.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-info">
+        <div>&#128161;</div>
+        <div>
+          <strong>Semaforo de Puntualidad y Regularidad:</strong><br>
+          El sistema compara la hora teorica vs real de salida:<br>
+          &bull; <span class="badge badge-success">Puntual (&plusmn;3 min)</span> Cumplimiento optimo del servicio.<br>
+          &bull; <span class="badge badge-danger">Con Retraso (&gt;3 min)</span> Salida demorada que genera acumulacion de pasajeros.<br>
+          &bull; <span class="badge badge-warning">Adelantado (&lt;-1 min)</span> Salida prematura que rompe el intervalo del servicio anterior.
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Monitoreo GPS y Tablero -->
+    <section>
+      <h2><span class="section-icon">&#128225;</span> 3. Monitoreo en Tiempo Real, Tablero Lineal de Frecuencias y Telemetria</h2>
+      <p>Visibilidad total de la flota en calle mediante mapas satelitales, tableros de regularidad continua y alertas automaticas basadas en la <strong>Resolucion GVMT N&deg; 065/2024</strong>:</p>
+
+      <div class="grid-2">
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128207;</span><div class="feature-card-title">Tablero Lineal de Regularidad (Headway)</div></div>
+          <p>Representa cada ramal como una <strong>linea recta horizontal</strong> desde la cabecera hasta el destino, proyectando los colectivos a lo largo del recorrido. <strong>Calcula la separacion en kilometros y minutos</strong> entre coches consecutivos.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128680;</span><div class="feature-card-title">Detector Automatico de Pegonamiento (Bunching)</div></div>
+          <p>Si dos colectivos se aproximan a <strong>menos de 800 metros (&lt;2 minutos)</strong>, el sistema dispara una alerta visual roja pulsante. API REST para integracion con notificaciones externas: <code>GET /api/v1/bunching/alerts</code>.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-info" style="margin:1.25rem 0;">
+        <div>&#128205;</div>
+        <div>
+          <strong>Localizacion Contextual Inteligente (Lenguaje Natural en Pantalla):</strong><br>
+          En lugar de coordenadas decimales, el sistema traduce en tiempo real la posicion del colectivo indicando la arteria por la que transita y la proxima esquina que esta por cruzar:<br>
+          <strong style="color:var(--primary);">Ejemplo: Circulando (Av. Mcal. Lopez aproximandose a Cnel. Escurra)</strong>
+        </div>
+      </div>
+
+      <ul class="feature-list">
+        <li><strong>340 Paradas Oficiales Homologadas por el CID / VMT:</strong> Georreferenciadas con su kilometraje exacto sobre el itinerario.</li>
+        <li><strong>Streaming Continuo sin Retraso (cada 10s):</strong> Sincronizacion en tiempo real con la base de datos de monitoreo del VMT.</li>
+        <li><strong>Alertas de Exceso de Velocidad y Desvios de Ruta:</strong> Deteccion inmediata si un chofer supera los 70 km/h o se devia mas de 400 metros de la traza oficial.</li>
+      </ul>
+    </section>
+
+    <div class="page-break"></div>
+
+    <!-- 4. NUEVO: ETA Predictivo -->
+    <section>
+      <h2><span class="section-icon">&#9199;</span> 4. ETA Predictivo por Parada &mdash; Tiempo de Espera para Pasajeros <span class="badge badge-purple">NUEVO v3.0</span></h2>
+      <p>Una de las funcionalidades mas valoradas por los usuarios del transporte publico: <strong>saber exactamente cuanto tiempo falta para que llegue el proximo bus</strong>, sin necesidad de descargar ninguna aplicacion.</p>
+
+      <div class="callout callout-purple">
+        <div>&#128241;</div>
+        <div>
+          <strong>Acceso sin App &mdash; Solo QR en la Parada Fisica:</strong><br>
+          Cada parada tiene un codigo QR impreso que lleva al pasajero directamente a la pagina de tiempo de espera en su navegador movil. Auto-actualiza cada 15 segundos. Funciona con cualquier celular, sin instalar nada.
+        </div>
+      </div>
+
+      <!-- ETA Demo visual -->
+      <div class="eta-demo-box">
+        <div class="eta-demo-header">
+          <div class="eta-demo-dot"></div>
+          <div class="eta-demo-label">EN VIVO &mdash; Parada: Av. Mcal. Lopez y Brasil (P047)</div>
+        </div>
+        <div class="eta-bus-card">
+          <div class="eta-bus-icon">&#128652;</div>
+          <div class="eta-bus-info">
+            <div class="eta-bus-plate">ABC 123</div>
+            <div class="eta-bus-route">Ramal 020F &middot; Circulando por Av. Espana</div>
+          </div>
+          <div class="eta-time">
+            <div class="eta-minutes" style="color:#10b981;">3</div>
+            <div class="eta-min-label">min &middot; PROXIMO</div>
+          </div>
+        </div>
+        <div class="eta-bus-card">
+          <div class="eta-bus-icon">&#128652;</div>
+          <div class="eta-bus-info">
+            <div class="eta-bus-plate">DEF 456</div>
+            <div class="eta-bus-route">Ramal 020F &middot; Circulando por Av. Sacramento</div>
+          </div>
+          <div class="eta-time">
+            <div class="eta-minutes" style="color:#f59e0b;">8</div>
+            <div class="eta-min-label">min</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="feature-card-new">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128200;</span><div class="feature-card-title">Calculo con PostGIS en Tiempo Real</div></div>
+          <p>Usa <code>ST_LineLocatePoint</code> para ubicar exactamente al bus y a la parada sobre el shape del ramal. Calcula los kilometros restantes y divide por la velocidad media historica de las ultimas 4 horas.</p>
+        </div>
+        <div class="feature-card-new">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128279;</span><div class="feature-card-title">QR Embebido &mdash; Compartir en 1 Segundo</div></div>
+          <p>La pagina de parada genera automaticamente un codigo QR con su URL directa. Cualquier pasajero puede escanearlo o compartirlo por WhatsApp para ver el ETA desde donde este.</p>
+        </div>
+      </div>
+
+      <ul class="feature-list">
+        <li><strong>Muestra hasta 3 buses proximos</strong> ordenados por tiempo de llegada.</li>
+        <li><strong>Cache Redis de 20 segundos</strong> para respuesta instantanea sin sobrecargar la base de datos.</li>
+        <li><strong>Fallback inteligente:</strong> Si no hay datos historicos de velocidad en el ramal, usa la velocidad media de ciudad (22 km/h).</li>
+        <li><strong>API REST:</strong> <code>GET /api/v1/eta/{stop_code}</code> para integracion en pantallas digitales de paradas y apps externas.</li>
+        <li><strong>URL amigable:</strong> <code>/parada/P047</code> accesible desde cualquier dispositivo movil.</li>
+      </ul>
+    </section>
+
+    <!-- 5. NUEVO: Cumplimiento VMT -->
+    <section>
+      <h2><span class="section-icon">&#9989;</span> 5. Dashboard de Cumplimiento VMT (Res. GVMT 065/2024) <span class="badge badge-purple">NUEVO v3.0</span></h2>
+      <p>Monitoreo en tiempo real del cumplimiento de la cuota de <strong>692 despachos diarios</strong> exigida por la Resolucion GVMT N&deg; 065/2024. Proactivo, visual y con alertas automaticas antes de que el deficit sea critico.</p>
+
+      <!-- Compliance preview -->
+      <div class="compliance-preview">
+        <div class="compliance-header">&#128202; Cumplimiento del dia &mdash; EN VIVO</div>
+        <div class="compliance-big">91.3%</div>
+        <div class="compliance-sub">631 de 692 despachos ejecutados &bull; Proyeccion al cierre: 98.2%</div>
+        <div class="compliance-bars">
+          <div class="c-bar-item">
+            <div class="c-bar-label">020C/D (E1)</div>
+            <div class="c-bar-pct" style="color:#10b981;">94%</div>
+            <div class="c-bar-bg"><div class="c-bar-fill" style="width:94%;background:#10b981;"></div></div>
+          </div>
+          <div class="c-bar-item">
+            <div class="c-bar-label">020E/F (E2)</div>
+            <div class="c-bar-pct" style="color:#38bdf8;">89%</div>
+            <div class="c-bar-bg"><div class="c-bar-fill" style="width:89%;background:#38bdf8;"></div></div>
+          </div>
+          <div class="c-bar-item">
+            <div class="c-bar-label">0210/11 (E3)</div>
+            <div class="c-bar-pct" style="color:#f59e0b;">87%</div>
+            <div class="c-bar-bg"><div class="c-bar-fill" style="width:87%;background:#f59e0b;"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="feature-card-new">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128203;</span><div class="feature-card-title">Detalle por Ramal en Tiempo Real</div></div>
+          <p>Muestra el cumplimiento individual de los 6 ramales electricos con la cuota asignada a cada uno. Detecta cual ramal esta en deficit antes de que sea demasiado tarde para corregir.</p>
+        </div>
+        <div class="feature-card-new">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128201;</span><div class="feature-card-title">Proyeccion al Cierre del Dia</div></div>
+          <p>Calcula la tasa de despacho por hora y proyecta si la empresa llegara o no a las 692 salidas al finalizar el dia operativo. Permite anticiparse y reforzar la operacion a tiempo.</p>
+        </div>
+      </div>
+
+      <div class="kpi-row-alt">
+        <div class="kpi-box-green"><div class="kpi-value">692</div><div class="kpi-label">Cuota diaria (Res.065/2024)</div></div>
+        <div class="kpi-box-blue"><div class="kpi-value">30 dias</div><div class="kpi-label">Historial de cumplimiento</div></div>
+        <div class="kpi-box-amber"><div class="kpi-value">Auto</div><div class="kpi-label">Alertas de deficit critico</div></div>
+        <div class="kpi-box-purple"><div class="kpi-value">API</div><div class="kpi-label">Integrable via REST</div></div>
+      </div>
+
+      <ul class="feature-list">
+        <li><strong>Alertas automaticas de deficit:</strong> Notificacion si el cumplimiento proyectado cae por debajo del 85% con menos de 4 horas para el cierre.</li>
+        <li><strong>Historial de 30 dias:</strong> Grafico de barras con la tendencia de cumplimiento reciente para auditorias del VMT.</li>
+        <li><strong>Exportable:</strong> Los datos del dashboard son accesibles via API REST para reportes automatizados al Viceministerio.</li>
+        <li><strong>Endpoints disponibles:</strong> <code>GET /compliance</code> (dashboard HTML), <code>GET /api/v1/compliance/today</code> (JSON), <code>GET /api/v1/compliance/alerts</code>.</li>
+      </ul>
+    </section>
+
+    <!-- 6. Taller y Mantenimiento -->
+    <section class="no-break">
+      <h2><span class="section-icon">&#128295;</span> 6. Gestion de Taller, Odometria y Mantenimiento Preventivo</h2>
+      <p>Integracion directa entre los kilometros recorridos en los despachos diarios y el plan de mantenimiento para maximizar la vida util de los colectivos electricos:</p>
+
+      <div class="grid-2">
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128203;</span><div class="feature-card-title">Ficha Tecnica Individual por Coche</div></div>
+          <p>Registro integral del numero de interno, chasis, motor, ano, asientos reglamentarios, rampa para personas con movilidad reducida y aire acondicionado.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128276;</span><div class="feature-card-title">Semaforo de Vencimientos Legales</div></div>
+          <p>Alertas programadas para <strong>ITV</strong>, <strong>Poliza de Seguros</strong> y habilitaciones. Bloqueo automatico para evitar que coches inhabilitados salgan a trabajar.</p>
+        </div>
+      </div>
+
+      <ul class="feature-list">
+        <li><strong>Actualizacion Automatica de Odometros:</strong> Al finalizar cada viaje, los km reales recorridos se guardan directamente en el historial del vehiculo en el ERP.</li>
+        <li><strong>Mantenimiento Preventivo por Km:</strong> Cambios de aceite, filtros, frenos y cubiertas disparados automaticamente al alcanzar el kilometraje configurado.</li>
+        <li><strong>Historial de Gastos y Reparaciones:</strong> Registro de repuestos, costo de mano de obra y horas de taller por cada unidad.</li>
+      </ul>
+    </section>
+
+    <!-- 7. SIFEN -->
+    <section class="no-break">
+      <h2><span class="section-icon">&#129534;</span> 7. Recaudacion, Boletos y Facturacion Electronica SIFEN (DNIT)</h2>
+      <p>Solucion integral y juridicamente blindada para resolver el desafio fiscal del transporte masivo de pasajeros en Paraguay:</p>
+
+      <div class="callout callout-success">
+        <div>&#128176;</div>
+        <div>
+          <strong>La Solucion al Dilema de la Facturacion en Transporte Masivo:</strong><br>
+          El sistema implementa la <strong>Facturacion Mensual Consolidada</strong>: a fin de mes, el area contable selecciona los boletos del periodo y genera una unica Factura Electronica por el monto global. Calcula el <strong>CDC de 44 digitos con Modulo 11</strong> y genera el <strong>codigo QR oficial para e-Kuatia</strong>.
+        </div>
+      </div>
+
+      <ul class="feature-list">
+        <li><strong>Generacion Oficial de CDC y Codigo QR:</strong> Calculo automatico con validacion de Modulo 11 y QR para verificacion publica en e-Kuatia.</li>
+        <li><strong>Conexion con Denarius:</strong> Conector integrado para el timbrado oficial de comprobantes electronicos.</li>
+        <li><strong>Trazabilidad Total:</strong> Cada boleto mantiene la referencia exacta a la factura mensual en la que fue consolidado.</li>
+      </ul>
+    </section>
+
+    <!-- 8. Reportes Gerenciales -->
+    <section class="no-break">
+      <h2><span class="section-icon">&#128202;</span> 8. Informes Gerenciales, Auditoria y Toma de Decisiones</h2>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Vista / Reporte</th>
+              <th>Informacion Clave</th>
+              <th>Beneficio Operativo</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Tablero Lineal de Frecuencias (Headway)</strong></td><td>Proyeccion horizontal con separacion metrica y minutos entre unidades.</td><td>Deteccion instantanea de pegonamiento (&lt;800m) y balanceo optimo de frecuencias.</td></tr>
+            <tr><td><strong>Dashboard Cumplimiento VMT</strong> <span class="badge badge-purple" style="font-size:9px;">NUEVO</span></td><td>% de cumplimiento de 692 despachos/dia, proyeccion al cierre, detalle por ramal.</td><td>Anticipacion proactiva de deficits antes de que sean criticos para el VMT.</td></tr>
+            <tr><td><strong>ETA por Parada (Pasajeros)</strong> <span class="badge badge-purple" style="font-size:9px;">NUEVO</span></td><td>Tiempo de espera en tiempo real para cada parada de los 6 ramales electricos.</td><td>Mejora la experiencia del pasajero y reduce la percepcion de espera.</td></tr>
+            <tr><td><strong>Radar Satelital en Vivo (Leaflet)</strong></td><td>Mapa georreferenciado con trazados vectoriales, paradas CID y localizacion contextual.</td><td>Supervision visual directa sin interpretar coordenadas numericas.</td></tr>
+            <tr><td><strong>Tablero Kanban en Vivo</strong></td><td>Estado en tiempo real de cada colectivo (En Cabecera, En Ruta, Completado, Con Alerta).</td><td>Visibilidad inmediata de la flota activa sin llamadas telefonicas.</td></tr>
+            <tr><td><strong>Vista Calendario Mensual/Semanal</strong></td><td>Malla visual de servicios planificados por coche y conductor.</td><td>Planificacion anticipada de turnos, descansos y rotaciones de flota.</td></tr>
+            <tr><td><strong>Cubo Pivot de Puntualidad</strong></td><td>% de puntualidad, promedio de retraso por ruta, chofer o bus.</td><td>Identificacion de choferes infractores y cuellos de botella en el trafico.</td></tr>
+            <tr><td><strong>Auditoria GVMT</strong></td><td>Historial inalterable de horarios teoricos vs reales y 340 paradas oficiales cruzadas.</td><td>Respaldo documentado ante fiscalizaciones del Viceministerio.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="page-break"></div>
+
+    <!-- 9. Comparativa -->
+    <section class="no-break">
+      <h2><span class="section-icon">&#9878;</span> 9. Comparativa: Operacion Tradicional vs. Con el Sistema</h2>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:25%;">Aspecto Operativo</th>
+              <th style="width:37.5%;color:var(--danger);">Sin Sistema</th>
+              <th style="width:37.5%;color:var(--success);">Con Sistema Integral v3.0</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Planificacion de Viajes</strong></td><td>Cuadernos de papel o planillas Excel aisladas.</td><td><strong>Programacion digital masiva</strong> en 1 clic para semanas completas.</td></tr>
+            <tr><td><strong>Regularidad y Frecuencias</strong></td><td>Sin control; buses pegados (uno lleno, otro vacio quemando gasoil).</td><td><strong>Tablero lineal con detector de pegonamiento</strong> y alerta si &lt;800m.</td></tr>
+            <tr><td><strong>Ubicacion de Unidades</strong></td><td>Llamadas por celular o coordenadas numericas incomprensibles.</td><td><strong>Lenguaje natural:</strong> <em>Circulando (Calle X aproximandose a Calle Y)</em>.</td></tr>
+            <tr><td><strong>Tiempo de Espera Pasajero</strong></td><td>Desconocido. El pasajero espera sin informacion en la parada.</td><td><strong>ETA en tiempo real via QR</strong>: "3 minutos para el proximo bus".</td></tr>
+            <tr><td><strong>Cumplimiento 692 Despachos</strong></td><td>Se descubre el deficit al final del dia cuando ya no hay forma de corregir.</td><td><strong>Dashboard en tiempo real</strong> con proyeccion y alertas antes del cierre.</td></tr>
+            <tr><td><strong>Control de Puntualidad</strong></td><td>Planilleros manuales en paradas con horarios alterados.</td><td><strong>Control por telemetria GPS</strong> objetivo con semaforos de tolerancia (+/-3 min).</td></tr>
+            <tr><td><strong>Seguridad de Salida</strong></td><td>Sin checklist; cualquier unidad puede salir con fallas mecanicas.</td><td><strong>Checklist digital de 5 puntos:</strong> bloqueo automatico si hay falla.</td></tr>
+            <tr><td><strong>Facturacion Fiscal</strong></td><td>Manual, propensa a errores, fuera de plazo o incumpliendo SIFEN.</td><td><strong>Factura electronica mensual consolidada</strong> con CDC 44 y QR en 1 clic.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 10. Stack Tecnologico -->
+    <section class="no-break">
+      <h2><span class="section-icon">&#128736;</span> 10. Stack Tecnologico (Para el Area de Sistemas)</h2>
+
+      <div class="grid-3">
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#127973;</span><div class="feature-card-title">ERP Core</div></div>
+          <p><strong>Odoo 18.0</strong> Community Edition en Docker. Modulo custom <code>transit_operations</code> sobre PostgreSQL 15 con PostGIS 3.4.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#9889;</span><div class="feature-card-title">Broker GPS v3.0</div></div>
+          <p><strong>FastAPI</strong> con ingesta MQTT/Protobuf v3, Redis 7 para estado en tiempo real y WebSockets para radar en vivo.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128288;</span><div class="feature-card-title">Cartografia</div></div>
+          <p><strong>PostGIS</strong> con <code>ST_LineLocatePoint</code>, <code>ST_Distance</code> y Leaflet.js para el radar satelital. 6 shapes oficiales del CID.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-info">
+        <div>&#127760;</div>
+        <div>
+          <strong>Nuevos Endpoints v3.0.0:</strong><br>
+          <code>GET /parada/{stop_code}</code> &mdash; Pagina movil ETA con QR &bull;
+          <code>GET /compliance</code> &mdash; Dashboard cumplimiento VMT &bull;
+          <code>GET /api/v1/eta/{stop_code}</code> &mdash; ETA JSON &bull;
+          <code>GET /api/v1/bunching/alerts</code> &mdash; Alertas de pegonamiento &bull;
+          <code>GET /api/v1/compliance/today</code> &mdash; Cumplimiento del dia
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="doc-footer">
+      <div>Sistema Integral de Gestion de Flota &mdash; Poliverso Transit &mdash; Linea 20 Electrica</div>
+      <div>v3.0.0 &bull; Septiembre 2026 &bull; Res. GVMT 065/2024</div>
+    </footer>
+
+  </div><!-- /document-wrapper -->
+
+</body>
+</html>

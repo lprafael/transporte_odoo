@@ -1,0 +1,118 @@
+ESPECIFICACIONES TÉCNICAS Y FUNCIONALES: SISTEMA INTEGRAL DE GESTIÓN DE TRANSPORTE PÚBLICO URBANO
+1. EJE 1: CAPACIDADES DEL SOFTWARE DE PLANIFICACIÓN Y GESTIÓN DE FLOTA (PLATAFORMA OPTIBUS)
+1.1. Módulo de Planificación de Rutas y Redes (Planning)
+El módulo de planificación de la plataforma Optibus constituye la herramienta central para el diseño táctico y estratégico de redes de transporte público urbano. La arquitectura del sistema deberá proporcionar a las agencias reguladoras, autoridades de transporte y empresas operadoras las siguientes capacidades funcionales avanzadas:
+Diseño y análisis dinámico de redes multimodales: El sistema deberá permitir la creación, evaluación técnica y reestructuración integral de trazados de rutas (troncales con carril exclusivo, auxiliares, alimentadoras y rutas exprés), adaptándose con precisión a las variaciones demográficas, la expansión de la mancha urbana y los patrones cambiantes de la demanda de movilidad.
+Optimización topológica de derroteros y coberturas: La plataforma integrará herramientas geoespaciales para modificar recorridos, eliminar solapamientos ineficientes entre líneas, maximizar la cobertura espacial en zonas de periferia o desarrollos industriales y optimizar las distancias entre paradas para elevar la velocidad comercial.
+Ajuste dinámico de frecuencias y tabla de horarios: El software deberá calcular y ajustar automáticamente los intervalos de paso (headways) y salidas programadas en función de las franjas de hora pico y hora valle, garantizando la convergencia entre la capacidad ofertada y la demanda esperada de pasajeros.
+Mejora de tiempos de viaje y captación de demanda: Mediante la reducción de tiempos de traslado intermodal y el incremento de la confiabilidad operacional, la herramienta proporcionará modelados orientados a elevar los estándares de puntualidad, incentivando la transferencia modal desde el vehículo particular e incrementando la demanda global del sistema.
+1.2. Scheduling Optimizado de Flotas y Tripulaciones mediante Inteligencia Artificial
+La programación automatizada de vehículos y personal operativo se fundamentará en algoritmos de optimización combinatoria e Inteligencia Artificial (IA). El motor algorítmico procesará simultáneamente miles de restricciones operativas, legales y contractuales para maximizar el rendimiento de la capacidad instalada y eliminar sobrecostos inherentes a la programación manual.
+Desafío Operativo Tradicional
+Solución Algorítmica Optibus
+Escasez de recursos e incrementos de costos: Restricciones presupuestarias severas, presupuestos decrecientes y disponibilidad limitada de flota vehicular y personal de conducción.
+Optimización de viajes y flota: Asignación algorítmica de itinerarios que maximiza la productividad por autobús, reduciendo hasta en un 10-15% el número total de vehículos requeridos para cubrir la tabla de servicio.
+Sobrecostos de combustible y mantenimiento: Elevado kilometraje en vacío (deadhead miles) y desgaste prematuro de unidades por asignaciones ineficientes entre talleres, cocheras y cabeceras de línea.
+Reducción de tiempos muertos y recorridos en vacío: Minimización sistemática de los viajes fuera de servicio mediante el ruteo óptimo hacia cocheras (depots) y el balanceo térmico/mecánico del rodamiento de la flota.
+Complejidad operacional e interrupciones: Incapacidad humana para ajustar simultáneamente los cuadrantes de autobuses y turnos de conductores ante eventualidades o cambios tarifarios/operativos.
+Programación combinatoria unificada: Generación automatizada en tiempo récord de esquemas integrados (vehicle and crew scheduling), absorbiendo variaciones de tráfico y respetando normativas laborales.
+1.3. Módulo de Rostering y Gestión de Turnos Centrada en la Satisfacción del Conductor
+Para mitigar la escasez global de conductores y elevar las tasas de retención de personal, el módulo de Rostering articulará la asignación de cuadrantes de trabajo bajo principios de equidad, ergonomía laboral y previsibilidad operacional:
+Equilibrio equitativo de la carga de trabajo y horas extras: El sistema generará cuadrantes de turnos automatizados y transparentes que distribuyan equitativamente las jornadas complejas, los días de descanso, los servicios nocturnos y la asignación de horas extraordinarias, evitando sesgos o favoritismos administrativos.
+Acomodación de preferencias individuales y licitación de turnos (preference bidding): La plataforma permitirá matizar y parametrizar las preferencias individuales del personal (días libres preferentes, franjas horarias específicas, esquemas de descanso) dentro del motor de optimización, garantizando el cumplimiento del convenio colectivo.
+Mitigación de la fatiga operacional y mejora de la retención: Mediante algoritmos predictivos de fatiga y la creación de jornadas laborales previsibles y rotaciones razonables, el software reducirá el ausentismo no programado, mejorará la salud ocupacional del conductor y elevará la satisfacción laboral.
+1.4. Módulo de Electrificación de Flotas y Gestión de Vehículos Cero Emisiones
+Las especificaciones funcionales para la gestión de flotas cero emisiones (EV) y la operación sustentable de flotas mixtas (diésel/eléctricas) integrarán las dinámicas de carga y autonomía dentro de la planificación operacional:
+Planificación y modelado del consumo energético: El sistema simulará el consumo térmico y eléctrico por kilómetro considerando variables de entorno: topografía de la ruta, velocidad promedio, densidad de pasajeros a bordo y uso de sistemas HVAC (calefacción y aire acondicionado).
+Modelado dinámico de autonomía de batería: La plataforma predecirá el rango de autonomía real de cada autobús en servicio activo para evitar varamientos por agotamiento de carga en vía pública.
+Rutinas inteligentes de carga en patio (Depot Charging Management): Programación optimizada de ventanas de recarga en cochera considerando el costo de la energía por franja horaria (time-of-use pricing) y la potencia máxima contratada.
+Programación unificada de flotas mixtas: Gestión simultánea de autobuses de combustión interna y unidades eléctricas, asignando automáticamente las rutas de mayor exigencia de kilometraje a vehículos térmicos y los corredores urbanos densos a flota cero emisiones.
+Factores Críticos para la Gestión de Cocheras (Depot Operations) en Flotas Eléctricas:
+Monitoreo del Estado de Carga (SoC - State of Charge): Registro telemétrico a la llegada al patio y estimación del SoC requerido para el siguiente ciclo operacional.
+Gestión de Carga Inteligente (Peak-Shaving y Load Balancing): Algoritmos de distribución de potencia entre cargadores para evitar picos de demanda eléctrica que sobrepasen la capacidad de la acometida.
+Integración del Protocolo OCPP (Open Charge Point Protocol): Comunicación interoperable entre el software de gestión de flota y los dispensadores físicos de carga.
+Modelado de Degradación Batería-Ciclo: Minimización del envejecimiento prematuro de las baterías mediante el control de la profundidad de descarga (DoD) y la velocidad de carga (C-rate).
+Gestión de Salidas Garantizadas: Verificación automatizada del acondicionamiento térmico de la cabina y carga completa del vehículo antes del despacho matutino.
+1.5. Simulación de Escenarios Operativos y Preparación de Licitaciones / Concursos
+El software proporcionará a agencias reguladoras, empresas concesionarias y consultorías ITS un entorno de simulación predictiva (what-if scenarios) para la formulación, evaluación y adjudicación de concursos públicos:
+Evaluación precisa de costos operacionales y niveles de servicio: El sistema calculará de forma anticipada el kilometraje total, las horas-comerciales, los requerimientos de flota de reserva, el consumo de combustible/energía y las horas de trabajo necesarias para cualquier alternativa de red propuesta.
+Estructuración de ofertas competitivas e hiper-eficientes: Permite a los operadores privados presentar licitaciones financieramente solventes, maximizando el margen operativo sin arriesgar la calidad del servicio ni incumplir los términos de referencia contractuales dictados por la autoridad.
+Modelado de sensibilidad operacional: Evaluación previa de variaciones en la velocidad comercial debido a obras viales, ajustes tarifarios o incrementos estacionales de demanda, garantizando la resiliencia de la propuesta antes de su despliegue en campo.
+2. EJE 2: SISTEMAS INTELIGENTES DE TRANSPORTE (ITS) ADICIONALES Y GESTIÓN OPERACIONAL EN CAMPO
+2.1. Sistema de Ayuda a la Explotación (SAE) y Control de Flota en Tiempo Real (GPS / AVL)
+El Sistema de Ayuda a la Explotación (SAE) integrará arquitecturas de hardware embarcado y software de central de control para la Localización Automática de Vehículos (AVL).
+Requerimientos de Hardware Embarcado y Telemetría:
+Unidad Central Embarcada (UCE): Procesador de grado automotriz con módulo de posicionamiento multiconstelación (GPS/GLONASS/Galileo) que envíe reportes de posición (pings) a la central con intervalos de refresco no mayores a 5 a 10 segundos.
+Conectividad Industrial: Modem celular multipropósito (4G/5G) con failover automático y almacenamiento en búfer local para evitar pérdida de datos telemétricos en zonas sin cobertura.
+Funcionalidades Técnicas de Regulación Operativa:
+Regulación de intervalos de paso (Headway Management): Algoritmos de control dinámico que identifiquen en tiempo real el fenómeno de aglomeración de autobuses (bus bunching) o brechas excesivas, emitiendo instrucciones de regulación de velocidad a la pantalla del conductor (Data Terminal Equipment).
+Control de itinerarios, paradas y puntos de control: Verificación del paso por geocercas virtuales definidas sobre la ruta, registrando automáticamente el cumplimiento de horarios, adelantamientos, retrasos no justificados y desvíos no autorizados.
+Monitoreo telemétrico de velocidad e imprevistos: Registro continuo de la velocidad media y picos de velocidad por tramo vial, alimentando la bitácora electrónica de operación y generando alertas por eventos de conducción agresiva o frenadas bruscas.
+2.2. Subsistema de Recaudo Electrónico e Integración Tarifaria (Modelo PagoBús, Tarjetas Sin Contacto y EMV)
+Basado en el modelo de caja común e integración tarifaria multimodal (SIT / PagoBús), el subsistema de recaudación electrónica articulará el cobro, la validación y la liquidación financiera centralizada.
+Especificaciones Técnicas del Equipamiento e Interfaces de Pago:
+Máquinas Validadoras Embarcadas y de Estación: Equipos físicos con certificación industrial ISO/IEC 14443 Tipos A y B, tiempo de transacción e interfaz óptica/acústica menor a 300 milisegundos, aptos para lectura de tarjetas inteligentes de proximidad (Mifare / DESFire).
+Tarjetas Inteligentes Recargables y Boletos Plastificados: Compatibilidad con tarjetas de uso continuo (general y preferencial con descuento) y pases retornables/desechables de plástico duro para integración multimodal.
+Soporte Pago Abierto (Open-Loop EMV): Capacidad del validador para procesar directamente pagos mediante tarjetas bancarias sin contacto (Visa/Mastercard) y dispositivos móviles con tecnología NFC.
+Cadena Financiera de Recaudo y Mecanismo de Compensación:
+Captura de la Tarifa y Transacciones en Campo
+Lectura y validación del medio de pago en validadores embarcados (rutas alimentadoras, auxiliares y convencionales) y torniquetes de acceso en estaciones de transferencia.
+Aplicación automatizada de las matrices de descuento e integración tarifaria para el transbordo sin costo o con costo preferencial en la ventana temporal autorizada.
+Concentración de Fondos en Fideicomisos Centralizados
+Fideicomiso de Cobro Controlado: Estructura fiduciaria que recibe diariamente el 100% de los ingresos de la caja común derivados de las ventas en efectivo, recargas electrónicas y pagos bancarios.
+Fideicomiso de Modernización del Transporte: Fondo en custodia destinado exclusivamente a la adquisición de tecnología ITS, mantenimiento de la infraestructura física del sistema y financiamiento de la renovación de flota vehicular.
+Reparto Financiero mediante Cámara de Compensación
+Consolidación diaria de la información telemétrica del SAE y de las transacciones del sistema de recaudo: kilómetros planificados, kilómetros ejecutados en servicio comercial y total de ingresos brutos recopilados.
+Cálculo del Factor de Ingreso por Kilómetro (FI_{km}) mediante la formulación financiera: FI_{km} = \frac{\text{Ventas Totales Recaudadas en el Período (\$)}}{\text{Kilómetros Totales Planificados en el Período (Km)}}
+Liquidación financiera a cada empresa concesionaria calculada multiplicando los kilómetros efectivamente ejecutados por el FI_{km}, deduciendo las penalizaciones administrativas aplicadas y reteniendo las aportaciones a la bolsa de incentivos.
+2.3. Sistema de Información al Usuario (SISU), Multicanalidad y Principios MaaS
+El Sistema de Información al Usuario (SISU) procesará la telemetría del SAE para ofrecer información en tiempo real bajo estándares internacionales de datos abiertos:
+Estándares de Datos GTFS y GTFS-Realtime: Generación y publicación continua de feeds de datos en formato General Transit Feed Specification (estático) y GTFS-RT (alertas de servicio, posiciones de vehículos y estimaciones de llegada en tiempo real).
+Pantallas Informativas en Estaciones y Paraderos: Despliegue de estimaciones de arribo (Time to Arrive) mediante pantallas LED/LCD de alta visibilidad conectadas por redes IoT en terminales y corredores troncales.
+Sistemas de Anuncio Vocal y Visual Embarcado: Megafonía automatizada e integración de monitores interiores a bordo conectados a la UCE que anuncian la siguiente parada, puntos de transferencia e incidencias a los pasajeros.
+Ecosistema Digital y Plataformas MaaS (Mobility as a Service): Integración de API abiertas para aplicaciones móviles propias y de terceros (ej. Moovit, Google Maps), garantizando la planificación de viajes intermodales puerta a puerta.
+2.4. Sensórica a Bordo: Conteo Automático de Pasajeros, Sensores de Peso y Monitoreo Ambiental
+El equipamiento físico distribuido en la flota vehicular recopilará datos telemétricos en tiempo real para auditoría técnica, seguridad operacional y calibración de indicadores.
+Tecnología / Sensor
+Mecanismo de Captura
+Uso Operativo y de Auditoría
+Conteo Automático de Pasajeros (APC / Cámaras 3D)
+Sensores ópticos estéreos o de visión artificial 3D con certificación ONVIF sobre los marcos de todas las puertas, registrando la dirección de los flujos de pasajeros (ascensos/descensos).
+Auditoría continua de aforos, cálculo en tiempo real del Índice de Pasajero por Kilómetro (IPK) por ruta y tramo, y detección automática de evasión de tarifa en combinación con el validador.
+Sensores de Carga / Peso en Ejes
+Sensores piezoresistivos o de presión neumática instalados en la suspensión de los ejes del vehículo, transmitiendo datos mediante protocolo CAN-bus (J1939).
+Monitoreo del nivel de ocupación en tiempo real, calibración del confort a bordo, prevención de la sobrecapacidad física por seguridad estructural y auditoría del volumen de carga por viaje.
+Monitores de Emisiones y Diagnóstico Ambiental
+Equipos telemétricos conectados al puerto OBD/CAN-bus de la unidad y sondas de gases en la línea de escape (medición de NO_x, material particulado PM y CO_2).
+Verificación técnica del impacto ambiental (eco-equilibrio), auditoría del desempeño energético de combustible/electricidad y supervisión de los planes de mantenimiento del motor.
+2.5. Marco Institucional, Estructura APP y Matriz de Indicadores Clave de Desempeño Operacional (KPIs)
+Gobernanza Institucional en Tres Niveles (Modelo SIT / UNE-EN 13816)
+La gobernanza del sistema bajo esquemas de Asociación Público-Privada (APP) de producción delegada se estructurará formalmente en tres niveles de actuación institucional:
+Nivel Estratégico (Autoridad Pública / Ayuntamiento): Encargado de la definición de la política pública de movilidad urbana, la aprobación del modelo tarifario (vía Comisión Tarifaria Mixta), la emisión de la reglamentación municipal y la administración del marco concesional.
+Nivel Táctico (Ejecutivo de Transporte / Dirección General de Movilidad): Encargado de la planificación técnica de la red, el diseño de la tabla de servicios, la realización de estudios de demanda, la ejecución de licitaciones y la supervisión, auditoría y aplicación de penalizaciones/incentivos a los concesionarios.
+Nivel Operativo (Empresas Concesionarias, Coordinadora de Transportistas y Organismo PagoBús): Responsable directo de la prestación del servicio vehicular, la inversión y renovación de la flota, el mantenimiento de taller, la gestión del personal de conducción, la administración de los sistemas informáticos de cobro y la operación del centro de compensación.
+Matriz Ponderada de Evaluación de Empresas Transportistas
+Para determinar la calificación mensual de desempeño de cada empresa concesionaria e impactar directamente el modelo de remuneración, la entidad reguladora aplicará la siguiente matriz de evaluación ponderada:
+Criterio Evaluado
+Ponderación
+Sub-indicadores Técnicos y Mecanismos de Auditoría
+1. Operación
+23%
+Puntualidad y regularidad en salidas, porcentaje de cumplimiento de itinerarios programados, cumplimiento de tiempos en puntos de control, bitácora de operación SAE y determinación de metas de IPK mediante aforos periódicos de movilidad semestrales.
+2. Calidad del Servicio
+22%
+Aprobación de la Revista Mecánica Semestral, ejecución del plan de mantenimiento preventivo y correctivo, vida útil promedio y renovación del parque vehicular, aseo e imagen de las unidades, y control/uniformidad del personal de conducción.
+3. Seguridad
+24%
+Tasa de siniestralidad y participación en accidentes viales por cada 100,000 km, volumen de infracciones de tránsito detectadas, índice de quejas ciudadanas procedentes, respeto al marco normativo y sanciones administrativas acumuladas.
+4. Infraestructura
+18%
+Inspección física de instalaciones de la empresa: oficinas administrativas, bases de encierro (patios) y terminales de ruta (verificación de limpieza, señalética, iluminación LED, ventilación, extintores vigentes, agua potable y sanitarios para operadores).
+5. Organización Administrativa
+13%
+Verificación de manuales de procesos operativos, presentación periódica de estados de resultados auditados, estructura empresarial formalizada, programa de salud ocupacional y esquema formal de contratación laboral del personal de conducción con prestaciones de ley.
+Mecanismo de Incentivos, Penalizaciones y Reparto del Fondo de Acumulación
+El modelo financiero incorporará una bolsa de incentivos conformada por las retenciones económicas derivadas de las penalizaciones por incumplimientos operacionales aplicadas durante el mes:
+Reparto del 50% del Fondo de Acumulación a la Excelencia: El 50% de la bolsa acumulada mensualmente se distribuirá exclusivamente entre las tres mejores empresas concesionarias que obtengan las calificaciones más altas en la matriz ponderada de desempeño (garantizando el cumplimiento de servicios, la meta de IPK y la aprobación de la Revista Mecánica).
+Distribución del 50% Restante: El 50% restante del fondo acumulado se repartirá de forma proporcional entre la totalidad de las empresas operadoras restantes, en función directa del puntaje total obtenido en su evaluación mensual.
+Este esquema algorítmico penaliza financieramente las desviaciones operativas de las empresas deficientes y recompensa la excelencia en la gestión, garantizando la sostenibilidad financiera, la rentabilidad privada y el cumplimiento riguroso de la norma europea UNE-EN 13816 en beneficio directo del usuario.

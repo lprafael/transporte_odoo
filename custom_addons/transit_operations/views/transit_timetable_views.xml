@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_transit_timetable_tree" model="ir.ui.view">
+        <field name="name">transit.timetable.list</field>
+        <field name="model">transit.timetable</field>
+        <field name="arch" type="xml">
+            <list string="Horarios Programados">
+                <field name="route_id"/>
+                <field name="direction"/>
+                <field name="service_code"/>
+                <field name="departure_time_float" widget="float_time"/>
+                <field name="arrival_time_float" widget="float_time" optional="show"/>
+                <field name="scheduled_duration_minutes"/>
+                <field name="day_of_week"/>
+                <field name="valid_from" optional="show"/>
+                <field name="cid_programacion_id" optional="hide"/>
+                <field name="active" widget="boolean_toggle"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_transit_timetable_form" model="ir.ui.view">
+        <field name="name">transit.timetable.form</field>
+        <field name="model">transit.timetable</field>
+        <field name="arch" type="xml">
+            <form string="Horario Programado">
+                <sheet>
+                    <group>
+                        <group string="Servicio y Ruta">
+                            <field name="route_id"/>
+                            <field name="direction"/>
+                            <field name="service_code" placeholder="Ej: S01"/>
+                            <field name="cid_programacion_id" readonly="1"/>
+                            <field name="active"/>
+                        </group>
+                        <group string="Programación Horaria y Vigencia">
+                            <field name="departure_time_float" widget="float_time"/>
+                            <field name="arrival_time_float" widget="float_time"/>
+                            <field name="scheduled_duration_minutes"/>
+                            <field name="day_of_week"/>
+                            <field name="valid_from"/>
+                            <field name="valid_until"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_transit_timetable_search" model="ir.ui.view">
+        <field name="name">transit.timetable.search</field>
+        <field name="model">transit.timetable</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Horarios">
+                <field name="route_id"/>
+                <field name="service_code"/>
+                <field name="direction"/>
+                <filter string="Ida" name="filter_ida" domain="[('direction', '=', 'ida')]"/>
+                <filter string="Vuelta" name="filter_vuelta" domain="[('direction', '=', 'vuelta')]"/>
+                <separator/>
+                <filter string="Lunes a Viernes" name="weekday" domain="[('day_of_week', 'in', ['all', 'weekday', '0', '1', '2', '3', '4'])]"/>
+                <filter string="Sábados" name="saturday" domain="[('day_of_week', 'in', ['all', 'weekend', '5'])]"/>
+                <filter string="Domingos / Feriados" name="sunday" domain="[('day_of_week', 'in', ['all', 'weekend', '6'])]"/>
+                <group expand="0" string="Agrupar Por">
+                    <filter string="Ruta" name="group_route" context="{'group_by': 'route_id'}"/>
+                    <filter string="Sentido" name="group_direction" context="{'group_by': 'direction'}"/>
+                    <filter string="Día" name="group_day" context="{'group_by': 'day_of_week'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_transit_timetable" model="ir.actions.act_window">
+        <field name="name">Cuadros de Marcha / Horarios</field>
+        <field name="res_model">transit.timetable</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

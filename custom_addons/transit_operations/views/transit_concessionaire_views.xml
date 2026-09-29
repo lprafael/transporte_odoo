@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Vista Lista / Árbol -->
+    <record id="view_transit_concessionaire_list" model="ir.ui.view">
+        <field name="name">transit.concessionaire.list</field>
+        <field name="model">transit.concessionaire</field>
+        <field name="arch" type="xml">
+            <list string="Empresas Concesionarias">
+                <field name="code"/>
+                <field name="name"/>
+                <field name="legal_name"/>
+                <field name="vat_ruc"/>
+                <field name="contact_phone"/>
+                <field name="vehicle_count" string="Flota Activa"/>
+                <field name="route_count" string="Rutas Asignadas"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Formulario -->
+    <record id="view_transit_concessionaire_form" model="ir.ui.view">
+        <field name="name">transit.concessionaire.form</field>
+        <field name="model">transit.concessionaire</field>
+        <field name="arch" type="xml">
+            <form string="Empresa Concesionaria">
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button class="oe_stat_button" type="action" name="%(fleet.fleet_vehicle_action)d" icon="fa-bus"
+                                context="{'search_default_concessionaire_id': id}">
+                            <field string="Unidades" name="vehicle_count" widget="statinfo"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <label for="name" string="Nombre Comercial"/>
+                        <h1><field name="name" placeholder="Ej: Empresa de Transporte San Lorenzo S.A."/></h1>
+                        <h3><field name="code" placeholder="Código: CONC-01"/></h3>
+                    </div>
+                    <group>
+                        <group string="Datos Fiscales y Jurídicos">
+                            <field name="legal_name"/>
+                            <field name="vat_ruc"/>
+                            <field name="partner_id"/>
+                            <field name="active" widget="boolean_toggle"/>
+                        </group>
+                        <group string="Contacto y Operación">
+                            <field name="contact_email"/>
+                            <field name="contact_phone"/>
+                            <field name="address"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Flota de Buses" name="vehicles">
+                            <field name="vehicle_ids" readonly="1">
+                                <list>
+                                    <field name="bus_internal_number" string="Nº Interno"/>
+                                    <field name="license_plate" string="Matrícula"/>
+                                    <field name="model_id" string="Modelo"/>
+                                    <field name="is_electric" string="Eléctrico" widget="boolean"/>
+                                    <field name="current_soc" string="SoC %" widget="progressbar"/>
+                                    <field name="itv_status" widget="badge"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Rutas y Ramales" name="routes">
+                            <field name="route_ids" readonly="1">
+                                <list>
+                                    <field name="code"/>
+                                    <field name="name"/>
+                                    <field name="origin"/>
+                                    <field name="destination"/>
+                                    <field name="distance_km"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Historial Evaluaciones UNE-EN 13816" name="evaluations">
+                            <field name="evaluation_ids" readonly="1">
+                                <list>
+                                    <field name="date_evaluation"/>
+                                    <field name="name"/>
+                                    <field name="final_score" widget="badge"/>
+                                    <field name="ranking_position"/>
+                                    <field name="performance_tier"/>
+                                    <field name="incentive_bonus" widget="monetary"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana -->
+    <record id="action_transit_concessionaire" model="ir.actions.act_window">
+        <field name="name">Empresas Concesionarias</field>
+        <field name="res_model">transit.concessionaire</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Registre la primera empresa concesionaria u operadora del sistema de transporte.
+            </p>
+        </field>
+    </record>
+</odoo>

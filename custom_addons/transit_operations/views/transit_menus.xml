@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Menú Principal de la Aplicación -->
+    <menuitem id="menu_transit_root"
+              name="Operaciones de Transporte"
+              sequence="15"
+              groups="group_transit_user"
+              web_icon="transit_operations,static/description/icon.png"/>
+
+    <!-- ================================================================== -->
+    <!-- 1. Operaciones Diarias -->
+    <!-- ================================================================== -->
+    <menuitem id="menu_transit_daily_operations"
+              name="Operaciones Diarias"
+              parent="menu_transit_root"
+              sequence="10"/>
+
+    <menuitem id="menu_transit_dispatch"
+              name="Despachos Diarios (Tablero en Vivo)"
+              parent="menu_transit_daily_operations"
+              action="action_transit_dispatch"
+              sequence="10"/>
+
+    <!-- Acciones URL para Tableros de Telemetría en Tiempo Real -->
+    <record id="action_transit_headway_dashboard" model="ir.actions.act_url">
+        <field name="name">Tablero Lineal de Frecuencias (Pegonamiento)</field>
+        <field name="url">http://localhost:8088/headway</field>
+        <field name="target">new</field>
+    </record>
+
+    <record id="action_transit_live_radar" model="ir.actions.act_url">
+        <field name="name">Radar Satelital GPS (En Vivo)</field>
+        <field name="url">http://localhost:8088/map</field>
+        <field name="target">new</field>
+    </record>
+
+    <menuitem id="menu_transit_headway"
+              name="Tablero Lineal de Intervalos (Headway)"
+              parent="menu_transit_daily_operations"
+              action="action_transit_headway_dashboard"
+              sequence="12"/>
+
+    <menuitem id="menu_transit_radar_map"
+              name="Radar Satelital GPS"
+              parent="menu_transit_daily_operations"
+              action="action_transit_live_radar"
+              sequence="14"/>
+
+    <menuitem id="menu_transit_ticket"
+              name="Venta de Pasajes / Boletos"
+              parent="menu_transit_daily_operations"
+              action="action_transit_ticket"
+              sequence="20"/>
+
+    <!-- Acción para Control de Puntualidad -->
+    <record id="action_transit_punctuality_report" model="ir.actions.act_window">
+        <field name="name">Control de Puntualidad y Despacho</field>
+        <field name="res_model">transit.dispatch</field>
+        <field name="view_mode">pivot,graph,list,kanban,calendar</field>
+        <field name="context">{'search_default_group_route': 1, 'search_default_group_compliance': 1}</field>
+    </record>
+
+    <menuitem id="menu_transit_punctuality"
+              name="Control de Puntualidad (Auditoría)"
+              parent="menu_transit_daily_operations"
+              action="action_transit_punctuality_report"
+              sequence="30"/>
+
+    <!-- ================================================================== -->
+    <!-- 2. Planificación de Tráfico y Simulación (Optibus-like) -->
+    <!-- ================================================================== -->
+    <menuitem id="menu_transit_planning"
+              name="Planificación de Tráfico"
+              parent="menu_transit_root"
+              sequence="20"/>
+
+    <menuitem id="menu_transit_route"
+              name="Rutas e Itinerarios"
+              parent="menu_transit_planning"
+              action="action_transit_route"
+              sequence="10"/>
+
+    <menuitem id="menu_transit_route_shapes"
+              name="Historial de Trazados (Shapes CID)"
+              parent="menu_transit_planning"
+              action="action_transit_route_shape"
+              sequence="15"/>
+
+    <menuitem id="menu_transit_timetable"
+              name="Cuadros de Marcha / Frecuencias"
+              parent="menu_transit_planning"
+              action="action_transit_timetable"
+              sequence="20"/>
+
+    <menuitem id="menu_transit_schedule_generator"
+              name="Generar Programación Operativa"
+              parent="menu_transit_planning"
+              action="action_transit_schedule_generator"
+              sequence="30"/>
+
+    <menuitem id="menu_transit_simulation"
+              name="Simulador What-If para Licitaciones"
+              parent="menu_transit_planning"
+              action="action_transit_simulation_wizard"
+              sequence="40"/>
+
+    <menuitem id="menu_transit_gtfs_export"
+              name="Exportar GTFS Estático (Google Maps / Moovit)"
+              parent="menu_transit_planning"
+              action="action_transit_gtfs_export_wizard"
+              sequence="50"/>
+
+    <!-- ================================================================== -->
+    <!-- 3. Flota, Concesionarios y Conductores (Rostering) -->
+    <!-- ================================================================== -->
+    <menuitem id="menu_transit_fleet_drivers"
+              name="Flota y Conductores"
+              parent="menu_transit_root"
+              sequence="30"/>
+
+    <menuitem id="menu_transit_concessionaires"
+              name="Empresas Concesionarias / Operadores"
+              parent="menu_transit_fleet_drivers"
+              action="action_transit_concessionaire"
+              sequence="5"/>
+
+    <menuitem id="menu_transit_vehicle"
+              name="Buses y Unidades"
+              parent="menu_transit_fleet_drivers"
+              action="fleet.fleet_vehicle_action"
+              sequence="10"/>
+
+    <!-- Acción para Choferes -->
+    <record id="action_transit_drivers" model="ir.actions.act_window">
+        <field name="name">Conductores y Choferes</field>
+        <field name="res_model">res.partner</field>
+        <field name="view_mode">kanban,list,form</field>
+        <field name="domain">[('is_driver', '=', True)]</field>
+        <field name="context">{'default_is_driver': True}</field>
+    </record>
+
+    <menuitem id="menu_transit_driver"
+              name="Conductores / Choferes"
+              parent="menu_transit_fleet_drivers"
+              action="action_transit_drivers"
+              sequence="20"/>
+
+    <menuitem id="menu_transit_shift_preferences"
+              name="Licitación de Turnos (Rostering)"
+              parent="menu_transit_fleet_drivers"
+              action="action_transit_shift_preference"
+              sequence="25"/>
+
+    <menuitem id="menu_transit_odometer"
+              name="Control de Odómetros"
+              parent="menu_transit_fleet_drivers"
+              action="fleet.fleet_vehicle_odometer_action"
+              sequence="30"/>
+
+    <!-- ================================================================== -->
+    <!-- 4. Electrificación y Cocheras (Depot Operations / EV) -->
+    <!-- ================================================================== -->
+    <menuitem id="menu_transit_electrification"
+              name="Electrificación y Cocheras (EV)"
+              parent="menu_transit_root"
+              sequence="35"/>
+
+    <menuitem id="menu_transit_charging_stations"
+              name="Patios y Estaciones de Carga"
+              parent="menu_transit_electrification"
+              action="action_transit_charging_station"
+              sequence="10"/>
+
+    <menuitem id="menu_transit_chargers"
+              name="Dispensadores de Carga en Vivo"
+              parent="menu_transit_electrification"
+              action="action_transit_charger"
+              sequence="20"/>
+
+    <!-- ================================================================== -->
+    <!-- 5. Cámara de Compensación y Fideicomiso (Modelo SIT / PagoBús) -->
+    <!-- ================================================================== -->
+    <menuitem id="menu_transit_clearing_root"
+              name="Cámara de Compensación y Gobernanza"
+              parent="menu_transit_root"
+              sequence="40"/>
+
+    <menuitem id="menu_transit_clearing_periods"
+              name="Liquidaciones Periódicas (FI_km)"
+              parent="menu_transit_clearing_root"
+              action="action_transit_clearing_period"
+              sequence="10"/>
+
+    <menuitem id="menu_transit_evaluations"
+              name="Matriz Ponderada UNE-EN 13816"
+              parent="menu_transit_clearing_root"
+              action="action_transit_concessionaire_evaluation"
+              sequence="20"/>
+
+    <!-- ================================================================== -->
+    <!-- 6. Facturación Electrónica SIFEN -->
+    <!-- ================================================================== -->
+    <menuitem id="menu_transit_sifen"
+              name="Facturación SIFEN"
+              parent="menu_transit_root"
+              sequence="50"/>
+
+    <!-- Acción para Facturas de Clientes -->
+    <record id="action_transit_sifen_invoices" model="ir.actions.act_window">
+        <field name="name">Comprobantes Electrónicos SIFEN</field>
+        <field name="res_model">account.move</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('move_type', '=', 'out_invoice')]</field>
+    </record>
+
+    <menuitem id="menu_transit_invoices"
+              name="Facturas de Transporte"
+              parent="menu_transit_sifen"
+              action="action_transit_sifen_invoices"
+              sequence="10"/>
+
+    <menuitem id="menu_transit_settings"
+              name="Configuración SIFEN / Denarius"
+              parent="menu_transit_sifen"
+              action="action_transit_config_settings"
+              sequence="20"
+              groups="group_transit_manager"/>
+</odoo>

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Vista Lista de Boletos / Pasajes (Odoo 18: list) -->
+    <record id="view_transit_ticket_tree" model="ir.ui.view">
+        <field name="name">transit.ticket.list</field>
+        <field name="model">transit.ticket</field>
+        <field name="arch" type="xml">
+            <list string="Boletos y Pasajes">
+                <field name="name"/>
+                <field name="date"/>
+                <field name="dispatch_id"/>
+                <field name="route_id"/>
+                <field name="passenger_name"/>
+                <field name="passenger_doc"/>
+                <field name="seat_number"/>
+                <field name="price" sum="Total Recaudado"/>
+                <field name="state" widget="badge"
+                       decoration-info="state == 'confirmed'"
+                       decoration-success="state == 'invoiced'"
+                       decoration-danger="state == 'canceled'"/>
+                <field name="invoice_id"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Formulario de Boletos -->
+    <record id="view_transit_ticket_form" model="ir.ui.view">
+        <field name="name">transit.ticket.form</field>
+        <field name="model">transit.ticket</field>
+        <field name="arch" type="xml">
+            <form string="Boleto de Pasaje">
+                <header>
+                    <button name="action_confirm" string="Emitir Boleto" type="object" class="oe_highlight" invisible="state != 'draft'"/>
+                    <button name="action_create_electronic_invoice" string="Emitir Factura Electrónica SIFEN" type="object"
+                            class="btn-success" invisible="state != 'confirmed'"/>
+                    <button name="action_cancel" string="Anular Boleto" type="object" invisible="state in ('invoiced', 'canceled')"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,confirmed,invoiced"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" string="Número de Boleto"/>
+                        <h1>
+                            <field name="name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Detalles del Viaje">
+                            <field name="dispatch_id"/>
+                            <field name="route_id"/>
+                            <field name="date"/>
+                            <field name="seat_number"/>
+                            <field name="price"/>
+                        </group>
+                        <group string="Datos del Pasajero / Fiscales">
+                            <field name="passenger_id"/>
+                            <field name="passenger_name"/>
+                            <field name="passenger_doc"/>
+                            <field name="invoice_id" invisible="not invoice_id"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vista Búsqueda de Boletos -->
+    <record id="view_transit_ticket_search" model="ir.ui.view">
+        <field name="name">transit.ticket.search</field>
+        <field name="model">transit.ticket</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Boletos">
+                <field name="name"/>
+                <field name="passenger_name"/>
+                <field name="passenger_doc"/>
+                <field name="dispatch_id"/>
+                <filter string="Facturados" name="invoiced" domain="[('state', '=', 'invoiced')]"/>
+                <filter string="Pendientes de Facturar" name="pending_invoice" domain="[('state', '=', 'confirmed')]"/>
+                <group expand="0" string="Agrupar Por">
+                    <filter string="Despacho / Viaje" name="group_dispatch" context="{'group_by': 'dispatch_id'}"/>
+                    <filter string="Estado" name="group_state" context="{'group_by': 'state'}"/>
+                    <filter string="Fecha" name="group_date" context="{'group_by': 'date'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana para Boletos -->
+    <record id="action_transit_ticket" model="ir.actions.act_window">
+        <field name="name">Venta de Pasajes / Boletos</field>
+        <field name="res_model">transit.ticket</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Acción de Servidor para Facturación Mensual Consolidada (Lotes de Boletos) -->
+    <record id="action_transit_ticket_consolidated_invoice" model="ir.actions.server">
+        <field name="name">Generar Factura Electrónica Mensual Consolidada SIFEN</field>
+        <field name="model_id" ref="model_transit_ticket"/>
+        <field name="binding_model_id" ref="model_transit_ticket"/>
+        <field name="binding_view_types">list</field>
+        <field name="state">code</field>
+        <field name="code">
+            action = records.action_create_consolidated_invoice()
+        </field>
+    </record>
+</odoo>

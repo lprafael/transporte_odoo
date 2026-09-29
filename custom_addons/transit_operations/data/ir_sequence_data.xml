@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!-- Sequence for Dispatch Number -->
+        <record id="seq_transit_dispatch" model="ir.sequence">
+            <field name="name">Secuencia de Despacho Diario</field>
+            <field name="code">transit.dispatch</field>
+            <field name="prefix">DESP-%(year)s%(month)s-</field>
+            <field name="padding">4</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+            <field name="company_id" eval="False"/>
+        </record>
+
+        <!-- Sequence for Bus Ticket -->
+        <record id="seq_transit_ticket" model="ir.sequence">
+            <field name="name">Secuencia de Boleto de Pasaje</field>
+            <field name="code">transit.ticket</field>
+            <field name="prefix">BOL-%(year)s-</field>
+            <field name="padding">5</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+            <field name="company_id" eval="False"/>
+        </record>
+
+        <!-- Sequence for Clearing Period -->
+        <record id="seq_transit_clearing_period" model="ir.sequence">
+            <field name="name">Secuencia de Período de Compensación</field>
+            <field name="code">transit.clearing.period</field>
+            <field name="prefix">COMP-%(year)s%(month)s-</field>
+            <field name="padding">3</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+            <field name="company_id" eval="False"/>
+        </record>
+
+        <!-- Sequence for Shift Preference -->
+        <record id="seq_transit_shift_preference" model="ir.sequence">
+            <field name="name">Secuencia de Preferencia de Turno</field>
+            <field name="code">transit.shift.preference</field>
+            <field name="prefix">PREF-%(year)s-</field>
+            <field name="padding">4</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+            <field name="company_id" eval="False"/>
+        </record>
+    </data>
+</odoo>

@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Vista Lista de Rutas (Odoo 18: list) -->
+    <record id="view_transit_route_tree" model="ir.ui.view">
+        <field name="name">transit.route.list</field>
+        <field name="model">transit.route</field>
+        <field name="arch" type="xml">
+            <list string="Rutas y Ramales">
+                <field name="code"/>
+                <field name="name"/>
+                <field name="direction" widget="badge"/>
+                <field name="origin"/>
+                <field name="destination"/>
+                <field name="distance_km"/>
+                <field name="standard_duration_minutes"/>
+                <field name="standard_fare"/>
+                <field name="timetable_count"/>
+                <field name="active" widget="boolean_toggle"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Formulario de Rutas -->
+    <record id="view_transit_route_form" model="ir.ui.view">
+        <field name="name">transit.route.form</field>
+        <field name="model">transit.route</field>
+        <field name="arch" type="xml">
+            <form string="Ruta / Ramal de Transporte">
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" string="Nombre del Ramal / Línea"/>
+                        <h1>
+                            <field name="name" placeholder="Ej: Línea 27 - Asunción a Capiatá"/>
+                        </h1>
+                        <label for="code" string="Código de Línea"/>
+                        <h2>
+                            <field name="code" placeholder="Ej: L27-IDA"/>
+                        </h2>
+                    </div>
+                    <group>
+                        <group string="Trayecto y Sentido">
+                            <field name="direction"/>
+                            <field name="origin"/>
+                            <field name="destination"/>
+                        </group>
+                        <group string="Parámetros de Operación">
+                            <field name="distance_km"/>
+                            <field name="standard_duration_minutes"/>
+                            <field name="standard_fare"/>
+                            <field name="active"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Cuadro de Marcha / Horarios Programados">
+                            <field name="timetable_ids">
+                                <list editable="bottom">
+                                    <field name="service_code"/>
+                                    <field name="departure_time_float" widget="float_time"/>
+                                    <field name="scheduled_duration_minutes"/>
+                                    <field name="day_of_week"/>
+                                    <field name="active" widget="boolean_toggle"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Geocercas y Puntos de Control GPS">
+                            <group string="Geocercas de Cabeceras">
+                                <group string="Cabecera Origen">
+                                    <field name="origin_latitude"/>
+                                    <field name="origin_longitude"/>
+                                    <field name="origin_radius_meters"/>
+                                </group>
+                                <group string="Cabecera Destino">
+                                    <field name="destination_latitude"/>
+                                    <field name="destination_longitude"/>
+                                    <field name="destination_radius_meters"/>
+                                </group>
+                            </group>
+                            <separator string="Paradas Intermedias y Puntos de Control"/>
+                            <field name="checkpoint_ids">
+                                <list editable="bottom">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="name"/>
+                                    <field name="checkpoint_type"/>
+                                    <field name="latitude"/>
+                                    <field name="longitude"/>
+                                    <field name="radius_meters"/>
+                                    <field name="offset_minutes"/>
+                                    <field name="active" widget="boolean_toggle"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Historial de Trazados y Vigencias (Shapes CID/VMT)">
+                            <field name="shape_ids">
+                                <list default_order="valid_from desc, version desc">
+                                    <field name="version"/>
+                                    <field name="valid_from"/>
+                                    <field name="valid_until"/>
+                                    <field name="is_active" widget="boolean" string="Vigente"/>
+                                    <field name="total_km"/>
+                                    <field name="shape_source"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vista Búsqueda de Rutas -->
+    <record id="view_transit_route_search" model="ir.ui.view">
+        <field name="name">transit.route.search</field>
+        <field name="model">transit.route</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Rutas">
+                <field name="name"/>
+                <field name="code"/>
+                <field name="origin"/>
+                <field name="destination"/>
+                <filter string="Sentido Ida" name="inbound" domain="[('direction', '=', 'inbound')]"/>
+                <filter string="Sentido Vuelta" name="outbound" domain="[('direction', '=', 'outbound')]"/>
+                <filter string="Archivados" name="inactive" domain="[('active', '=', False)]"/>
+                <group expand="0" string="Agrupar Por">
+                    <filter string="Sentido" name="group_direction" context="{'group_by': 'direction'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana para Rutas -->
+    <record id="action_transit_route" model="ir.actions.act_window">
+        <field name="name">Rutas e Itinerarios</field>
+        <field name="res_model">transit.route</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Crea tu primera Ruta o Ramal de transporte
+            </p>
+            <p>
+                Define el código de línea, cabeceras de origen y destino, distancia y cuadro de horarios programados.
+            </p>
+        </field>
+    </record>
+
+    <!-- Vista Lista de Trazados y Shapes (Vigencias) -->
+    <record id="view_transit_route_shape_tree" model="ir.ui.view">
+        <field name="name">transit.route.shape.list</field>
+        <field name="model">transit.route.shape</field>
+        <field name="arch" type="xml">
+            <list string="Historial de Trazados y Shapes (CID/VMT)" default_order="route_id asc, valid_from desc">
+                <field name="route_id"/>
+                <field name="version"/>
+                <field name="valid_from"/>
+                <field name="valid_until"/>
+                <field name="is_active" widget="boolean" string="Vigente"/>
+                <field name="total_km"/>
+                <field name="shape_source"/>
+                <field name="notes"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Formulario de Shapes -->
+    <record id="view_transit_route_shape_form" model="ir.ui.view">
+        <field name="name">transit.route.shape.form</field>
+        <field name="model">transit.route.shape</field>
+        <field name="arch" type="xml">
+            <form string="Trazado de Ruta Oficial">
+                <sheet>
+                    <group>
+                        <group string="Identificación del Trazado">
+                            <field name="route_id"/>
+                            <field name="version"/>
+                            <field name="shape_source"/>
+                            <field name="total_km"/>
+                        </group>
+                        <group string="Período de Vigencia">
+                            <field name="valid_from"/>
+                            <field name="valid_until"/>
+                            <field name="is_active" widget="boolean"/>
+                        </group>
+                    </group>
+                    <group string="Observaciones / Motivo de Variación de Recorrido">
+                        <field name="notes" placeholder="Ej: Desvío temporal por obras en Costanera o evento oficial."/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana para Shapes -->
+    <record id="action_transit_route_shape" model="ir.actions.act_window">
+        <field name="name">Historial de Trazados y Shapes</field>
+        <field name="res_model">transit.route.shape</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Historial Bi-temporal de Itinerarios oficiales VMT
+            </p>
+            <p>
+                Permite auditar los trazados vigentes y desvíos históricos para cada ramal de la flota.
+            </p>
+        </field>
+    </record>
+</odoo>

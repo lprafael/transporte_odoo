@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Vista Formulario del Asistente de Programación Operativa -->
+    <record id="view_transit_schedule_generator_form" model="ir.ui.view">
+        <field name="name">transit.schedule.generator.form</field>
+        <field name="model">transit.schedule.generator</field>
+        <field name="arch" type="xml">
+            <form string="Generador de Programación Operativa">
+                <div class="alert alert-info" role="alert">
+                    <h5 class="alert-heading font-weight-bold mb-1">
+                        <i class="fa fa-calendar-check-o me-2"></i>Carga Masiva de Operación Programada
+                    </h5>
+                    <p class="mb-0">
+                        Este asistente toma los <strong>Cuadros de Marcha / Frecuencias Maestras</strong> configuradas para cada día de la semana y genera automáticamente las <strong>Órdenes de Despacho Operativo</strong> hacia adelante con sus horas teóricas y paradas/geocercas calculadas.
+                    </p>
+                </div>
+                <group>
+                    <group string="Rango de Fechas a Programar">
+                        <field name="date_from"/>
+                        <field name="date_to"/>
+                    </group>
+                    <group string="Criterios y Asignación">
+                        <field name="assignment_mode" widget="radio"/>
+                        <field name="route_ids" widget="many2many_tags" placeholder="Todas las rutas activas"/>
+                    </group>
+                </group>
+                <footer>
+                    <button name="action_generate_schedule" string="Generar Programación Operativa" type="object" class="btn-primary"/>
+                    <button string="Cancelar" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana para el Asistente -->
+    <record id="action_transit_schedule_generator" model="ir.actions.act_window">
+        <field name="name">Cargar Programación Operativa</field>
+        <field name="res_model">transit.schedule.generator</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+</odoo>

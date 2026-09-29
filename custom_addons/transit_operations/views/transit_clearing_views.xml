@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Período de Liquidación: Lista -->
+    <record id="view_transit_clearing_period_list" model="ir.ui.view">
+        <field name="name">transit.clearing.period.list</field>
+        <field name="model">transit.clearing.period</field>
+        <field name="arch" type="xml">
+            <list string="Cámara de Compensación y Fideicomiso">
+                <field name="name"/>
+                <field name="date_start"/>
+                <field name="date_end"/>
+                <field name="total_collected_revenue" string="Recaudación Bruta (Gs.)" widget="monetary"/>
+                <field name="income_factor_per_km" string="FI_km" digits="[10, 4]"/>
+                <field name="total_planned_km" string="Km Planificados"/>
+                <field name="total_executed_km" string="Km Reales (SAE)"/>
+                <field name="total_net_settlement" string="Neto Liquidado" widget="monetary"/>
+                <field name="state" widget="badge"
+                       decoration-info="state == 'draft'"
+                       decoration-warning="state in ('calculated', 'evaluated')"
+                       decoration-success="state in ('approved', 'settled')"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Período de Liquidación: Formulario -->
+    <record id="view_transit_clearing_period_form" model="ir.ui.view">
+        <field name="name">transit.clearing.period.form</field>
+        <field name="model">transit.clearing.period</field>
+        <field name="arch" type="xml">
+            <form string="Liquidación de Compensación Tarifaria">
+                <header>
+                    <button name="action_calculate_settlements"
+                            string="1. Consolidar SAE y Calcular FI_km"
+                            type="object"
+                            class="oe_highlight"
+                            invisible="state not in ('draft', 'calculated')"/>
+                    <button name="action_apply_evaluations_and_incentives"
+                            string="2. Aplicar Bolsa de Incentivos UNE-EN 13816"
+                            type="object"
+                            class="oe_highlight"
+                            invisible="state not in ('calculated', 'evaluated')"/>
+                    <button name="action_approve"
+                            string="3. Aprobar Liquidación"
+                            type="object"
+                            class="btn-success"
+                            invisible="state not in ('evaluated')"/>
+                    <button name="action_settle"
+                            string="4. Marcar como Pagado / Transferido"
+                            type="object"
+                            class="btn-primary"
+                            invisible="state not in ('approved')"/>
+                    <button name="action_cancel"
+                            string="Cancelar"
+                            type="object"
+                            invisible="state in ('settled', 'canceled')"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,calculated,evaluated,approved,settled"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" string="Período de Compensación"/>
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="Parámetros del Período">
+                            <field name="period_type"/>
+                            <field name="date_start"/>
+                            <field name="date_end"/>
+                        </group>
+                        <group string="Fideicomisos y Caja Común">
+                            <field name="total_collected_revenue" widget="monetary"/>
+                            <label for="modernization_fund_rate"/>
+                            <div class="o_row">
+                                <field name="modernization_fund_rate"/>%
+                            </div>
+                            <field name="modernization_fund_amount" widget="monetary"/>
+                            <field name="net_distributable_revenue" widget="monetary"/>
+                        </group>
+                    </group>
+
+                    <group string="Ecuación del Factor de Ingreso por Kilómetro (FI_km)">
+                        <group>
+                            <field name="total_planned_km"/>
+                            <field name="total_executed_km"/>
+                        </group>
+                        <group>
+                            <field name="income_factor_per_km" digits="[10, 4]"/>
+                            <field name="total_penalties_collected" widget="monetary"/>
+                            <field name="total_incentives_distributed" widget="monetary"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Liquidaciones a Concesionarias" name="settlements">
+                            <field name="settlement_ids">
+                                <list editable="bottom">
+                                    <field name="concessionaire_id"/>
+                                    <field name="planned_km"/>
+                                    <field name="executed_km"/>
+                                    <field name="km_compliance_rate" widget="progressbar"/>
+                                    <field name="income_factor_per_km" digits="[10, 4]"/>
+                                    <field name="gross_amount" widget="monetary"/>
+                                    <field name="penalties_amount" widget="monetary"/>
+                                    <field name="penalty_notes"/>
+                                    <field name="incentive_bonus_amount" widget="monetary" string="Incentivo UNE 13816"/>
+                                    <field name="net_amount" widget="monetary" decoration-bf="1"/>
+                                    <field name="payment_status" widget="badge"/>
+                                </list>
+                            </field>
+                            <group class="oe_subtotal_footer">
+                                <field name="total_gross_settlement" widget="monetary"/>
+                                <field name="total_net_settlement" widget="monetary" class="oe_subtotal_footer_separator"/>
+                            </group>
+                        </page>
+                        <page string="Evaluaciones de Desempeño Vinculadas" name="evaluations">
+                            <field name="evaluation_ids" readonly="1">
+                                <list>
+                                    <field name="ranking_position" string="Puesto"/>
+                                    <field name="concessionaire_id"/>
+                                    <field name="final_score" widget="badge"/>
+                                    <field name="is_top_3" widget="boolean" string="Top 3 Excelencia"/>
+                                    <field name="performance_tier"/>
+                                    <field name="incentive_bonus" widget="monetary"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Observaciones y Dictamen" name="notes">
+                            <field name="notes" placeholder="Notas sobre auditoría de kilómetros SAE, inconsistencias de telemetría o incidencias de servicio..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana -->
+    <record id="action_transit_clearing_period" model="ir.actions.act_window">
+        <field name="name">Cámara de Compensación y Fideicomiso</field>
+        <field name="res_model">transit.clearing.period</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Cree un nuevo período de liquidación financiera bajo el modelo SIT / PagoBús.
+            </p>
+            <p>
+                Calcula automáticamente el FI_km, liquida por kilómetros certificados por el SAE y reparte la bolsa de incentivos a la excelencia.
+            </p>
+        </field>
+    </record>
+</odoo>

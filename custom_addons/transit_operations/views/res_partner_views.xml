@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_partner_form_inherit_transit" model="ir.ui.view">
+        <field name="name">res.partner.form.inherit.transit</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="Datos de Transporte y Conductor">
+                    <group>
+                        <group string="Habilitación de Chofer">
+                            <field name="is_driver"/>
+                            <field name="driver_license_number" invisible="not is_driver"/>
+                            <field name="driver_license_category" invisible="not is_driver"/>
+                            <field name="driver_license_expiry" invisible="not is_driver"/>
+                            <field name="driver_license_status" widget="badge" invisible="not is_driver"
+                                   decoration-success="driver_license_status == 'valid'"
+                                   decoration-warning="driver_license_status == 'warning'"
+                                   decoration-danger="driver_license_status == 'expired'"/>
+                        </group>
+                        <group string="Datos Fiscales SIFEN (Paraguay)">
+                            <field name="sifen_doc_type"/>
+                            <field name="vat_ruc" placeholder="Ej: 80012345"/>
+                            <field name="vat_dv" placeholder="6"/>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

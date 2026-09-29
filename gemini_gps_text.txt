@@ -1,0 +1,3179 @@
+‎Gemini - Acceso directo a la IA de Google
+Iniciar sesión
+Gemini
+Iniciar sesión
+Gestión de Flota de Buses en Odoo
+https://share.gemini.google/xygCNKu1pzZc
+Creado con
+3.8 Flash
+19 de septiembre de 2026 a las 18:34
+Publicada el 24 de septiembre de 2026 a las 20:19
+Has dicho
+Una consulta... La herramienta ODOO tiene la funcionalidad para manejo de flota de buses?
+Una consulta... La herramienta ODOO tiene la funcionalidad para manejo de flota de buses?
+Sí, pero con una distinción importante:
+Odoo cuenta con un módulo nativo de
+Gestión de Flota (
+Fleet
+)
+, pero está diseñado principalmente como un sistema administrativo y de mantenimiento (ERP/GMAO), no como un software de despacho u operación de transporte público/pasajeros en tiempo real.
+Lo que Odoo cubre de forma nativa (
+Fleet
++ ERP)
+Para la gestión de activos, compras y talleres, Odoo resuelve prácticamente todo:
+Ficha técnica de la unidad:
+Registro de chasis, motor, número de asientos, año, modelo y asignación de chofer/conductor habitual.
+Control de mantenimiento (preventivo y correctivo):
+Calendario de servicios por kilometraje u horas de uso (cambio de aceite, filtros, neumáticos, frenos). Al integrarse con el módulo de
+Mantenimiento/Inventario
+, permite descontar repuestos de stock y registrar horas de mecánicos.
+Wayakna
+Consumo de combustible y kilometraje:
+Registro de odómetros y cargas de combustible, calculando rendimientos (litros/100 km o km/l) y detectando desvíos.
+Documentación y contratos:
+Gestión de pólizas de seguro, inspecciones técnicas vehiculares, habilitaciones municipales/estatales y vencimientos de licencias de conducir con alertas automáticas.
+ECOSIRE
+Costes totales (TCO):
+Consolidación contable de depreciación, combustibles, seguros, peajes y reparaciones por unidad o por línea.
+Lo que NO incluye de forma nativa (y cómo se resuelve)
+ECOSIRE
+El módulo estándar no incluye lógica específica de transporte masivo o de larga distancia:
+Requerimiento operativo
+¿Viene nativo en Odoo?
+Alternativa habitual en Odoo
+Monitoreo GPS / AVL en tiempo real
+No
+Integración vía API / Webhooks con la plataforma de telemetría (Traccar, Geotab, etc.).
+Venta de pasajes y mapa de asientos
+No
+Módulos de terceros de la Odoo App Store (
+Bus Booking Management
+).
+Planificación de frecuencias / Headway / GTFS
+No
+Módulos a medida o consumo de datos de plataformas SAE/ITS especializadas.
+Cuadrantes de choferes y turnos rotativos
+Parcial (con
+Planning
+/
+HR
+)
+Requiere parametrización sobre el módulo de Planificación y Asistencia.
+Integración con billetaje electrónico / validadores
+No
+Conexión por API para ingesta de recaudación diaria e integración contable.
+Si la necesidad es
+administrativa, de taller, repuestos, combustible y costos de operación
+, Odoo nativo es robusto y muy eficiente. Si la necesidad es
+operación de tráfico, control de frecuencias o ticketing
+, Odoo suele actuar como el
+backend
+financiero y de mantenimiento, integrándose mediante API con el sistema de rastreo satelital (AVL) o la expendedora de boletos.
+¿Querés que veamos cómo integrar Odoo con un sistema GPS/telemetría vía API?
+Sí
+Has dicho
+Y puedo modificar el ODOO para integrar datos de operación? despacho de buses, horario de salidas, c…
+Y puedo modificar el ODOO para integrar datos de operación? despacho de buses, horario de salidas, control de cumplimientos de itinerarios, etc?
+Totalmente sí.
+Odoo está construido sobre Python y PostgreSQL con un ORM modular y extensible, lo que lo convierte en un excelente
+framework
+para construir esa capa operativa a medida.
+Sin embargo, hay
+dos caminos de arquitectura
+muy marcados según si el control es en tiempo real de alta frecuencia o si es un registro operativo/despacho.
+¿Cómo modelarías la operación dentro de Odoo?
+Para cubrir despacho, itinerarios y cumplimiento, lo ideal es crear un módulo personalizado (ej.
+fleet_transit_operation
+) que extienda los modelos nativos:
+┌─────────────────┐
+                  │   fleet.route   │ (Itinerario / Recorrido / Ramal)
+                  └────────┬────────┘
+                           │ 1:N
+                  ┌────────▼────────┐
+                  │ fleet.timetable │ (Horarios planificados / Frecuencias)
+                  └────────┬────────┘
+                           │ 1:N
+                  ┌────────▼────────┐
+                  │ fleet.dispatch  │ (Despacho diario: Bus + Chofer + Servicio)
+                  └────────┬────────┘
+                           │ 1:N
+                  ┌────────▼────────┐
+                  │  fleet.trip.log │ (Puntos de control: Estimado vs Real)
+                  └─────────────────┘
+1. Rutas e Itinerarios (
+fleet.route
+)
+Define los ramales, cabeceras (origen/destino) y paradas de control (
+checkpoints
+).
+Si manejás datos geográficos, podés almacenar la traza en formato GeoJSON / WKT o relacionarlo con geometrías de PostGIS si activás la extensión en la base de datos de Odoo.
+2. Horarios y Frecuencias (
+fleet.timetable
+)
+Planificación de cuadros de marcha: hora programada de salida de cabecera y tiempos de paso teóricos por puntos intermedios (considerando franjas horarias: hora pico vs. hora valle).
+Reglas de intervalo (
+headway
+regular o tabla horaria fija).
+3. Despacho diario (
+fleet.dispatch
+)
+Asocia:
+Vehículo (
+fleet.vehicle
+) + Chofer (
+hr.employee
+o
+res.partner
+) + Itinerario + Hora asignada
+.
+Estados del despacho con flujo Odoo (
+state machine
+):
+Borrador
+→
+Despachado
+→
+En tránsito
+→
+Completado
+/
+Cancelado
+.
+Validación previa de salida: verificación de inspección técnica al día, chofer habilitado (sin cruces de turnos por descanso) y bus sin órdenes de taller abiertas en
+fleet.service
+.
+4. Control de Cumplimiento e Índices Operativos
+Puntualidad por parada:
+Comparación entre
+scheduled_time
+y
+actual_time
+(generando alertas de adelanto o retraso).
+Cumplimiento de salidas (Índice de Regularidad):
+Cálculo automático de viajes programados vs. viajes efectivamente despachados y completados.
+Control de redondos/vueltas:
+Registro de kilometraje real recorrido por vuelta para alimentar automáticamente el odómetro de la unidad.
+Arquitectura recomendada: Dónde poner el límite de Odoo
+La clave del éxito en este tipo de desarrollos está en
+separar la telemetría masiva de la lógica de negocio
+:
+Tarea
+¿Dónde conviene procesarla?
+Por qué
+Pings GPS en crudo (cada 5 a 15 seg)
+Servidor externo / Ingestor (Node.js, FastAPI, Traccar)
+Si metés miles de
+pings
+por segundo directo al ORM de Odoo, vas a saturar el pool de conexiones de PostgreSQL y ralentizar todo el ERP.
+Detección de eventos (Geofencing)
+Ingestor externo
+El motor externo detecta cuándo el bus cruza la cabecera o parada y calcula la diferencia de tiempo.
+Registro de eventos y KPI de despacho
+Odoo (vía API REST / JSON-RPC)
+El ingestor solo envía a Odoo el evento consolidado:
+"Bus #102 salió de Terminal A a las 06:14 (Retraso: +4 min)"
+.
+Vistas operativas y tableros
+Odoo (Kanban / Gantt / Dashboards)
+Odoo gestiona los turnos, la vista de despacho en vivo, sanciones, reportes de flota y costos por km.
+¿Con qué herramientas construirlo en Odoo?
+Odoo Studio (Sin código / Bajo código):
+Sirve para prototipos rápidos: agregar campos al formulario de Flota (ej. "Ruta asignada", "Hora de salida"), crear un modelo simple de "Despachos" y vistas Kanban para mover buses de "En espera" a "En ruta".
+Limitación:
+Queda corto para automatizaciones complejas de cumplimiento o cálculos matriciales de horarios.
+Módulo Python a medida (Recomendado):
+Creás tu propio addon (
+addons/transit_dispatch
+).
+Usás vistas tipo
+Gantt
+(en Odoo Enterprise) o calendarios para ver la asignación de buses/choferes en una línea de tiempo.
+Exponés controladores HTTP (
+@http.route
+) o endpoints JSON-RPC para que el sistema de monitoreo o la app de los inspectores/despachadores en terminal envíen las salidas y llegadas.
+Podemos profundizar en el diseño técnico del módulo o la integración:
+Diseñar el modelo de datos Python/Odoo para despachos e itinerarios
+Ver la arquitectura de integración con la API de rastreo satelital
+Has dicho
+Escribe un ejemplo de código en Python con los modelos de Odoo para gestionar rutas, horarios y desp…
+Escribe un ejemplo de código en Python con los modelos de Odoo para gestionar rutas, horarios y despachos de buses.
+Para implementar este flujo en un módulo personalizado de Odoo (por ejemplo,
+fleet_transit_operation
+), creamos una estructura relacional con cuatro modelos principales:
+transit.route
+: Define la línea/ramal, sentido y cabeceras.
+transit.timetable
+: Define el cuadro de marchas teórico (horarios programados de salida y duración estimada).
+transit.dispatch
+: Es la orden de despacho diario que vincula el horario con la unidad (
+fleet.vehicle
+), el chofer (
+res.partner
+o
+hr.employee
+), y calcula desvíos y cumplimiento.
+transit.dispatch.checkpoint
+: Registra el paso real por paradas de control o cabeceras para auditar adelantos/retrasos.
+1. Modelos en Python (
+models/transit_operation.py
+)
+Python
+# -*- coding: utf-8 -*-
+from
+datetime
+import
+timedelta
+from
+odoo
+import
+api, fields, models
+from
+odoo.exceptions
+import
+ValidationError
+class
+TransitRoute
+(
+models.Model
+):
+_name =
+'transit.route'
+_description =
+'Línea e Itinerario de Transporte'
+name = fields.Char(string=
+'Nombre del Ramal / Línea'
+, required=
+True
+)
+    code = fields.Char(string=
+'Código de Línea / Ramal'
+, required=
+True
+, index=
+True
+)
+    direction = fields.Selection([
+        (
+'inbound'
+,
+'Ida'
+),
+        (
+'outbound'
+,
+'Vuelta'
+),
+        (
+'circular'
+,
+'Circular'
+),
+    ], string=
+'Sentido'
+, default=
+'inbound'
+, required=
+True
+)
+
+    origin = fields.Char(string=
+'Cabecera Origen'
+, required=
+True
+)
+    destination = fields.Char(string=
+'Cabecera Destino'
+, required=
+True
+)
+    distance_km = fields.Float(string=
+'Distancia Total (km)'
+, digits=(
+6
+,
+2
+))
+    standard_duration_minutes = fields.Integer(string=
+'Tiempo Teórico de Viaje (minutos)'
+, default=
+60
+)
+
+    timetable_ids = fields.One2many(
+'transit.timetable'
+,
+'route_id'
+, string=
+'Horarios Programados'
+)
+    active = fields.Boolean(default=
+True
+)
+class
+TransitTimetable
+(
+models.Model
+):
+_name =
+'transit.timetable'
+_description =
+'Horarios Planificados (Cuadro de Marcha)'
+_order =
+'departure_time_float asc'
+route_id = fields.Many2one(
+'transit.route'
+, string=
+'Ruta / Ramal'
+, required=
+True
+, ondelete=
+'cascade'
+)
+    service_code = fields.Char(string=
+'Código de Servicio / Vuelta'
+,
+help
+=
+'Ej: S01, V04'
+)
+# Almacenado como float en base 24h para facilitar orden y filtros (ej: 06:30 = 6.5)
+departure_time_float = fields.Float(string=
+'Hora Salida Programada'
+, required=
+True
+)
+    scheduled_duration_minutes = fields.Integer(
+        string=
+'Duración Estimada (min)'
+,
+        related=
+'route_id.standard_duration_minutes'
+,
+        store=
+True
+,
+        readonly=
+False
+)
+
+    day_of_week = fields.Selection([
+        (
+'0'
+,
+'Lunes'
+),
+        (
+'1'
+,
+'Martes'
+),
+        (
+'2'
+,
+'Miércoles'
+),
+        (
+'3'
+,
+'Jueves'
+),
+        (
+'4'
+,
+'Viernes'
+),
+        (
+'5'
+,
+'Sábado'
+),
+        (
+'6'
+,
+'Domingo'
+),
+    ], string=
+'Día de Operación'
+, default=
+'0'
+, required=
+True
+)
+
+    active = fields.Boolean(default=
+True
+)
+def
+name_get
+(
+self
+):
+result = []
+for
+rec
+in
+self:
+            hours =
+int
+(rec.departure_time_float)
+            minutes =
+int
+(
+round
+((rec.departure_time_float - hours) *
+60
+))
+            time_str =
+f"
+{hours:02d}
+:
+{minutes:02d}
+"
+name =
+f"[
+{rec.route_id.code}
+]
+{time_str}
+(
+{rec.service_code
+or
+'Servicio'
+}
+)"
+result.append((rec.
+id
+, name))
+return
+result
+class
+TransitDispatch
+(
+models.Model
+):
+_name =
+'transit.dispatch'
+_description =
+'Despacho Diario de Bus'
+_inherit = [
+'mail.thread'
+,
+'mail.activity.mixin'
+]
+    _order =
+'scheduled_departure desc'
+name = fields.Char(string=
+'Número de Despacho'
+, required=
+True
+, copy=
+False
+, readonly=
+True
+, default=
+'Nuevo'
+)
+    date = fields.Date(string=
+'Fecha Operativa'
+, default=fields.Date.context_today, required=
+True
+, index=
+True
+)
+
+    timetable_id = fields.Many2one(
+'transit.timetable'
+, string=
+'Servicio / Horario Programado'
+, required=
+True
+)
+    route_id = fields.Many2one(
+'transit.route'
+, string=
+'Ruta'
+, related=
+'timetable_id.route_id'
+, store=
+True
+, readonly=
+True
+)
+# Integración con el módulo nativo Fleet
+vehicle_id = fields.Many2one(
+'fleet.vehicle'
+,
+        string=
+'Unidad / Bus'
+,
+        required=
+True
+,
+        domain=
+"[('state_id.name', '!=', 'En Taller')]"
+,
+        tracking=
+True
+)
+    driver_id = fields.Many2one(
+'res.partner'
+, string=
+'Chofer Asignado'
+, tracking=
+True
+)
+# Tiempos de despacho y cumplimiento
+scheduled_departure = fields.Datetime(string=
+'Salida Programada'
+, required=
+True
+, tracking=
+True
+)
+    actual_departure = fields.Datetime(string=
+'Salida Real'
+, tracking=
+True
+)
+    scheduled_arrival = fields.Datetime(string=
+'Llegada Estimada'
+, compute=
+'_compute_scheduled_arrival'
+, store=
+True
+)
+    actual_arrival = fields.Datetime(string=
+'Llegada Real'
+, tracking=
+True
+)
+
+    departure_delay_minutes = fields.Float(
+        string=
+'Desvío Salida (min)'
+,
+        compute=
+'_compute_performance'
+,
+        store=
+True
+,
+help
+=
+'Positivo indica retraso; negativo indica salida adelantada'
+)
+    compliance_status = fields.Selection([
+        (
+'on_time'
+,
+'Puntual (±3 min)'
+),
+        (
+'delayed'
+,
+'Con Retraso (>3 min)'
+),
+        (
+'early'
+,
+'Adelantado (<-1 min)'
+),
+        (
+'pending'
+,
+'Pendiente'
+),
+    ], string=
+'Estado de Cumplimiento'
+, compute=
+'_compute_performance'
+, store=
+True
+)
+# Odómetros vinculados
+initial_odometer = fields.Float(string=
+'Odómetro Inicial (km)'
+)
+    final_odometer = fields.Float(string=
+'Odómetro Final (km)'
+)
+    km_traveled = fields.Float(string=
+'Km Recorridos'
+, compute=
+'_compute_km'
+, store=
+True
+)
+
+    state = fields.Selection([
+        (
+'draft'
+,
+'Borrador / Asignado'
+),
+        (
+'dispatched'
+,
+'Despachado en Cabecera'
+),
+        (
+'in_transit'
+,
+'En Ruta'
+),
+        (
+'completed'
+,
+'Completado'
+),
+        (
+'canceled'
+,
+'Cancelado / No cumplido'
+),
+    ], string=
+'Estado de Operación'
+, default=
+'draft'
+, tracking=
+True
+)
+
+    checkpoint_ids = fields.One2many(
+'transit.dispatch.checkpoint'
+,
+'dispatch_id'
+, string=
+'Puntos de Control'
+)
+# Validaciones y Cálculos
+@api.model_create_multi
+def
+create
+(
+self, vals_list
+):
+for
+vals
+in
+vals_list:
+if
+vals.get(
+'name'
+,
+'Nuevo'
+) ==
+'Nuevo'
+:
+                vals[
+'name'
+] = self.env[
+'ir.sequence'
+].next_by_code(
+'transit.dispatch'
+)
+or
+'DESP-AUTO'
+return
+super
+().create(vals_list)
+@api.depends(
+'scheduled_departure'
+,
+'timetable_id.scheduled_duration_minutes'
+)
+def
+_compute_scheduled_arrival
+(
+self
+):
+for
+rec
+in
+self:
+if
+rec.scheduled_departure
+and
+rec.timetable_id:
+                rec.scheduled_arrival = rec.scheduled_departure + timedelta(
+                    minutes=rec.timetable_id.scheduled_duration_minutes
+                )
+else
+:
+                rec.scheduled_arrival =
+False
+@api.depends(
+'scheduled_departure'
+,
+'actual_departure'
+)
+def
+_compute_performance
+(
+self
+):
+for
+rec
+in
+self:
+if
+rec.scheduled_departure
+and
+rec.actual_departure:
+                diff_seconds = (rec.actual_departure - rec.scheduled_departure).total_seconds()
+                diff_minutes = diff_seconds /
+60.0
+rec.departure_delay_minutes =
+round
+(diff_minutes,
+1
+)
+if
+-
+1.0
+<= rec.departure_delay_minutes <=
+3.0
+:
+                    rec.compliance_status =
+'on_time'
+elif
+rec.departure_delay_minutes >
+3.0
+:
+                    rec.compliance_status =
+'delayed'
+else
+:
+                    rec.compliance_status =
+'early'
+else
+:
+                rec.departure_delay_minutes =
+0.0
+rec.compliance_status =
+'pending'
+@api.depends(
+'initial_odometer'
+,
+'final_odometer'
+)
+def
+_compute_km
+(
+self
+):
+for
+rec
+in
+self:
+if
+rec.final_odometer
+and
+rec.initial_odometer:
+                rec.km_traveled = rec.final_odometer - rec.initial_odometer
+else
+:
+                rec.km_traveled =
+0.0
+# Acciones de flujo de estado
+def
+action_dispatch
+(
+self
+):
+"""Registra la salida efectiva del bus"""
+for
+rec
+in
+self:
+            now = fields.Datetime.now()
+            rec.write({
+'state'
+:
+'dispatched'
+,
+'actual_departure'
+: now,
+            })
+# Si el bus tiene odómetro registrado en Fleet, precargar odómetro inicial
+latest_odometer = self.env[
+'fleet.vehicle.odometer'
+].search(
+                [(
+'vehicle_id'
+,
+'='
+, rec.vehicle_id.
+id
+)], order=
+'value desc'
+, limit=
+1
+)
+if
+latest_odometer
+and
+not
+rec.initial_odometer:
+                rec.initial_odometer = latest_odometer.value
+def
+action_complete
+(
+self
+):
+"""Finaliza el servicio y actualiza el odómetro del bus en Odoo Fleet"""
+for
+rec
+in
+self:
+            rec.write({
+'state'
+:
+'completed'
+,
+'actual_arrival'
+: fields.Datetime.now(),
+            })
+# Actualiza el odómetro central del ERP automáticamente
+if
+rec.final_odometer
+and
+rec.final_odometer > rec.initial_odometer:
+                self.env[
+'fleet.vehicle.odometer'
+].create({
+'vehicle_id'
+: rec.vehicle_id.
+id
+,
+'value'
+: rec.final_odometer,
+'date'
+: rec.date,
+                })
+class
+TransitDispatchCheckpoint
+(
+models.Model
+):
+_name =
+'transit.dispatch.checkpoint'
+_description =
+'Puntos de Control / Paradas de Itinerario'
+_order =
+'sequence asc'
+dispatch_id = fields.Many2one(
+'transit.dispatch'
+, string=
+'Despacho'
+, ondelete=
+'cascade'
+)
+    sequence = fields.Integer(string=
+'Orden'
+, default=
+10
+)
+    name = fields.Char(string=
+'Nombre Parada / Checkpoint'
+, required=
+True
+)
+
+    scheduled_time = fields.Datetime(string=
+'Hora Teórica de Paso'
+)
+    actual_time = fields.Datetime(string=
+'Hora Real de Paso'
+)
+    delay_minutes = fields.Float(string=
+'Desvío (min)'
+, compute=
+'_compute_delay'
+, store=
+True
+)
+@api.depends(
+'scheduled_time'
+,
+'actual_time'
+)
+def
+_compute_delay
+(
+self
+):
+for
+rec
+in
+self:
+if
+rec.scheduled_time
+and
+rec.actual_time:
+                diff_seconds = (rec.actual_time - rec.scheduled_time).total_seconds()
+                rec.delay_minutes =
+round
+(diff_seconds /
+60.0
+,
+1
+)
+else
+:
+                rec.delay_minutes =
+0.0
+2. Vista XML de Despacho Diario con KPI Visual (
+views/transit_dispatch_views.xml
+)
+Permite gestionar la operación mediante botones de acción, colores dinámicos de cumplimiento e integración de mensajería (Chatter):
+XML
+<?xml version="1.0" encoding="utf-8"?>
+<
+odoo
+>
+<
+record
+id
+=
+"view_transit_dispatch_tree"
+model
+=
+"ir.ui.view"
+>
+<
+field
+name
+=
+"name"
+>
+transit.dispatch.tree
+</
+field
+>
+<
+field
+name
+=
+"model"
+>
+transit.dispatch
+</
+field
+>
+<
+field
+name
+=
+"arch"
+type
+=
+"xml"
+>
+<
+tree
+decoration-danger
+=
+"compliance_status == 'delayed'"
+decoration-warning
+=
+"compliance_status == 'early'"
+decoration-success
+=
+"compliance_status == 'on_time'"
+>
+<
+field
+name
+=
+"name"
+/>
+<
+field
+name
+=
+"date"
+/>
+<
+field
+name
+=
+"route_id"
+/>
+<
+field
+name
+=
+"vehicle_id"
+/>
+<
+field
+name
+=
+"driver_id"
+/>
+<
+field
+name
+=
+"scheduled_departure"
+/>
+<
+field
+name
+=
+"actual_departure"
+/>
+<
+field
+name
+=
+"departure_delay_minutes"
+/>
+<
+field
+name
+=
+"compliance_status"
+widget
+=
+"badge"
+/>
+<
+field
+name
+=
+"state"
+widget
+=
+"badge"
+decoration-info
+=
+"state == 'in_transit'"
+decoration-success
+=
+"state == 'completed'"
+/>
+</
+tree
+>
+</
+field
+>
+</
+record
+>
+<
+record
+id
+=
+"view_transit_dispatch_form"
+model
+=
+"ir.ui.view"
+>
+<
+field
+name
+=
+"name"
+>
+transit.dispatch.form
+</
+field
+>
+<
+field
+name
+=
+"model"
+>
+transit.dispatch
+</
+field
+>
+<
+field
+name
+=
+"arch"
+type
+=
+"xml"
+>
+<
+form
+string
+=
+"Despacho de Unidad"
+>
+<
+header
+>
+<
+button
+name
+=
+"action_dispatch"
+string
+=
+"Marcar Salida"
+type
+=
+"object"
+class
+=
+"oe_highlight"
+states
+=
+"draft"
+/>
+<
+button
+name
+=
+"action_complete"
+string
+=
+"Finalizar Viaje"
+type
+=
+"object"
+class
+=
+"oe_highlight"
+states
+=
+"dispatched,in_transit"
+/>
+<
+field
+name
+=
+"state"
+widget
+=
+"statusbar"
+statusbar_visible
+=
+"draft,dispatched,completed"
+/>
+</
+header
+>
+<
+sheet
+>
+<
+div
+class
+=
+"oe_title"
+>
+<
+h1
+>
+<
+field
+name
+=
+"name"
+/>
+</
+h1
+>
+</
+div
+>
+<
+group
+>
+<
+group
+string
+=
+"Programación"
+>
+<
+field
+name
+=
+"timetable_id"
+/>
+<
+field
+name
+=
+"route_id"
+/>
+<
+field
+name
+=
+"date"
+/>
+<
+field
+name
+=
+"scheduled_departure"
+/>
+<
+field
+name
+=
+"scheduled_arrival"
+/>
+</
+group
+>
+<
+group
+string
+=
+"Asignación Operativa"
+>
+<
+field
+name
+=
+"vehicle_id"
+/>
+<
+field
+name
+=
+"driver_id"
+/>
+<
+field
+name
+=
+"actual_departure"
+/>
+<
+field
+name
+=
+"actual_arrival"
+/>
+<
+field
+name
+=
+"departure_delay_minutes"
+/>
+<
+field
+name
+=
+"compliance_status"
+/>
+</
+group
+>
+</
+group
+>
+<
+notebook
+>
+<
+page
+string
+=
+"Puntos de Control / Itinerario"
+>
+<
+field
+name
+=
+"checkpoint_ids"
+>
+<
+tree
+editable
+=
+"bottom"
+>
+<
+field
+name
+=
+"sequence"
+widget
+=
+"handle"
+/>
+<
+field
+name
+=
+"name"
+/>
+<
+field
+name
+=
+"scheduled_time"
+/>
+<
+field
+name
+=
+"actual_time"
+/>
+<
+field
+name
+=
+"delay_minutes"
+/>
+</
+tree
+>
+</
+field
+>
+</
+page
+>
+<
+page
+string
+=
+"Control de Kilometraje"
+>
+<
+group
+>
+<
+field
+name
+=
+"initial_odometer"
+/>
+<
+field
+name
+=
+"final_odometer"
+/>
+<
+field
+name
+=
+"km_traveled"
+/>
+</
+group
+>
+</
+page
+>
+</
+notebook
+>
+</
+sheet
+>
+<
+div
+class
+=
+"oe_chatter"
+>
+<
+field
+name
+=
+"message_follower_ids"
+/>
+<
+field
+name
+=
+"activity_ids"
+/>
+<
+field
+name
+=
+"message_ids"
+/>
+</
+div
+>
+</
+form
+>
+</
+field
+>
+</
+record
+>
+</
+odoo
+>
+3. Endpoint REST/JSON-RPC para telemetría externa (
+controllers/main.py
+)
+Si un sistema AVL/GPS externo o una app móvil de fiscalización en cabecera necesita registrar la salida o el paso por parada:
+Python
+# -*- coding: utf-8 -*-
+from
+odoo
+import
+http
+from
+odoo.http
+import
+request
+class
+TransitApiController
+(
+http.Controller
+):
+@http.route(
+'/api/transit/record_event'
+,
+type
+=
+'json'
+, auth=
+'user'
+, methods=[
+'POST'
+]
+)
+def
+record_transit_event
+(
+self, **kwargs
+):
+"""
+        Payload esperado:
+        {
+            "dispatch_id": 142,
+            "event_type": "departure" | "checkpoint" | "arrival",
+            "timestamp": "2026-09-21 07:15:00",
+            "checkpoint_name": "Parada Central",
+            "odometer": 145020.5
+        }
+        """
+dispatch_id = kwargs.get(
+'dispatch_id'
+)
+        event_type = kwargs.get(
+'event_type'
+)
+        timestamp = kwargs.get(
+'timestamp'
+)
+
+        dispatch = request.env[
+'transit.dispatch'
+].browse(dispatch_id)
+if
+not
+dispatch.exists():
+return
+{
+'status'
+:
+'error'
+,
+'message'
+:
+'Despacho no encontrado'
+}
+if
+event_type ==
+'departure'
+:
+            dispatch.write({
+'actual_departure'
+: timestamp,
+'state'
+:
+'dispatched'
+})
+elif
+event_type ==
+'arrival'
+:
+            dispatch.write({
+'actual_arrival'
+: timestamp,
+'final_odometer'
+: kwargs.get(
+'odometer'
+, dispatch.final_odometer),
+'state'
+:
+'completed'
+})
+            dispatch.action_complete()
+elif
+event_type ==
+'checkpoint'
+:
+            request.env[
+'transit.dispatch.checkpoint'
+].create({
+'dispatch_id'
+: dispatch.
+id
+,
+'name'
+: kwargs.get(
+'checkpoint_name'
+,
+'Checkpoint Automático'
+),
+'actual_time'
+: timestamp,
+            })
+return
+{
+'status'
+:
+'success'
+,
+'dispatch_state'
+: dispatch.state}
+¿Querés ver cómo programar un cron (acción planificada) que genere los despachos del día automáticamente?
+Sí
+Has dicho
+¿Cómo estructurar la API para que un servicio de GPS externo envíe eventos de cumplimiento a Odoo?
+¿Cómo estructurar la API para que un servicio de GPS externo envíe eventos de cumplimiento a Odoo?
+Para integrar un sistema de telemetría o GPS externo (como Traccar, Geotab o un servicio propio) con Odoo sin degradar el rendimiento del ERP, la clave está en el
+desacoplamiento arquitectónico
+.
+El GPS no debe enviar millones de coordenadas crudas a Odoo; debe procesarlas en un servicio intermedio que detecte geocercas/eventos y notifique a Odoo únicamente cuando ocurra un hito operativo.
+1. Diagrama de flujo de datos
+[Buses / AVL] 
+     │ (Telemetría UDP/MQTT cada 5s)
+     ▼
+[Servidor de Telemetría / Ingestor (Traccar / FastAPI)]
+     │
+     ├─ Detección de Geocercas (Entrada/Salida Cabeceras y Checkpoints)
+     ├─ Matching con Servicio Activo
+     │
+     ▼ (Webhook HTTP REST con Bearer Token)
+[Odoo ERP: /api/v1/transit/events]
+     │
+     ├─ Validación de Token de Sistema
+     ├─ Búsqueda del `transit.dispatch` activo
+     └─ Registro de cumplimiento y actualización de odómetro
+2. Estructura del Payload JSON
+El servicio intermedio debe enviar un esquema predecible y desacoplado de los IDs internos de Odoo (identificando el bus por su
+patente/matrícula
+o código interno):
+Endpoint:
+POST /api/v1/transit/events
+JSON
+{
+"device_id"
+:
+"BUS-104"
+,
+"license_plate"
+:
+"ABC 123"
+,
+"event_type"
+:
+"departure"
+,
+"timestamp"
+:
+"2026-09-21T07:15:30Z"
+,
+"location"
+: {
+"checkpoint_name"
+:
+"Cabecera San Lorenzo"
+,
+"latitude"
+:
+-25.34120
+,
+"longitude"
+:
+-57.51230
+},
+"telemetry"
+: {
+"odometer_km"
+:
+154210.4
+,
+"speed_kmh"
+:
+12.5
+}
+}
+Valores de
+event_type
+:
+departure
+: Salida detectada de geocerca origen (cabecera).
+checkpoint
+: Cruce o pasada por parada de control intermedia.
+arrival
+: Entrada a geocerca destino (final de vuelta).
+3. Implementación del Controlador en Odoo (
+controllers/api.py
+)
+Para integraciones de máquina a máquina (M2M) modernas, se recomienda usar autenticación por
+API Key / Bearer Token
+en lugar de sesiones con cookies o contraseñas en texto plano:
+Python
+# -*- coding: utf-8 -*-
+import
+json
+import
+logging
+from
+datetime
+import
+datetime
+from
+odoo
+import
+http, fields
+from
+odoo.http
+import
+request, Response
+
+_logger = logging.getLogger(__name__)
+class
+TransitGpsApiController
+(
+http.Controller
+):
+def
+_authenticate_api_key
+(
+self
+):
+"""Valida el Bearer Token contra las API Keys de Odoo"""
+auth_header = request.httprequest.headers.get(
+'Authorization'
+)
+if
+not
+auth_header
+or
+not
+auth_header.startswith(
+'Bearer '
+):
+return
+None
+token = auth_header.split(
+'Bearer '
+)[
+1
+].strip()
+# Busca el usuario dueño de la API Key en res.users.apikeys
+user_id = request.env[
+'res.users.apikeys'
+]._check_credentials(
+            scope=
+'rpc'
+, key=token
+        )
+return
+user_id
+@http.route(
+'/api/v1/transit/events'
+,
+type
+=
+'http'
+, auth=
+'none'
+, methods=[
+'POST'
+], csrf=
+False
+)
+def
+handle_gps_event
+(
+self
+):
+# 1. Autenticación
+user_id = self._authenticate_api_key()
+if
+not
+user_id:
+return
+Response(
+                json.dumps({
+'error'
+:
+'Unauthorized'
+,
+'code'
+:
+401
+}),
+                status=
+401
+,
+                content_type=
+'application/json'
+)
+# 2. Parsing del cuerpo
+try
+:
+            payload = json.loads(request.httprequest.data.decode(
+'utf-8'
+))
+except
+Exception:
+return
+Response(
+                json.dumps({
+'error'
+:
+'Invalid JSON format'
+,
+'code'
+:
+400
+}),
+                status=
+400
+,
+                content_type=
+'application/json'
+)
+
+        license_plate = payload.get(
+'license_plate'
+)
+        event_type = payload.get(
+'event_type'
+)
+        event_time_str = payload.get(
+'timestamp'
+)
+        odometer = payload.get(
+'telemetry'
+, {}).get(
+'odometer_km'
+)
+        checkpoint_name = payload.get(
+'location'
+, {}).get(
+'checkpoint_name'
+,
+'Punto Control GPS'
+)
+# 3. Contexto con el usuario autenticado
+env = request.env(user=user_id)
+# 4. Buscar la unidad (fleet.vehicle)
+vehicle = env[
+'fleet.vehicle'
+].sudo().search([
+'|'
+,
+            (
+'license_plate'
+,
+'=ilike'
+, license_plate),
+            (
+'name'
+,
+'=ilike'
+, license_plate)
+        ], limit=
+1
+)
+if
+not
+vehicle:
+return
+Response(
+                json.dumps({
+'error'
+:
+f'Vehículo con placa
+{license_plate}
+no encontrado'
+,
+'code'
+:
+404
+}),
+                status=
+404
+,
+                content_type=
+'application/json'
+)
+# 5. Localizar el despacho activo para esa unidad
+# Busca despachos del día en estado borrador, despachado o en tránsito
+today = fields.Date.context_today(env[
+'transit.dispatch'
+])
+        dispatch = env[
+'transit.dispatch'
+].sudo().search([
+            (
+'vehicle_id'
+,
+'='
+, vehicle.
+id
+),
+            (
+'date'
+,
+'='
+, today),
+            (
+'state'
+,
+'in'
+, [
+'draft'
+,
+'dispatched'
+,
+'in_transit'
+])
+        ], order=
+'scheduled_departure asc'
+, limit=
+1
+)
+if
+not
+dispatch:
+return
+Response(
+                json.dumps({
+'error'
+:
+f'No hay un despacho activo asignado para la unidad
+{license_plate}
+'
+,
+'code'
+:
+422
+}),
+                status=
+422
+,
+                content_type=
+'application/json'
+)
+# Parsear fecha ISO (con soporte a zonas horarias)
+event_dt = fields.Datetime.to_datetime(event_time_str.replace(
+'Z'
+,
+'+00:00'
+))
+# 6. Procesar según el evento
+try
+:
+if
+event_type ==
+'departure'
+:
+                dispatch.write({
+'actual_departure'
+: event_dt,
+'initial_odometer'
+: odometer
+or
+dispatch.initial_odometer,
+'state'
+:
+'in_transit'
+,
+                })
+# Forzar recálculo de puntualidad
+dispatch._compute_performance()
+elif
+event_type ==
+'checkpoint'
+:
+                env[
+'transit.dispatch.checkpoint'
+].sudo().create({
+'dispatch_id'
+: dispatch.
+id
+,
+'name'
+: checkpoint_name,
+'actual_time'
+: event_dt,
+                })
+elif
+event_type ==
+'arrival'
+:
+                dispatch.write({
+'actual_arrival'
+: event_dt,
+'final_odometer'
+: odometer
+or
+dispatch.final_odometer,
+'state'
+:
+'completed'
+,
+                })
+                dispatch.action_complete()
+else
+:
+return
+Response(
+                    json.dumps({
+'error'
+:
+f'Tipo de evento no reconocido:
+{event_type}
+'
+,
+'code'
+:
+400
+}),
+                    status=
+400
+,
+                    content_type=
+'application/json'
+)
+except
+Exception
+as
+e:
+            _logger.exception(
+"Error procesando evento GPS en Odoo"
+)
+return
+Response(
+                json.dumps({
+'error'
+:
+str
+(e),
+'code'
+:
+500
+}),
+                status=
+500
+,
+                content_type=
+'application/json'
+)
+return
+Response(
+            json.dumps({
+'status'
+:
+'success'
+,
+'dispatch_id'
+: dispatch.
+id
+,
+'dispatch_name'
+: dispatch.name,
+'state'
+: dispatch.state,
+'compliance_status'
+: dispatch.compliance_status,
+'delay_minutes'
+: dispatch.departure_delay_minutes
+            }),
+            status=
+200
+,
+            content_type=
+'application/json'
+)
+4. Buenas Prácticas y Resiliencia
+Idempotencia:
+Si el GPS pierde cobertura e intenta reenviar el evento 3 veces, el endpoint debe validar que si
+actual_departure
+ya tiene un valor cargado, no sobreescriba la hora original ni duplique checkpoints.
+Buffer de Desconexión:
+Si los eventos llegan en lote (
+batch
+) porque el bus estuvo en zona sin señal, el servicio receptor debe ordenar los registros por el campo
+timestamp
+del dispositivo antes de procesar el estado en Odoo.
+Manejo de Zonas Horarias:
+Odoo almacena internamente todos los campos
+Datetime
+en
+UTC
+. Asegurate de que el ingestor siempre serialice en formato ISO 8601 con sufijo
+Z
+(
+2026-09-21T10:15:00Z
+).
+¿Querés un ejemplo de script en Python (FastAPI/requests) para simular el envío de estos eventos?
+Sí
+Has dicho
+De donde descargo Gestión de Flota (Fleet) de ODOO?
+De donde descargo Gestión de Flota (Fleet) de ODOO?
+No necesitás descargarlo por separado.
+El módulo de
+Flota (
+fleet
+)
+forma parte del núcleo oficial de Odoo y viene incluido por defecto tanto en la versión
+Community
+(código abierto) como en
+Enterprise
+.
+La forma de obtenerlo e instalarlo depende de cómo estés ejecutando tu entorno:
+1. Si ya tenés Odoo corriendo (Interfaz Web)
+Entrá a Odoo con un usuario Administrador.
+Andá al menú principal y abrí la aplicación
+Aplicaciones (Apps)
+.
+En la barra de búsqueda superior, eliminá el filtro por defecto que dice
+"Aplicaciones"
+(o asegurate de que busque en todos los módulos).
+Escribí
+Flota
+(o
+Fleet
+).
+Hacé clic en el botón
+Instalar / Activar
+.
+2. Si estás montando un entorno de desarrollo local o con Docker
+El código fuente del módulo ya se encuentra dentro de la carpeta estándar
+addons/fleet/
+del repositorio oficial.
+Repositorio oficial de Odoo (GitHub):
+github.com/odoo/odoo
+(carpeta
+/addons/fleet
+)
+Si levantás Odoo por consola o Docker y querés que se instale directamente al inicializar la base de datos, agregás el parámetro
+-i fleet
+:
+Bash
+# Ejemplo corriendo el binario directamente
+python3 odoo-bin -d mi_base_datos -i fleet --db_user=odoo --db_password=odoo
+# Ejemplo vía Docker Run
+docker run -d -p 8069:8069 --name odoo --link db:db -t odoo -i fleet
+3. Si vas a desarrollar tu propio módulo de transporte (
+transit_operation
+)
+Como tu módulo dependerá de los modelos de vehículos y odómetros de Flota, solo debés declarar la dependencia en tu archivo
+__manifest__.py
+:
+Python
+{
+'name'
+:
+'Transit Dispatch & Operation'
+,
+'version'
+:
+'1.0'
+,
+'depends'
+: [
+'base'
+,
+'fleet'
+,
+# <--- Esto fuerza a Odoo a instalar y cargar Fleet automáticamente
+'mail'
+,
+    ],
+'data'
+: [
+# Tus vistas XML, seguridad, etc.
+],
+'installable'
+:
+True
+,
+'application'
+:
+True
+,
+}
+Al instalar tu módulo desde la interfaz o por comando (
+-i transit_operation
+), Odoo instalará automáticamente el módulo oficial de Flota.
+¿Querés que veamos la estructura básica de carpetas y el manifest.py para tu módulo?
+Sí
+Has dicho
+Y cómo manejo el módulo odoo con fleet para modificarlo a mi antojo?
+Y cómo manejo el módulo odoo con fleet para modificarlo a mi antojo?
+La regla de oro en el ecosistema Odoo es:
+nunca modifiques directamente el código original de
+addons/fleet
+. Si tocas los archivos fuente nativos, perderás todas tus modificaciones cada vez que actualices Odoo o cambies de versión.
+La forma estándar y profesional de modificar Fleet "a tu antojo" es mediante la
+herencia de módulos
+(
+module inheritance
+), creando tu propio addon que extiende y sobreescribe los modelos y vistas de Fleet.
+A continuación, el paso a paso práctico para armar tu entorno y hacer modificaciones.
+1. Estructura de carpetas para tu módulo personalizado
+Creá un directorio para módulos propios (por ejemplo
+custom_addons/
+) separado del core de Odoo, y dentro de él, tu módulo (por ejemplo
+fleet_transit_custom
+):
+Plaintext
+mi-proyecto-odoo/
+├── odoo/                     # Código fuente oficial de Odoo (NO SE TOCA)
+│   └── addons/
+│       └── fleet/
+└── custom_addons/            # Tu carpeta de desarrollo
+    └── fleet_transit_custom/
+        ├── __init__.py
+        ├── __manifest__.py
+        ├── models/
+        │   ├── __init__.py
+        │   └── fleet_vehicle_inherit.py
+        ├── views/
+        │   └── fleet_vehicle_views.xml
+        └── security/
+            └── ir.model.access.csv
+2. Configurar el manifiesto (
+__manifest__.py
+)
+En este archivo declarás que tu módulo
+depende de
+fleet
+:
+Python
+# custom_addons/fleet_transit_custom/__manifest__.py
+{
+'name'
+:
+'Extensión de Flota para Buses'
+,
+'version'
+:
+'1.0.0'
+,
+'category'
+:
+'Operations/Fleet'
+,
+'summary'
+:
+'Campos y lógica operativa para buses sobre Odoo Fleet'
+,
+'depends'
+: [
+'base'
+,
+'fleet'
+,
+# Hereda de Fleet nativo
+'mail'
+,
+    ],
+'data'
+: [
+'views/fleet_vehicle_views.xml'
+,
+    ],
+'installable'
+:
+True
+,
+'application'
+:
+False
+,
+'auto_install'
+:
+False
+,
+'license'
+:
+'LGPL-3'
+,
+}
+El archivo
+custom_addons/fleet_transit_custom/__init__.py
+simplemente importa los modelos:
+Python
+# custom_addons/fleet_transit_custom/__init__.py
+from
+.
+import
+models
+Y en
+custom_addons/fleet_transit_custom/models/__init__.py
+:
+Python
+from
+.
+import
+fleet_vehicle_inherit
+3. Modificar la lógica y agregar campos en Python (
+_inherit
+)
+En Odoo usás el atributo
+_inherit = 'fleet.vehicle'
+para inyectar campos y métodos a la tabla nativa sin tocar el módulo original:
+Python
+# custom_addons/fleet_transit_custom/models/fleet_vehicle_inherit.py
+# -*- coding: utf-8 -*-
+from
+odoo
+import
+api, fields, models
+class
+FleetVehicle
+(
+models.Model
+):
+_inherit =
+'fleet.vehicle'
+# Nuevos campos específicos para transporte de pasajeros
+bus_internal_number = fields.Char(
+        string=
+'Número de Coche / Interno'
+,
+        required=
+True
+,
+        index=
+True
+,
+help
+=
+'Número visible de la unidad (ej: 04, 102)'
+)
+    seating_capacity = fields.Integer(string=
+'Capacidad Asientos'
+, default=
+45
+)
+    standing_capacity = fields.Integer(string=
+'Capacidad Parados'
+, default=
+20
+)
+    has_air_conditioning = fields.Boolean(string=
+'Aire Acondicionado'
+, default=
+True
+)
+    has_wheelchair_ramp = fields.Boolean(string=
+'Rampa de Accesibilidad'
+, default=
+False
+)
+# Campo para vincular el validador / billetaje
+validator_terminal_id = fields.Char(string=
+'ID Validador Electrónico'
+)
+# Sobreescribir el nombre mostrado en Odoo (ej: "[102] Mercedes-Benz OF 1722 - ABC 123")
+def
+name_get
+(
+self
+):
+res = []
+for
+vehicle
+in
+self:
+            name =
+f"[
+{vehicle.bus_internal_number
+or
+'S/N'
+}
+]
+{vehicle.model_id.name
+or
+''
+}
+(
+{vehicle.license_plate
+or
+''
+}
+)"
+res.append((vehicle.
+id
+, name))
+return
+res
+4. Modificar la interfaz gráfica con herencia XML (
+inherit_id
+e
+xpath
+)
+Para agregar tus nuevos campos en la pantalla de Flota de Odoo sin reescribir toda la vista, usás
+XPath
+:
+XML
+<!-- custom_addons/fleet_transit_custom/views/fleet_vehicle_views.xml -->
+<?xml version="1.0" encoding="utf-8"?>
+<
+odoo
+>
+<
+record
+id
+=
+"fleet_vehicle_view_form_inherit_transit"
+model
+=
+"ir.ui.view"
+>
+<
+field
+name
+=
+"name"
+>
+fleet.vehicle.form.inherit.transit
+</
+field
+>
+<
+field
+name
+=
+"model"
+>
+fleet.vehicle
+</
+field
+>
+<!-- Apuntamos a la vista nativa del módulo fleet -->
+<
+field
+name
+=
+"inherit_id"
+ref
+=
+"fleet.fleet_vehicle_view_form"
+/>
+<
+field
+name
+=
+"arch"
+type
+=
+"xml"
+>
+<!-- Insertamos el número de interno justo antes de la matrícula/patente -->
+<
+xpath
+expr
+=
+"//field[@name='license_plate']"
+position
+=
+"before"
+>
+<
+field
+name
+=
+"bus_internal_number"
+/>
+</
+xpath
+>
+<!-- Agregamos una pestaña nueva en el formulario del bus -->
+<
+xpath
+expr
+=
+"//notebook"
+position
+=
+"inside"
+>
+<
+page
+string
+=
+"Especificaciones de Transporte"
+>
+<
+group
+>
+<
+group
+string
+=
+"Capacidad de Pasajeros"
+>
+<
+field
+name
+=
+"seating_capacity"
+/>
+<
+field
+name
+=
+"standing_capacity"
+/>
+</
+group
+>
+<
+group
+string
+=
+"Equipamiento y Tecnología"
+>
+<
+field
+name
+=
+"has_air_conditioning"
+/>
+<
+field
+name
+=
+"has_wheelchair_ramp"
+/>
+<
+field
+name
+=
+"validator_terminal_id"
+/>
+</
+group
+>
+</
+group
+>
+</
+page
+>
+</
+xpath
+>
+</
+field
+>
+</
+record
+>
+</
+odoo
+>
+5. Cómo levantar Odoo cargando tu carpeta personalizada
+En tu archivo de configuración
+odoo.conf
+(o por línea de comandos), agregás la ruta de tu carpeta a
+addons_path
+:
+Ini, TOML
+[options]
+; Rutas separadas por coma
+addons_path
+= /ruta/a/odoo/addons,/ruta/a/custom_addons
+db_host
+= localhost
+db_port
+=
+5432
+db_user
+= odoo
+db_password
+= tu_password
+O al iniciar por consola:
+Bash
+python3 odoo-bin -c odoo.conf -u fleet_transit_custom -d tu_base_datos
+(El flag
+-u fleet_transit_custom
+le indica a Odoo que actualice y aplique los cambios de tu código Python y XML inmediatamente al arrancar).
+6. Flujo de trabajo para cambios rápidos (Modo Desarrollador)
+Para saber exactamente qué IDs de vista o campos tocar:
+En Odoo web, activá el
+Modo Desarrollador
+(desde
+Ajustes
+-> abajo del todo:
+Activar modo desarrollador
+).
+Verás un icono de un bicho (
+Debug
+) en la barra superior.
+Al posicionar el mouse sobre cualquier campo en la ficha de un vehículo, Odoo te dirá el nombre exacto de la columna técnica (ej.
+license_plate
+,
+driver_id
+).
+Haciendo clic en el bicho ->
+Editar Vista Formulario
+, podés ver el XML original completo y su ID externo para usarlo en tus
+xpath
+.
+¿Querés ver cómo armar un archivo docker-compose.yml con volumen montado para desarrollo rápido?
+Sí
+Has dicho
+Si, quiero que me guies para comenzar odoo desde cero, e ir armando mi sistema integral de control d…
+Si, quiero que me guies para comenzar odoo desde cero, e ir armando mi sistema integral de control de flota
+Para construir tu sistema de control de flota y transporte de pasajeros desde cero sin enredarte con dependencias de Python ni configuraciones manuales de PostgreSQL, la mejor alternativa es usar
+Docker
+.
+Esto te permite tener un entorno aislado donde modificas código en tu computadora y Odoo lo refleja inmediatamente.
+Paso 1: Estructura del proyecto en tu máquina
+Crea una carpeta raíz en tu equipo (por ejemplo, en tu terminal o explorador de archivos) con la siguiente distribución:
+Plaintext
+transporte_odoo/
+├── docker-compose.yml
+├── config/
+│   └── odoo.conf
+└── custom_addons/
+    └── transit_operations/
+        ├── __init__.py
+        ├── __manifest__.py
+        ├── models/
+        │   ├── __init__.py
+        │   └── fleet_vehicle.py
+        └── views/
+            └── fleet_vehicle_views.xml
+Paso 2: Crear el archivo de configuración
+odoo.conf
+Dentro de
+config/odoo.conf
+:
+Ini, TOML
+[options]
+addons_path
+= /mnt/extra-addons
+data_dir
+= /var/lib/odoo
+admin_passwd
+= admin_master_secret
+db_host
+= db
+db_port
+=
+5432
+db_user
+= odoo
+db_password
+= odoo
+Paso 3: Crear el orquestador
+docker-compose.yml
+En la raíz (
+transporte_odoo/docker-compose.yml
+):
+YAML
+version:
+'3.8'
+services:
+web:
+image:
+odoo:17.0
+depends_on:
+-
+db
+ports:
+-
+"8069:8069"
+environment:
+-
+HOST=db
+-
+USER=odoo
+-
+PASSWORD=odoo
+volumes:
+# Monta tu carpeta de código local dentro del contenedor
+-
+./custom_addons:/mnt/extra-addons
+-
+./config:/etc/odoo
+-
+odoo-web-data:/var/lib/odoo
+restart:
+always
+db:
+image:
+postgres:15
+environment:
+-
+POSTGRES_DB=postgres
+-
+POSTGRES_PASSWORD=odoo
+-
+POSTGRES_USER=odoo
+-
+PGDATA=/var/lib/postgresql/data/pgdata
+volumes:
+-
+odoo-db-data:/var/lib/postgresql/data/pgdata
+restart:
+always
+volumes:
+odoo-web-data:
+odoo-db-data:
+Paso 4: Definir tu primer módulo personalizado (
+transit_operations
+)
+Vamos a configurar los archivos mínimos dentro de
+custom_addons/transit_operations/
+:
+__manifest__.py
+Python
+# -*- coding: utf-8 -*-
+{
+'name'
+:
+'Operaciones y Control de Flota de Buses'
+,
+'version'
+:
+'1.0'
+,
+'summary'
+:
+'Extensión de flota con datos operativos de buses e itinerarios'
+,
+'category'
+:
+'Fleet/Operations'
+,
+'depends'
+: [
+'base'
+,
+'fleet'
+,
+'mail'
+],
+'data'
+: [
+'views/fleet_vehicle_views.xml'
+,
+    ],
+'installable'
+:
+True
+,
+'application'
+:
+True
+,
+'license'
+:
+'LGPL-3'
+,
+}
+__init__.py
+(raíz del módulo)
+Python
+# -*- coding: utf-8 -*-
+from
+.
+import
+models
+models/__init__.py
+Python
+# -*- coding: utf-8 -*-
+from
+.
+import
+fleet_vehicle
+models/fleet_vehicle.py
+Python
+# -*- coding: utf-8 -*-
+from
+odoo
+import
+fields, models
+class
+FleetVehicle
+(
+models.Model
+):
+_inherit =
+'fleet.vehicle'
+bus_internal_number = fields.Char(string=
+'Nº de Coche / Interno'
+, required=
+True
+, index=
+True
+)
+    seating_capacity = fields.Integer(string=
+'Asientos'
+, default=
+45
+)
+    standing_capacity = fields.Integer(string=
+'Pasajeros Parados'
+, default=
+20
+)
+    has_air_conditioning = fields.Boolean(string=
+'Aire Acondicionado'
+, default=
+True
+)
+    validator_terminal_id = fields.Char(string=
+'ID Validador Billetaje'
+)
+views/fleet_vehicle_views.xml
+XML
+<?xml version="1.0" encoding="utf-8"?>
+<
+odoo
+>
+<
+record
+id
+=
+"fleet_vehicle_view_form_inherit_bus"
+model
+=
+"ir.ui.view"
+>
+<
+field
+name
+=
+"name"
+>
+fleet.vehicle.form.inherit.bus
+</
+field
+>
+<
+field
+name
+=
+"model"
+>
+fleet.vehicle
+</
+field
+>
+<
+field
+name
+=
+"inherit_id"
+ref
+=
+"fleet.fleet_vehicle_view_form"
+/>
+<
+field
+name
+=
+"arch"
+type
+=
+"xml"
+>
+<
+xpath
+expr
+=
+"//field[@name='license_plate']"
+position
+=
+"before"
+>
+<
+field
+name
+=
+"bus_internal_number"
+/>
+</
+xpath
+>
+<
+xpath
+expr
+=
+"//notebook"
+position
+=
+"inside"
+>
+<
+page
+string
+=
+"Datos de Pasajeros"
+>
+<
+group
+>
+<
+field
+name
+=
+"seating_capacity"
+/>
+<
+field
+name
+=
+"standing_capacity"
+/>
+<
+field
+name
+=
+"has_air_conditioning"
+/>
+<
+field
+name
+=
+"validator_terminal_id"
+/>
+</
+group
+>
+</
+page
+>
+</
+xpath
+>
+</
+field
+>
+</
+record
+>
+</
+odoo
+>
+Paso 5: Levantar el sistema
+Abre tu terminal en la carpeta
+transporte_odoo/
+.
+Ejecuta:
+Bash
+docker compose up -d
+Abre tu navegador web e ingresa a:
+Plaintext
+http://localhost:8069
+Completa la pantalla de bienvenida para crear tu base de datos:
+Master Password
+:
+admin_master_secret
+(el que definiste en
+odoo.conf
+).
+Database Name
+:
+flota_db
+.
+Email
+: tu email de administrador.
+Password
+: tu clave.
+Marca o desmarca
+Demo data
+según prefieras.
+Paso 6: Activar tu módulo en Odoo
+Ingresa a Odoo e inicia sesión.
+Ve a
+Ajustes
+y desplázate al final de la página para hacer clic en
+Activar el modo de desarrollador
+.
+Dirígete a la aplicación
+Aplicaciones (Apps)
+en el menú principal.
+En la barra superior, haz clic en
+Actualizar lista de aplicaciones
+.
+Quita el filtro
+"Aplicaciones"
+de la barra de búsqueda y busca
+Operaciones y Control de Flota de Buses
+.
+Haz clic en
+Activar / Instalar
+.
+Al entrar a la app de
+Flota
+, verás que el formulario de vehículos ahora tiene tus campos personalizados integrados.
+Flujo de trabajo para seguir construyendo:
+Cada vez que agregues código en Python, reinicia el servicio web para recargar la memoria:
+Bash
+docker compose restart web
+Y si modificaste archivos XML, actualiza tu módulo desde el navegador o corriendo:
+Bash
+docker compose
+exec
+web odoo -u transit_operations -d flota_db --stop-after-init
+¿Querés que agreguemos el modelo de Rutas y Despacho Diario con su vista correspondiente?
+Sí
+Has dicho
+Cómo funciona un broker de mensajería? para recibir datos GPS de la empresa operadora de transporte?
+Cómo funciona un broker de mensajería? para recibir datos GPS de la empresa operadora de transporte?
+Un
+broker de mensajería
+actúa como una "estación central de correos" o intermediario asíncrono entre los dispositivos emisores (los buses transmitiendo datos telemáticos) y los sistemas receptores (tu base de datos, motor de geocercas, visores en tiempo real o el ERP).
+1. El problema que resuelve: Por qué no conectar los buses directo a Odoo / Base de Datos
+Si tienes una flota de 100 buses y cada uno envía una trama GPS cada 5 o 10 segundos:
+Estás recibiendo
+10 a 20 peticiones por segundo de forma continua
+.
+Si la base de datos o el ERP tiene un pico de carga, una transacción bloqueada o entra en mantenimiento por 30 segundos,
+las conexiones de los buses rebotan, colapsan el servidor HTTP o se pierden las coordenadas
+.
+Si además necesitas que esa misma coordenada la lea:
+El mapa en vivo para los usuarios.
+El motor de geocercas que calcula retrasos e itinerarios.
+El almacenamiento histórico.
+Hacer que el bus envíe 3 peticiones HTTP separadas consume datos móviles del módem del bus y vuelve al sistema frágil.
+2. El modelo Publicador / Suscriptor (
+Pub/Sub
+)
+Los brokers de mensajería modernos (como
+EMQX / Mosquitto
+para MQTT, o
+RabbitMQ / Redis Streams / Apache Kafka
+) utilizan el patrón
+Publicador/Suscriptor
+:
+[Bus #102] ──(Publish)──► Topic: "flota/linea101/bus102/telemetria"
+                                │
+                                ▼
+                    ┌─────────────────────────┐
+                    │  BROKER DE MENSAJERÍA   │
+                    │   (Memoria / Cola FIFO) │
+                    └───────────┬─────────────┘
+                                │
+          ┌─────────────────────┼─────────────────────┐
+          ▼                     ▼                     ▼
+[Servicio Ingestor]    [Motor de Geocercas]   [WebSocket Web]
+(Guarda en DB)        (Calcula demoras/Odoo)  (Mapa en vivo)
+Desacoplamiento total:
+El bus no sabe quién lee el dato ni le importa; solo publica su paquete al broker y queda libre.
+Buffer / Colas de retención (Backpressure):
+Si tu servidor de Odoo o la base de datos se cae por 5 minutos, el broker acumula los mensajes en memoria/disco en una cola ordenada. Cuando el servidor vuelve a estar en línea, procesa todo el historial acumulado sin perder un solo metro de recorrido.
+Distribución 1 a N (
+Fan-out
+):
+Un único mensaje entrante puede ser consumido en paralelo por distintos microservicios a la velocidad que cada uno necesite.
+3. Protocolos más comunes en transporte: MQTT vs HTTP
+Para dispositivos embebidos en buses (computadoras a bordo, validadores o rastreadores AVL), el protocolo rey es
+MQTT
+(Message Queuing Telemetry Transport):
+Característica
+HTTP tradicional (REST)
+MQTT (vía Broker)
+Conexión
+Abre y cierra conexión TCP por cada punto GPS
+Mantiene
+una única conexión TCP abierta
+y persistente
+Cabecera (Overhead)
+~500 a 1000 bytes solo en cabeceras HTTP
+2 bytes
+de cabecera fija
+Consumo de datos móviles
+Alto (costoso en chips 4G/IoT)
+Mínimo (ideal para planes de datos limitados)
+Calidad de Servicio (QoS)
+Requiere reintentos manuales
+Soporta
+QoS 0
+(al menos una vez),
+QoS 1
+,
+QoS 2
+nativo
+Latencia
+Variable (apretón de manos recurrente)
+Inmediata (< 50 ms)
+4. Flujo operativo paso a paso
+El módem del bus envía el paquete:
+El dispositivo a bordo publica un JSON comprimido en el
+topic
+:
+empresa/flota/bus-04/posicion
+JSON
+{
+"bus_id"
+:
+"04"
+,
+"timestamp"
+:
+1727213442
+,
+"lat"
+:
+-25.3214
+,
+"lon"
+:
+-57.5621
+,
+"speed"
+:
+42.5
+,
+"odometer"
+:
+189420.3
+}
+El Broker recibe y enruta:
+El broker (ej. EMQX o Mosquitto) autentica la unidad por certificado o usuario/contraseña, y pone el mensaje a disposición de los clientes suscritos al patrón
+empresa/flota/+/posicion
+.
+Los Consumidores procesan:
+Consumidor A (Geofencing / Reglas):
+Un microservicio ligero (en Python o Go) recibe el mensaje, valida si el punto cayó dentro del radio de 30 metros de la parada o cabecera, y si detecta llegada o salida, hace el llamado al endpoint de Odoo que definimos anteriormente (
+POST /api/v1/transit/events
+).
+Consumidor B (Histórico / Big Data):
+Escribe el punto directamente en una base temporal o serie de tiempo (TimescaleDB / PostGIS).
+Consumidor C (Monitoreo en vivo):
+Reenvía por WebSocket al navegador de los despachadores para pintar el colectivo moviéndose en el mapa.
+5. ¿Qué broker elegir según el volumen?
+Mosquitto / EMQX:
+Si tus buses o validadores transmiten directamente vía
+MQTT
+. EMQX es especialmente potente porque incluye un motor de reglas interno que puede disparar webhooks HTTP directamente sin escribir código intermedio.
+RabbitMQ:
+Excelente si recibes datos por HTTP o sockets en un ingestor y necesitas colas de trabajo garantizadas con lógica compleja de reintentos y enrutamiento hacia Odoo o bases de datos.
+Redis Streams:
+Muy rápido, liviano y fácil de levantar en tu mismo
+docker-compose.yml
+para proyectos medianos (decenas a cientos de buses).
+¿Querés que agreguemos un broker MQTT (Mosquitto o EMQX) a tu docker-compose.yml?
+Sí
+Has dicho
+Cual es el protocolo recomendado? MQTT o HTTP?
+Cual es el protocolo recomendado? MQTT o HTTP?
+Para telemetría vehicular en transporte público,
+MQTT es el estándar indiscutido y la recomendación técnica por excelencia
+, con una salvedad muy clara:
+depende de qué dispositivo esté emitiendo el dato
+.
+Comparativa directa en campo
+Criterio
+MQTT (Recomendado para telemetría)
+HTTP / REST
+Overhead de red
+Cabecera fija de
+2 bytes
+.
+Cabecera de
+500 a 1.000+ bytes
+por petición (headers, user-agent, cookies, etc.).
+Consumo de datos móviles
+Mínimo. En un escenario de 100 buses enviando datos cada 5 s, el ahorro de datos en el chip SIM suele rondar el
+60% al 80%
+.
+Alto. Transmite más metadatos de cabecera que información útil de lat/lon.
+Modelo de conexión
+1 sola conexión TCP persistente
+con
+keep-alive
+(paquetes mínimos tipo ping).
+Abre y cierra conexión TCP (Handshake TLS/TCP continuo).
+Comportamiento ante zonas sin señal
+Reconexión automática nativa; maneja desconexiones intermitentes sin colapsar el socket.
+Múltiples reintentos que agotan timeouts y saturan la cola del módem 3G/4G.
+Latencia
+En tiempo real (< 50–100 ms).
+Moderada (150–500+ ms por el ciclo de petición/respuesta).
+Bidireccionalidad
+Inmediata. El servidor puede enviar un comando al bus (ej: cortar combustible, resetear validador) al instante.
+Compleja. El bus tiene que hacer
+polling
+o requerir IP pública fija (muy costoso en telefonía celular).
+La excepción en la práctica: ¿Quién transmite el dato?
+En el transporte público real existen dos escenarios muy distintos:
+Escenario 1: El bus transmite directamente a tu servidor (Gana MQTT)
+Si controlas el firmware del validador de billetaje, tienes una computadora de a bordo (Raspberry Pi/Linux embebido) o utilizas un rastreador AVL programable (como Teltonika o Suntech que soportan MQTT nativo):
+Elección obligatoria:
+MQTT
+.
+Reduces el costo mensual de los planes de datos móviles de la flota y aseguras fluidez en mapas en tiempo real.
+Escenario 2: La empresa operadora te entrega los datos vía API de un tercero (Se usa HTTP)
+Si los buses ya transmiten a la plataforma del proveedor del GPS o del sistema de billetaje (ej. Geotab, Traccar o el proveedor del validador) y esa empresa te provee a ti la información:
+En este caso, la empresa casi siempre entrega un
+Webhook HTTP
+o una
+API REST (JSON)
+.
+Elección:
+Consumir ese
+HTTP/Webhook
+, pero recibirlo en un microservicio ligero (como FastAPI o Node.js) que actúe de adaptador,
+nunca directamente en Odoo
+.
+Arquitectura óptima para tu solución
+El esquema estándar de la industria combina lo mejor de ambos mundos:
+[Buses en calle] 
+      │ 
+      │ (MQTT / binario liviano sobre 4G)
+      ▼
+[Broker de Mensajería (EMQX / Mosquitto)]
+      │
+      ├─► [Microservicio Ingestor / Geocercas] (Python / FastAPI)
+      │         │
+      │         ▼ (HTTP POST solo cuando hay un hito: salida, parada, llegada)
+      │   [Odoo ERP] 
+      │
+      └─► [Mapa en Vivo / Websocket] (Directo al navegador sin tocar Odoo)
+Resumen:
+Usa
+MQTT
+del bus al servidor para la transmisión constante de coordenadas (por costo de datos, velocidad y eficiencia). Usa
+HTTP (REST)
+únicamente para eventos consolidados y comunicación entre tus propios servidores (por ejemplo, del motor de reglas hacia Odoo).
+¿Querés saber cómo configurar EMQX para transformar eventos MQTT en webhooks HTTP automáticamente?
+Sí
+Iniciar sesión
+Gemini puede mostrar información imprecisa (incluidos datos sobre personas), así que verifica sus respuestas.
+Política de Privacidad de Google
+Se abre en una ventana nueva
+Términos del Servicio de Google
+Se abre en una ventana nueva
+Tu privacidad y las aplicaciones de Gemini
+Se abre en una ventana nueva
+Aplicaciones de Google
+Copiar enlace público
+Denunciar
+Copiar petición
+Más opciones
+Descargar código
+Copiar código

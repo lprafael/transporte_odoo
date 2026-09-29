@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_inherit_transit" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.transit</field>
+        <field name="model">res.config.settings</field>
+        <field name="priority" eval="90"/>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Facturación SIFEN" string="Facturación SIFEN / Denarius" name="transit_operations">
+                    <block title="Conexión con Backend Denarius / SIFEN" id="denarius_connection_settings">
+                        <setting string="Servidor Denarius API" help="URL del servicio backend de facturación electrónica">
+                            <div class="content-group mt8">
+                                <field name="denarius_api_url" placeholder="http://host.docker.internal:8085"/>
+                            </div>
+                        </setting>
+                        <setting string="Seguridad y Ambiente" help="Token de autenticación y ambiente de operación">
+                            <div class="content-group mt8">
+                                <label for="denarius_api_token" string="Bearer Token"/>
+                                <field name="denarius_api_token" password="True"/>
+                                <div class="mt8">
+                                    <label for="sifen_ambiente" string="Ambiente SIFEN"/>
+                                    <field name="sifen_ambiente"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
+                    <block title="Datos del Emisor Fiscal (Paraguay)" id="sifen_emisor_settings">
+                        <setting string="Identificación Fiscal de la Empresa" help="RUC y Razón social registrados en DNIT / SET">
+                            <div class="content-group mt8">
+                                <div class="row">
+                                    <div class="col-8">
+                                        <label for="sifen_emisor_ruc" string="RUC Emisor"/>
+                                        <field name="sifen_emisor_ruc"/>
+                                    </div>
+                                    <div class="col-4">
+                                        <label for="sifen_emisor_dv" string="DV"/>
+                                        <field name="sifen_emisor_dv"/>
+                                    </div>
+                                </div>
+                                <div class="mt8">
+                                    <label for="sifen_emisor_razon_social" string="Razón Social"/>
+                                    <field name="sifen_emisor_razon_social"/>
+                                </div>
+                                <div class="mt8">
+                                    <label for="sifen_tipo_contribuyente" string="Tipo de Contribuyente"/>
+                                    <field name="sifen_tipo_contribuyente"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="action_transit_config_settings" model="ir.actions.act_window">
+        <field name="name">Configuración SIFEN / Denarius</field>
+        <field name="type">ir.actions.act_window</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="target">inline</field>
+        <field name="context">{'module' : 'transit_operations', 'bin_size': False}</field>
+    </record>
+</odoo>

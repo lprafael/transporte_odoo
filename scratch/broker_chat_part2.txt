@@ -1,0 +1,950 @@
+s horarias)
+event_dt = fields.Datetime.to_datetime(event_time_str.replace( 'Z' ,  '+00:00' ))
+# 6. Procesar según el evento
+try :
+if  event_type ==  'departure' :
+dispatch.write({
+'actual_departure' : event_dt,
+'initial_odometer' : odometer  or  dispatch.initial_odometer,
+'state' :  'in_transit' ,
+})
+# Forzar recálculo de puntualidad
+dispatch._compute_performance()
+elif  event_type ==  'checkpoint' :
+env[ 'transit.dispatch.checkpoint' ].sudo().create({
+'dispatch_id' : dispatch. id ,
+'name' : checkpoint_name,
+'actual_time' : event_dt,
+})
+elif  event_type ==  'arrival' :
+dispatch.write({
+'actual_arrival' : event_dt,
+'final_odometer' : odometer  or  dispatch.final_odometer,
+'state' :  'completed' ,
+})
+dispatch.action_complete()
+else :
+return  Response(
+json.dumps({ 'error' :  f'Tipo de evento no reconocido:  {event_type} ' ,  'code' :  400 }),
+status= 400 ,
+content_type= 'application/json'
+)
+except  Exception  as  e:
+_logger.exception( "Error procesando evento GPS en Odoo" )
+return  Response(
+json.dumps({ 'error' :  str (e),  'code' :  500 }),
+status= 500 ,
+content_type= 'application/json'
+)
+return  Response(
+json.dumps({
+'status' :  'success' ,
+'dispatch_id' : dispatch. id ,
+'dispatch_name' : dispatch.name,
+'state' : dispatch.state,
+'compliance_status' : dispatch.compliance_status,
+'delay_minutes' : dispatch.departure_delay_minutes
+}),
+status= 200 ,
+content_type= 'application/json'
+)
+4. Buenas Prácticas y Resiliencia
+Idempotencia:  Si el GPS pierde cobertura e intenta reenviar el evento 3 veces, el endpoint debe validar que si  actual_departure  ya tiene un valor cargado, no sobreescriba la hora original ni duplique checkpoints.
+Buffer de Desconexión:  Si los eventos llegan en lote ( batch ) porque el bus estuvo en zona sin señal, el servicio receptor debe ordenar los registros por el campo  timestamp  del dispositivo antes de procesar el estado en Odoo.
+Manejo de Zonas Horarias:  Odoo almacena internamente todos los campos  Datetime  en  UTC . Asegurate de que el ingestor siempre serialice en formato ISO 8601 con sufijo  Z  ( 2026-09-21T10:15:00Z ).
+¿Querés un ejemplo de script en Python (FastAPI/requests) para simular el envío de estos eventos?
+Sí
+Has dicho  De donde descargo Gestión de Flota (Fleet) de ODOO?
+De donde descargo Gestión de Flota (Fleet) de ODOO?
+No necesitás descargarlo por separado.  El módulo de  Flota ( fleet )  forma parte del núcleo oficial de Odoo y viene incluido por defecto tanto en la versión  Community  (código abierto) como en  Enterprise .
+La forma de obtenerlo e instalarlo depende de cómo estés ejecutando tu entorno:
+1. Si ya tenés Odoo corriendo (Interfaz Web)
+Entrá a Odoo con un usuario Administrador.
+Andá al menú principal y abrí la aplicación  Aplicaciones (Apps) .
+En la barra de búsqueda superior, eliminá el filtro por defecto que dice  "Aplicaciones"  (o asegurate de que busque en todos los módulos).
+Escribí  Flota  (o  Fleet ).
+Hacé clic en el botón  Instalar / Activar .
+2. Si estás montando un entorno de desarrollo local o con Docker
+El código fuente del módulo ya se encuentra dentro de la carpeta estándar  addons/fleet/  del repositorio oficial.
+Repositorio oficial de Odoo (GitHub):
+github.com/odoo/odoo                                                           (carpeta  /addons/fleet )
+Si levantás Odoo por consola o Docker y querés que se instale directamente al inicializar la base de datos, agregás el parámetro  -i fleet :
+Bash
+# Ejemplo corriendo el binario directamente
+python3 odoo-bin -d mi_base_datos -i fleet --db_user=odoo --db_password=odoo
+# Ejemplo vía Docker Run
+docker run -d -p 8069:8069 --name odoo --link db:db -t odoo -i fleet
+3. Si vas a desarrollar tu propio módulo de transporte ( transit_operation )
+Como tu módulo dependerá de los modelos de vehículos y odómetros de Flota, solo debés declarar la dependencia en tu archivo  __manifest__.py :
+Python
+{
+'name' :  'Transit Dispatch & Operation' ,
+'version' :  '1.0' ,
+'depends' : [
+'base' ,
+'fleet' ,   # <--- Esto fuerza a Odoo a instalar y cargar Fleet automáticamente
+'mail' ,
+],
+'data' : [
+# Tus vistas XML, seguridad, etc.
+],
+'installable' :  True ,
+'application' :  True ,
+}
+Al instalar tu módulo desde la interfaz o por comando ( -i transit_operation ), Odoo instalará automáticamente el módulo oficial de Flota.
+¿Querés que veamos la estructura básica de carpetas y el manifest.py para tu módulo?
+Sí
+Has dicho  Y cómo manejo el módulo odoo con fleet para modificarlo a mi antojo?
+Y cómo manejo el módulo odoo con fleet para modificarlo a mi antojo?
+La regla de oro en el ecosistema Odoo es:  nunca modifiques directamente el código original de  addons/fleet  . Si tocas los archivos fuente nativos, perderás todas tus modificaciones cada vez que actualices Odoo o cambies de versión.
+La forma estándar y profesional de modificar Fleet "a tu antojo" es mediante la  herencia de módulos  ( module inheritance ), creando tu propio addon que extiende y sobreescribe los modelos y vistas de Fleet.
+A continuación, el paso a paso práctico para armar tu entorno y hacer modificaciones.
+1. Estructura de carpetas para tu módulo personalizado
+Creá un directorio para módulos propios (por ejemplo  custom_addons/ ) separado del core de Odoo, y dentro de él, tu módulo (por ejemplo  fleet_transit_custom ):
+Plaintext
+mi-proyecto-odoo/
+├── odoo/                     # Código fuente oficial de Odoo (NO SE TOCA)
+│   └── addons/
+│       └── fleet/
+└── custom_addons/            # Tu carpeta de desarrollo
+└── fleet_transit_custom/
+├── __init__.py
+├── __manifest__.py
+├── models/
+│   ├── __init__.py
+│   └── fleet_vehicle_inherit.py
+├── views/
+│   └── fleet_vehicle_views.xml
+└── security/
+└── ir.model.access.csv
+2. Configurar el manifiesto ( __manifest__.py )
+En este archivo declarás que tu módulo  depende de  fleet  :
+Python
+# custom_addons/fleet_transit_custom/__manifest__.py
+{
+'name' :  'Extensión de Flota para Buses' ,
+'version' :  '1.0.0' ,
+'category' :  'Operations/Fleet' ,
+'summary' :  'Campos y lógica operativa para buses sobre Odoo Fleet' ,
+'depends' : [
+'base' ,
+'fleet' ,        # Hereda de Fleet nativo
+'mail' ,
+],
+'data' : [
+'views/fleet_vehicle_views.xml' ,
+],
+'installable' :  True ,
+'application' :  False ,
+'auto_install' :  False ,
+'license' :  'LGPL-3' ,
+}
+El archivo  custom_addons/fleet_transit_custom/__init__.py  simplemente importa los modelos:
+Python
+# custom_addons/fleet_transit_custom/__init__.py
+from  .  import  models
+Y en  custom_addons/fleet_transit_custom/models/__init__.py :
+Python
+from  .  import  fleet_vehicle_inherit
+3. Modificar la lógica y agregar campos en Python ( _inherit )
+En Odoo usás el atributo  _inherit = 'fleet.vehicle'  para inyectar campos y métodos a la tabla nativa sin tocar el módulo original:
+Python
+# custom_addons/fleet_transit_custom/models/fleet_vehicle_inherit.py
+# -*- coding: utf-8 -*-
+from  odoo  import  api, fields, models
+class   FleetVehicle ( models.Model ):
+_inherit =  'fleet.vehicle'
+# Nuevos campos específicos para transporte de pasajeros
+bus_internal_number = fields.Char(
+string= 'Número de Coche / Interno' ,
+required= True ,
+index= True ,
+help = 'Número visible de la unidad (ej: 04, 102)'
+)
+seating_capacity = fields.Integer(string= 'Capacidad Asientos' , default= 45 )
+standing_capacity = fields.Integer(string= 'Capacidad Parados' , default= 20 )
+has_air_conditioning = fields.Boolean(string= 'Aire Acondicionado' , default= True )
+has_wheelchair_ramp = fields.Boolean(string= 'Rampa de Accesibilidad' , default= False )
+# Campo para vincular el validador / billetaje
+validator_terminal_id = fields.Char(string= 'ID Validador Electrónico' )
+# Sobreescribir el nombre mostrado en Odoo (ej: "[102] Mercedes-Benz OF 1722 - ABC 123")
+def   name_get ( self ):
+res = []
+for  vehicle  in  self:
+name =  f"[ {vehicle.bus_internal_number  or   'S/N' } ]  {vehicle.model_id.name  or   '' }  ( {vehicle.license_plate  or   '' } )"
+res.append((vehicle. id , name))
+return  res
+4. Modificar la interfaz gráfica con herencia XML ( inherit_id  e  xpath )
+Para agregar tus nuevos campos en la pantalla de Flota de Odoo sin reescribir toda la vista, usás  XPath :
+XML
+<!-- custom_addons/fleet_transit_custom/views/fleet_vehicle_views.xml -->
+<?xml version="1.0" encoding="utf-8"?>
+< odoo >
+< record   id = "fleet_vehicle_view_form_inherit_transit"   model = "ir.ui.view" >
+< field   name = "name" > fleet.vehicle.form.inherit.transit </ field >
+< field   name = "model" > fleet.vehicle </ field >
+<!-- Apuntamos a la vista nativa del módulo fleet -->
+< field   name = "inherit_id"   ref = "fleet.fleet_vehicle_view_form" />
+< field   name = "arch"   type = "xml" >
+<!-- Insertamos el número de interno justo antes de la matrícula/patente -->
+< xpath   expr = "//field[@name='license_plate']"   position = "before" >
+< field   name = "bus_internal_number" />
+</ xpath >
+<!-- Agregamos una pestaña nueva en el formulario del bus -->
+< xpath   expr = "//notebook"   position = "inside" >
+< page   string = "Especificaciones de Transporte" >
+< group >
+< group   string = "Capacidad de Pasajeros" >
+< field   name = "seating_capacity" />
+< field   name = "standing_capacity" />
+</ group >
+< group   string = "Equipamiento y Tecnología" >
+< field   name = "has_air_conditioning" />
+< field   name = "has_wheelchair_ramp" />
+< field   name = "validator_terminal_id" />
+</ group >
+</ page >
+</ xpath >
+</ field >
+</ record >
+</ odoo >
+5. Cómo levantar Odoo cargando tu carpeta personalizada
+En tu archivo de configuración  odoo.conf  (o por línea de comandos), agregás la ruta de tu carpeta a  addons_path :
+Ini, TOML
+[options]
+; Rutas separadas por coma
+addons_path  = /ruta/a/odoo/addons,/ruta/a/custom_addons
+db_host  = localhost
+db_port  =  5432
+db_user  = odoo
+db_password  = tu_password
+O al iniciar por consola:
+Bash
+python3 odoo-bin -c odoo.conf -u fleet_transit_custom -d tu_base_datos
+(El flag  -u fleet_transit_custom  le indica a Odoo que actualice y aplique los cambios de tu código Python y XML inmediatamente al arrancar).
+6. Flujo de trabajo para cambios rápidos (Modo Desarrollador)
+Para saber exactamente qué IDs de vista o campos tocar:
+En Odoo web, activá el  Modo Desarrollador  (desde  Ajustes  -> abajo del todo:  Activar modo desarrollador ).
+Verás un icono de un bicho ( Debug ) en la barra superior.
+Al posicionar el mouse sobre cualquier campo en la ficha de un vehículo, Odoo te dirá el nombre exacto de la columna técnica (ej.  license_plate ,  driver_id ).
+Haciendo clic en el bicho ->  Editar Vista Formulario , podés ver el XML original completo y su ID externo para usarlo en tus  xpath .
+¿Querés ver cómo armar un archivo docker-compose.yml con volumen montado para desarrollo rápido?
+Sí
+Has dicho  Si, quiero que me guies para comenzar odoo desde cero, e ir armando mi sistema integral de control d…
+Si, quiero que me guies para comenzar odoo desde cero, e ir armando mi sistema integral de control de flota
+Para construir tu sistema de control de flota y transporte de pasajeros desde cero sin enredarte con dependencias de Python ni configuraciones manuales de PostgreSQL, la mejor alternativa es usar  Docker .
+Esto te permite tener un entorno aislado donde modificas código en tu computadora y Odoo lo refleja inmediatamente.
+Paso 1: Estructura del proyecto en tu máquina
+Crea una carpeta raíz en tu equipo (por ejemplo, en tu terminal o explorador de archivos) con la siguiente distribución:
+Plaintext
+transporte_odoo/
+├── docker-compose.yml
+├── config/
+│   └── odoo.conf
+└── custom_addons/
+└── transit_operations/
+├── __init__.py
+├── __manifest__.py
+├── models/
+│   ├── __init__.py
+│   └── fleet_vehicle.py
+└── views/
+└── fleet_vehicle_views.xml
+Paso 2: Crear el archivo de configuración  odoo.conf
+Dentro de  config/odoo.conf :
+Ini, TOML
+[options]
+addons_path  = /mnt/extra-addons
+data_dir  = /var/lib/odoo
+admin_passwd  = admin_master_secret
+db_host  = db
+db_port  =  5432
+db_user  = odoo
+db_password  = odoo
+Paso 3: Crear el orquestador  docker-compose.yml
+En la raíz ( transporte_odoo/docker-compose.yml ):
+YAML
+version:   '3.8'
+services:
+web:
+image:   odoo:17.0
+depends_on:
+-   db
+ports:
+-   "8069:8069"
+environment:
+-   HOST=db
+-   USER=odoo
+-   PASSWORD=odoo
+volumes:
+# Monta tu carpeta de código local dentro del contenedor
+-   ./custom_addons:/mnt/extra-addons
+-   ./config:/etc/odoo
+-   odoo-web-data:/var/lib/odoo
+restart:   always
+db:
+image:   postgres:15
+environment:
+-   POSTGRES_DB=postgres
+-   POSTGRES_PASSWORD=odoo
+-   POSTGRES_USER=odoo
+-   PGDATA=/var/lib/postgresql/data/pgdata
+volumes:
+-   odoo-db-data:/var/lib/postgresql/data/pgdata
+restart:   always
+volumes:
+odoo-web-data:
+odoo-db-data:
+Paso 4: Definir tu primer módulo personalizado ( transit_operations )
+Vamos a configurar los archivos mínimos dentro de  custom_addons/transit_operations/ :
+__manifest__.py
+Python
+# -*- coding: utf-8 -*-
+{
+'name' :  'Operaciones y Control de Flota de Buses' ,
+'version' :  '1.0' ,
+'summary' :  'Extensión de flota con datos operativos de buses e itinerarios' ,
+'category' :  'Fleet/Operations' ,
+'depends' : [ 'base' ,  'fleet' ,  'mail' ],
+'data' : [
+'views/fleet_vehicle_views.xml' ,
+],
+'installable' :  True ,
+'application' :  True ,
+'license' :  'LGPL-3' ,
+}
+__init__.py  (raíz del módulo)
+Python
+# -*- coding: utf-8 -*-
+from  .  import  models
+models/__init__.py
+Python
+# -*- coding: utf-8 -*-
+from  .  import  fleet_vehicle
+models/fleet_vehicle.py
+Python
+# -*- coding: utf-8 -*-
+from  odoo  import  fields, models
+class   FleetVehicle ( models.Model ):
+_inherit =  'fleet.vehicle'
+bus_internal_number = fields.Char(string= 'Nº de Coche / Interno' , required= True , index= True )
+seating_capacity = fields.Integer(string= 'Asientos' , default= 45 )
+standing_capacity = fields.Integer(string= 'Pasajeros Parados' , default= 20 )
+has_air_conditioning = fields.Boolean(string= 'Aire Acondicionado' , default= True )
+validator_terminal_id = fields.Char(string= 'ID Validador Billetaje' )
+views/fleet_vehicle_views.xml
+XML
+<?xml version="1.0" encoding="utf-8"?>
+< odoo >
+< record   id = "fleet_vehicle_view_form_inherit_bus"   model = "ir.ui.view" >
+< field   name = "name" > fleet.vehicle.form.inherit.bus </ field >
+< field   name = "model" > fleet.vehicle </ field >
+< field   name = "inherit_id"   ref = "fleet.fleet_vehicle_view_form" />
+< field   name = "arch"   type = "xml" >
+< xpath   expr = "//field[@name='license_plate']"   position = "before" >
+< field   name = "bus_internal_number" />
+</ xpath >
+< xpath   expr = "//notebook"   position = "inside" >
+< page   string = "Datos de Pasajeros" >
+< group >
+< field   name = "seating_capacity" />
+< field   name = "standing_capacity" />
+< field   name = "has_air_conditioning" />
+< field   name = "validator_terminal_id" />
+</ group >
+</ page >
+</ xpath >
+</ field >
+</ record >
+</ odoo >
+Paso 5: Levantar el sistema
+Abre tu terminal en la carpeta  transporte_odoo/ .
+Ejecuta:
+Bash
+docker compose up -d
+Abre tu navegador web e ingresa a:
+Plaintext
+http://localhost:8069
+Completa la pantalla de bienvenida para crear tu base de datos:
+Master Password :  admin_master_secret  (el que definiste en  odoo.conf ).
+Database Name :  flota_db .
+Email : tu email de administrador.
+Password : tu clave.
+Marca o desmarca  Demo data  según prefieras.
+Paso 6: Activar tu módulo en Odoo
+Ingresa a Odoo e inicia sesión.
+Ve a  Ajustes  y desplázate al final de la página para hacer clic en  Activar el modo de desarrollador .
+Dirígete a la aplicación  Aplicaciones (Apps)  en el menú principal.
+En la barra superior, haz clic en  Actualizar lista de aplicaciones .
+Quita el filtro  "Aplicaciones"  de la barra de búsqueda y busca  Operaciones y Control de Flota de Buses .
+Haz clic en  Activar / Instalar .
+Al entrar a la app de  Flota , verás que el formulario de vehículos ahora tiene tus campos personalizados integrados.
+Flujo de trabajo para seguir construyendo:
+Cada vez que agregues código en Python, reinicia el servicio web para recargar la memoria:
+Bash
+docker compose restart web
+Y si modificaste archivos XML, actualiza tu módulo desde el navegador o corriendo:
+Bash
+docker compose  exec  web odoo -u transit_operations -d flota_db --stop-after-init
+¿Querés que agreguemos el modelo de Rutas y Despacho Diario con su vista correspondiente?
+Sí
+Has dicho  Cómo funciona un broker de mensajería? para recibir datos GPS de la empresa operadora de transporte?
+Cómo funciona un broker de mensajería? para recibir datos GPS de la empresa operadora de transporte?
+Un  broker de mensajería  actúa como una "estación central de correos" o intermediario asíncrono entre los dispositivos emisores (los buses transmitiendo datos telemáticos) y los sistemas receptores (tu base de datos, motor de geocercas, visores en tiempo real o el ERP).
+1. El problema que resuelve: Por qué no conectar los buses directo a Odoo / Base de Datos
+Si tienes una flota de 100 buses y cada uno envía una trama GPS cada 5 o 10 segundos:
+Estás recibiendo  10 a 20 peticiones por segundo de forma continua .
+Si la base de datos o el ERP tiene un pico de carga, una transacción bloqueada o entra en mantenimiento por 30 segundos,  las conexiones de los buses rebotan, colapsan el servidor HTTP o se pierden las coordenadas .
+Si además necesitas que esa misma coordenada la lea:
+El mapa en vivo para los usuarios.
+El motor de geocercas que calcula retrasos e itinerarios.
+El almacenamiento histórico.
+Hacer que el bus envíe 3 peticiones HTTP separadas consume datos móviles del módem del bus y vuelve al sistema frágil.
+2. El modelo Publicador / Suscriptor ( Pub/Sub )
+Los brokers de mensajería modernos (como  EMQX / Mosquitto  para MQTT, o  RabbitMQ / Redis Streams / Apache Kafka ) utilizan el patrón  Publicador/Suscriptor :
+[Bus #102] ──(Publish)──► Topic: "flota/linea101/bus102/telemetria"
+│
+▼
+┌─────────────────────────┐
+│  BROKER DE MENSAJERÍA   │
+│   (Memoria / Cola FIFO) │
+└───────────┬─────────────┘
+│
+┌─────────────────────┼─────────────────────┐
+▼                     ▼                     ▼
+[Servicio Ingestor]    [Motor de Geocercas]   [WebSocket Web]
+(Guarda en DB)        (Calcula demoras/Odoo)  (Mapa en vivo)
+Desacoplamiento total:  El bus no sabe quién lee el dato ni le importa; solo publica su paquete al broker y queda libre.
+Buffer / Colas de retención (Backpressure):  Si tu servidor de Odoo o la base de datos se cae por 5 minutos, el broker acumula los mensajes en memoria/disco en una cola ordenada. Cuando el servidor vuelve a estar en línea, procesa todo el historial acumulado sin perder un solo metro de recorrido.
+Distribución 1 a N ( Fan-out ):  Un único mensaje entrante puede ser consumido en paralelo por distintos microservicios a la velocidad que cada uno necesite.
+3. Protocolos más comunes en transporte: MQTT vs HTTP
+Para dispositivos embebidos en buses (computadoras a bordo, validadores o rastreadores AVL), el protocolo rey es  MQTT  (Message Queuing Telemetry Transport):
+Característica    HTTP tradicional (REST)    MQTT (vía Broker)
+Conexión     Abre y cierra conexión TCP por cada punto GPS    Mantiene  una única conexión TCP abierta  y persistente
+Cabecera (Overhead)     ~500 a 1000 bytes solo en cabeceras HTTP     2 bytes  de cabecera fija
+Consumo de datos móviles     Alto (costoso en chips 4G/IoT)    Mínimo (ideal para planes de datos limitados)
+Calidad de Servicio (QoS)     Requiere reintentos manuales    Soporta  QoS 0  (al menos una vez),  QoS 1 ,  QoS 2  nativo
+Latencia     Variable (apretón de manos recurrente)    Inmediata (< 50 ms)
+4. Flujo operativo paso a paso
+El módem del bus envía el paquete:
+El dispositivo a bordo publica un JSON comprimido en el  topic :
+empresa/flota/bus-04/posicion
+JSON
+{
+"bus_id" :  "04" ,
+"timestamp" :  1727213442 ,
+"lat" :  -25.3214 ,
+"lon" :  -57.5621 ,
+"speed" :  42.5 ,
+"odometer" :  189420.3
+}
+El Broker recibe y enruta:
+El broker (ej. EMQX o Mosquitto) autentica la unidad por certificado o usuario/contraseña, y pone el mensaje a disposición de los clientes suscritos al patrón  empresa/flota/+/posicion .
+Los Consumidores procesan:
+Consumidor A (Geofencing / Reglas):  Un microservicio ligero (en Python o Go) recibe el mensaje, valida si el punto cayó dentro del radio de 30 metros de la parada o cabecera, y si detecta llegada o salida, hace el llamado al endpoint de Odoo que definimos anteriormente ( POST /api/v1/transit/events ).
+Consumidor B (Histórico / Big Data):  Escribe el punto directamente en una base temporal o serie de tiempo (TimescaleDB / PostGIS).
+Consumidor C (Monitoreo en vivo):  Reenvía por WebSocket al navegador de los despachadores para pintar el colectivo moviéndose en el mapa.
+5. ¿Qué broker elegir según el volumen?
+Mosquitto / EMQX:  Si tus buses o validadores transmiten directamente vía  MQTT . EMQX es especialmente potente porque incluye un motor de reglas interno que puede disparar webhooks HTTP directamente sin escribir código intermedio.
+RabbitMQ:  Excelente si recibes datos por HTTP o sockets en un ingestor y necesitas colas de trabajo garantizadas con lógica compleja de reintentos y enrutamiento hacia Odoo o bases de datos.
+Redis Streams:  Muy rápido, liviano y fácil de levantar en tu mismo  docker-compose.yml  para proyectos medianos (decenas a cientos de buses).
+¿Querés que agreguemos un broker MQTT (Mosquitto o EMQX) a tu docker-compose.yml?
+Sí
+Has dicho  Cual es el protocolo recomendado? MQTT o HTTP?
+Cual es el protocolo recomendado? MQTT o HTTP?
+Para telemetría vehicular en transporte público,  MQTT es el estándar indiscutido y la recomendación técnica por excelencia , con una salvedad muy clara:  depende de qué dispositivo esté emitiendo el dato .
+Comparativa directa en campo
+Criterio    MQTT (Recomendado para telemetría)    HTTP / REST
+Overhead de red     Cabecera fija de  2 bytes .    Cabecera de  500 a 1.000+ bytes  por petición (headers, user-agent, cookies, etc.).
+Consumo de datos móviles     Mínimo. En un escenario de 100 buses enviando datos cada 5 s, el ahorro de datos en el chip SIM suele rondar el  60% al 80% .    Alto. Transmite más metadatos de cabecera que información útil de lat/lon.
+Modelo de conexión      1 sola conexión TCP persistente  con  keep-alive  (paquetes mínimos tipo ping).    Abre y cierra conexión TCP (Handshake TLS/TCP continuo).
+Comportamiento ante zonas sin señal     Reconexión automática nativa; maneja desconexiones intermitentes sin colapsar el socket.    Múltiples reintentos que agotan timeouts y saturan la cola del módem 3G/4G.
+Latencia     En tiempo real (< 50–100 ms).    Moderada (150–500+ ms por el ciclo de petición/respuesta).
+Bidireccionalidad     Inmediata. El servidor puede enviar un comando al bus (ej: cortar combustible, resetear validador) al instante.    Compleja. El bus tiene que hacer  polling  o requerir IP pública fija (muy costoso en telefonía celular).
+La excepción en la práctica: ¿Quién transmite el dato?
+En el transporte público real existen dos escenarios muy distintos:
+Escenario 1: El bus transmite directamente a tu servidor (Gana MQTT)
+Si controlas el firmware del validador de billetaje, tienes una computadora de a bordo (Raspberry Pi/Linux embebido) o utilizas un rastreador AVL programable (como Teltonika o Suntech que soportan MQTT nativo):
+Elección obligatoria:   MQTT .
+Reduces el costo mensual de los planes de datos móviles de la flota y aseguras fluidez en mapas en tiempo real.
+Escenario 2: La empresa operadora te entrega los datos vía API de un tercero (Se usa HTTP)
+Si los buses ya transmiten a la plataforma del proveedor del GPS o del sistema de billetaje (ej. Geotab, Traccar o el proveedor del validador) y esa empresa te provee a ti la información:
+En este caso, la empresa casi siempre entrega un  Webhook HTTP  o una  API REST (JSON) .
+Elección:  Consumir ese  HTTP/Webhook , pero recibirlo en un microservicio ligero (como FastAPI o Node.js) que actúe de adaptador,  nunca directamente en Odoo .
+Arquitectura óptima para tu solución
+El esquema estándar de la industria combina lo mejor de ambos mundos:
+[Buses en calle]
+│
+│ (MQTT / binario liviano sobre 4G)
+▼
+[Broker de Mensajería (EMQX / Mosquitto)]
+│
+├─► [Microservicio Ingestor / Geocercas] (Python / FastAPI)
+│         │
+│         ▼ (HTTP POST solo cuando hay un hito: salida, parada, llegada)
+│   [Odoo ERP]
+│
+└─► [Mapa en Vivo / Websocket] (Directo al navegador sin tocar Odoo)
+Resumen:
+Usa  MQTT  del bus al servidor para la transmisión constante de coordenadas (por costo de datos, velocidad y eficiencia). Usa  HTTP (REST)  únicamente para eventos consolidados y comunicación entre tus propios servidores (por ejemplo, del motor de reglas hacia Odoo).
+¿Querés saber cómo configurar EMQX para transformar eventos MQTT en webhooks HTTP automáticamente?
+Sí
+Has dicho  Cuanto aproximadamente sería el tamaño que ocuparía por mes, si cada bus envía datos cada 10 segundo…
+Cuanto aproximadamente sería el tamaño que ocuparía por mes, si cada bus envía datos cada 10 segundos? para una flota de 30 buses?
+Para estimar el volumen, debemos separar dos dimensiones clave:
+Consumo de datos móviles (Plan de datos 4G / Tráfico de red)  por bus y para toda la flota.
+Espacio en disco (Base de datos en el servidor)  para almacenar ese histórico.
+1. Parámetros base del cálculo
+Frecuencia:  1 transmisión cada 10 segundos =  6 mensajes por minuto = 360 mensajes por hora .
+Jornada operativa:  Asumiendo una operación intensiva de  18 horas al día  (ej. 05:00 a 23:00) y que en parada nocturna duerme o baja a modo  heartbeat :
+Mensajes por bus al día:        360    ×        18    =         6.480    mensajes/d         ı       ˊ        a       .
+Mensajes por bus al mes (30 días):        6.480    ×        30    ≈         194.400    mensajes/mes       .
+Total flota (30 buses):        194.400    ×        30    ≈         5.832.000    mensajes/mes        (~5,8 millones de registros).
+2. Consumo de datos móviles (Plan 4G / SIM Card)
+El peso de cada transmisión depende directamente del protocolo utilizado:
+Opción A: Con MQTT (Recomendado)
+Payload JSON:  ~120 bytes (lat, lon, vel, rumbo, odómetro, bus_id, timestamp).
+Overhead MQTT + TCP/IP + TLS:  ~60 a 100 bytes (con conexión persistente).
+Tamaño total real por paquete:   ~200 bytes .
+Consumo por bus al mes:         194.400    ×        200    B     ≈        38  ,    8    MB     ≈         40    a 50 MB / mes        (sumando pings de keep-alive y reconexiones).
+Consumo total de los 30 buses:   ~1,2 GB a 1,5 GB / mes .
+Con un chip IoT básico de 50 MB a 100 MB mensuales por bus es más que suficiente.
+Opción B: Con HTTP / REST tradicional
+Payload JSON:  ~120 bytes.
+Overhead HTTP + Handshake TCP + Cabeceras:  ~700 a 1.000 bytes por petición.
+Tamaño total por paquete:   ~900 bytes a 1 KB .
+Consumo por bus al mes:         194.400    ×        1    KB     ≈        194    MB     ≈         200    a 250 MB / mes       .
+Consumo total de los 30 buses:   ~6 GB a 7,5 GB / mes .
+3. Almacenamiento en Base de Datos (Servidor)
+Si decides guardar  todos los puntos crudos  en tu base de datos (PostgreSQL con PostGIS o TimescaleDB):
+Cada fila típica en PostgreSQL (con  id ,  timestamp ,  geom(Point, 4326) ,  speed ,  odometer ,  bus_id ) ocupa alrededor de  120 bytes de datos brutos .
+Sumando  índices  (clave primaria, índice espacial GIST sobre geometría e índice B-Tree sobre timestamp/bus): cada fila termina ocupando unos  200 a 250 bytes en disco .
+Estimación en disco:
+Al mes (5,83 millones de registros):
+5.832.000    ×        220    bytes     ≈        1  ,    28    GB / mes
+Al año (para 30 buses):
+∼         15    a 18 GB / a         n       ˜        o
+Resumen ejecutivo
+Concepto    Por Bus (Individual)    Flota Completa (30 buses)
+Volumen de registros     ~195 mil pings / mes     ~5,83 millones pings / mes
+Plan de datos móvil (MQTT)     ~40 – 50 MB / mes     ~1,2 – 1,5 GB / mes
+Plan de datos móvil (HTTP)     ~200 – 250 MB / mes     ~6 – 7,5 GB / mes
+Espacio en base de datos     ~45 MB / mes     ~1,3 GB / mes  (~15–18 GB/año)
+Recomendación para la arquitectura
+En la base de datos:  1,3 GB al mes es un volumen perfectamente manejable para un PostgreSQL estándar en un VPS básico (2 vCPU, 4 GB RAM).
+En Odoo:   No guardes los 5,8 millones de puntos dentro de las tablas de Odoo . Guarda esa serie temporal en una tabla optimizada de PostgreSQL / PostGIS externa o tabla plana, y solo escribe en Odoo los  eventos clave de despacho  (salida de cabecera, cruce de checkpoint, llegada a destino, exceso de velocidad o alarmas de botón de pánico), que representarán menos de 3.000 registros al mes.
+¿Querés ver una estrategia de particionado o retención de datos en PostgreSQL para que no crezca indefinidamente?
+Sí
+Has dicho  Si, muestrame la estrategia de particionado o retención de datos en PostgreSQL para que no crezca in…
+Si, muestrame la estrategia de particionado o retención de datos en PostgreSQL para que no crezca indefinidamente
+Para evitar que la base de datos se degrade o consuma todo el disco con los millones de puntos GPS, la estrategia estándar en PostgreSQL combina dos técnicas:
+Particionado declarativo por rango de fechas (mensual o semanal):  Permite aislar los datos en tablas hijas.
+Purgado instantáneo con  DROP TABLE :  Eliminar un mes viejo borrando la partición completa toma  milisegundos  y no genera  bloat  (espacio muerto) ni bloqueos de tabla, a diferencia de un  DELETE FROM ... WHERE fecha < ... , que satura el log de transacciones (WAL) y degrada el rendimiento.
+1. Creación de la tabla particionada en PostgreSQL
+Definimos la tabla principal indicando que se particionará por la columna  recorded_at :
+SQL
+-- Habilitar extensión espacial si aún no está activa
+CREATE  EXTENSION IF  NOT   EXISTS  postgis;
+-- Tabla principal particionada por RANGO de tiempo
+CREATE   TABLE  telemetry_ping (
+id BIGSERIAL,
+bus_internal_code  VARCHAR ( 20 )  NOT   NULL ,
+recorded_at TIMESTAMPTZ  NOT   NULL ,
+geom GEOMETRY(Point,  4326 ),
+speed_kmh  NUMERIC ( 5 ,  2 ),
+heading_degrees  SMALLINT ,
+odometer_km  NUMERIC ( 10 ,  2 ),
+created_at TIMESTAMPTZ  DEFAULT   CURRENT_TIMESTAMP ,
+-- La clave primaria debe incluir obligatoriamente la columna de partición
+PRIMARY  KEY (id, recorded_at)
+)  PARTITION   BY   RANGE  (recorded_at);
+-- Índices en la tabla base (PostgreSQL los propaga automáticamente a cada partición)
+CREATE  INDEX idx_telemetry_bus_time
+ON  telemetry_ping (bus_internal_code, recorded_at  DESC );
+CREATE  INDEX idx_telemetry_geom
+ON  telemetry_ping  USING  GIST (geom);
+2. Creación manual de particiones mensuales (Ejemplo)
+Cada mes es una tabla física independiente, pero para las consultas ( SELECT ,  INSERT ), PostgreSQL lo gestiona de forma transparente a través de  telemetry_ping :
+SQL
+-- Partición para Octubre 2026
+CREATE   TABLE  telemetry_ping_2026_10  PARTITION   OF  telemetry_ping
+FOR   VALUES   FROM  ( '2026-10-01 00:00:00+00' )  TO  ( '2026-11-01 00:00:00+00' );
+-- Partición para Noviembre 2026
+CREATE   TABLE  telemetry_ping_2026_11  PARTITION   OF  telemetry_ping
+FOR   VALUES   FROM  ( '2026-11-01 00:00:00+00' )  TO  ( '2026-12-01 00:00:00+00' );
+-- Partición para Diciembre 2026
+CREATE   TABLE  telemetry_ping_2026_12  PARTITION   OF  telemetry_ping
+FOR   VALUES   FROM  ( '2026-12-01 00:00:00+00' )  TO  ( '2027-01-01 00:00:00+00' );
+3. Automatización de creación de particiones y política de retención
+Para no crear tablas a mano cada mes ni preocuparte por el borrado manual, creamos una función en PL/pgSQL que:
+Crea la partición del mes actual y del mes siguiente (para asegurar que siempre haya dónde escribir).
+Elimina (o desacopla) las particiones que superen la política de retención (ej.  más de 90 días / 3 meses de antigüedad ).
+SQL
+CREATE   OR  REPLACE  FUNCTION  maintain_telemetry_partitions(retention_months  INTEGER   DEFAULT   3 )
+RETURNS  VOID  AS  $$
+DECLARE
+v_date  DATE ;
+v_next_month  DATE ;
+v_partition_name TEXT;
+v_start_time TIMESTAMPTZ;
+v_end_time TIMESTAMPTZ;
+v_old_partition TEXT;
+BEGIN
+-- 1. Crear particiones: mes actual y mes siguiente
+FOR  i  IN   0.  .1  LOOP
+v_date : =  date_trunc( 'month' ,  CURRENT_DATE   +  (i  ||   ' month' ):: INTERVAL );
+v_next_month : =  v_date  +   INTERVAL   '1 month' ;
+v_partition_name : =   'telemetry_ping_'   ||  to_char(v_date,  'YYYY_MM' );
+v_start_time : =  v_date::TIMESTAMPTZ;
+v_end_time : =  v_next_month::TIMESTAMPTZ;
+-- Verificar si ya existe antes de crear
+IF  NOT   EXISTS  (
+SELECT   1   FROM  pg_class c
+JOIN  pg_namespace n  ON  n.oid  =  c.relnamespace
+WHERE  c.relname  =  v_partition_name
+)  THEN
+EXECUTE  format(
+'CREATE TABLE %I PARTITION OF telemetry_ping FOR VALUES FROM (%L) TO (%L);' ,
+v_partition_name, v_start_time, v_end_time
+);
+RAISE NOTICE  'Partición creada: %' , v_partition_name;
+END  IF;
+END  LOOP;
+-- 2. Eliminar particiones más viejas que el período de retención
+FOR  v_old_partition  IN
+SELECT  c.relname
+FROM  pg_class c
+JOIN  pg_inherits i  ON  i.inhrelid  =  c.oid
+JOIN  pg_class parent  ON  f_parent.oid  =  i.inhparent
+WHERE  parent.relname  =   'telemetry_ping'
+AND  c.relname  <  ( 'telemetry_ping_'   ||  to_char( CURRENT_DATE   -  (retention_months  ||   ' month' ):: INTERVAL ,  'YYYY_MM' ))
+LOOP
+-- Desasociar y destruir la tabla vieja en microsegundos
+EXECUTE  format( 'DROP TABLE IF EXISTS %I;' , v_old_partition);
+RAISE NOTICE  'Partición eliminada por política de retención: %' , v_old_partition;
+END  LOOP;
+END ;
+$$  LANGUAGE  plpgsql;
+4. Ejecución periódica (Cron / pg_cron)
+Podés programar esta función para que se ejecute una vez por semana o el primer día de cada mes:
+Opción A (Desde el host / contenedor con un Cron de Linux):
+Bash
+0 2 1 * * docker  exec  -i transporte_odoo-db-1 psql -U odoo -d flota_db -c  "SELECT maintain_telemetry_partitions(3);"
+Opción B (Con la extensión nativa  pg_cron  en PostgreSQL):
+SQL
+-- Ejecuta el primer día de cada mes a las 02:00 AM manteniendo 3 meses de histórico
+SELECT  cron.schedule( 'maintain-telemetry' ,  '0 2 1 * *' ,  'SELECT maintain_telemetry_partitions(3);' );
+5. Beneficio colateral: Pruning de consultas ( Partition Pruning )
+Cuando Odoo o tu visor cartográfico consulte el recorrido de un bus para auditar un reclamo o un horario:
+SQL
+SELECT  recorded_at, speed_kmh, geom
+FROM  telemetry_ping
+WHERE  bus_internal_code  =   '04'
+AND  recorded_at  >=   '2026-10-15 06:00:00'
+AND  recorded_at  <=   '2026-10-15 08:00:00' ;
+El planificador de PostgreSQL aplicará  Partition Pruning : ignorará por completo todas las tablas de otros meses y leerá  únicamente  la partición  telemetry_ping_2026_10 . Esto reduce drásticamente el consumo de I/O de disco y memoria RAM.
+Alternativa avanzada: TimescaleDB (Hipertables)
+Si en el futuro la flota escala a cientos de buses, podés activar la extensión de código abierto  TimescaleDB  sobre la misma instancia de PostgreSQL:
+Convierte la tabla en una  Hipertabla  con una sola instrucción:  SELECT create_hypertable('telemetry_ping', 'recorded_at'); .
+Particiona de forma 100% nativa y transparente.
+Ofrece  compresión nativa columnar , reduciendo el tamaño en disco de 1,3 GB/mes a apenas  ~100-150 MB/mes  (hasta un 90% de ahorro de almacenamiento).
+¿Querés ver cómo conectar esta tabla con el microservicio de ingesta para guardar las coordenadas?
+Sí
+Has dicho  Entonces, para saber... cuanto es el tamaño que debo prever en mi servidor para manejar una cantidad…
+Entonces, para saber... cuanto es el tamaño que debo prever en mi servidor para manejar una cantidad de datos de 1 año?
+Para dimensionar el disco de tu servidor para  1 año completo  con 30 buses transmitiendo cada 10 segundos, no solo debemos contar los puntos GPS en crudo, sino también el sistema operativo, los servicios en Docker, las tablas de Odoo, los logs y, fundamentalmente,  los respaldos (backups) .
+1. Desglose detallado del almacenamiento (1 Año)
+Componente    Cálculo base    Tamaño estimado (1 Año)
+Puntos GPS crudos + Índices     ~5,8 millones pings/mes × 12 meses × ~220 bytes     ~16 a 18 GB
+Base de datos de Odoo     Despachos diarios, odómetros, repuestos, compras y facturación     ~3 a 5 GB
+Sistema Operativo + Imágenes Docker     Ubuntu Server + Odoo + PostgreSQL/PostGIS + Broker MQTT     ~10 a 12 GB
+Logs del sistema y contenedores     Logs de acceso, rotación de Docker y del Broker     ~5 GB
+Margen de seguridad de PostgreSQL     Espacio temporal para mantenimiento ( VACUUM , reindexación, WAL)     ~10 GB
+Respaldos locales (Backups)     Dumps comprimidos rotativos diarios/semanales (mínimo 2-3 copias)     ~25 a 30 GB
+Total Neto Estimado     Sumatoria técnica de operación     ~70 a 80 GB
+2. Capacidad de disco recomendada para contratar / aprovisionar
+En producción nunca se debe superar el 70–75% de ocupación de un disco (PostgreSQL se bloquea si el disco se llena al 100% por no poder escribir transacciones WAL).
+Capacidad recomendada:   120 GB a 160 GB SSD (o NVMe) .
+Con un disco de  120 a 160 GB , el sistema funcionará holgado durante todo el año, con espacio de sobra para snapshots, actualizaciones del sistema y copias de seguridad locales antes de subirlas a un almacenamiento externo (S3/Drive).
+3. Comparativa según la estrategia que elijas
+Dependiendo de cómo decidas estructurar la retención de los datos, el requerimiento cambia notablemente:
+Guardar todo en PostgreSQL plano (1 año completo):
+Necesitas prever  ~120 a 160 GB .
+Aplicar la política de retención (ej. guardar solo 3 meses en caliente y purgar):
+Los puntos GPS se estabilizan en ~4 a 5 GB de forma permanente.
+Con un disco de  50 a 80 GB SSD  te sobra espacio para años de operación.
+Usar PostgreSQL + TimescaleDB (con compresión activa):
+La compresión columnar reduce los 18 GB anuales a menos de  2 GB .
+Con un disco de  60 a 80 GB SSD  puedes guardar 3 a 5 años de datos completos sin purgar nada.
+Perfil de servidor VPS sugerido para este proyecto:
+Para mover Odoo 17, PostgreSQL/PostGIS, el broker MQTT y el microservicio sin cuellos de botella:
+CPU:  4 vCPU.
+RAM:  8 GB (mínimo 4 GB, pero 8 GB permite a PostgreSQL cachear índices en memoria y evita que Odoo use swap).
+Almacenamiento:   120 a 160 GB SSD / NVMe .
+¿Querés que veamos cómo automatizar los backups diarios comprimidos hacia un almacenamiento en la nube?
+Sí
+Has dicho  Si, veamos como antomatizar los backups diarios comprimidos... en realidad, todo el programa, lo qui…
+Si, veamos como antomatizar los backups diarios comprimidos... en realidad, todo el programa, lo quiero tener en un VPS
+Para respaldar un entorno completo de Odoo y PostgreSQL en un VPS de producción,  no basta con respaldar la base de datos : también es obligatorio respaldar el   filestore   de Odoo (donde se almacenan los adjuntos, fotos de unidades, documentos de seguro e imágenes de la flota) y tus módulos personalizados.
+La estrategia más sólida y estándar en entornos Linux con Docker es utilizar un script en Bash automatizado con  cron  que genere un archivo comprimido  .tar.gz  con fecha, aplique retención local y lo sincronice con un almacenamiento externo (como Google Drive, AWS S3 o un servidor remoto) usando  Rclone .
+1. Estructura de respaldos en el VPS
+Creá una carpeta dedicada para los backups fuera del árbol del proyecto:
+Bash
+sudo mkdir -p /opt/backups/flota
+sudo chown -R  $USER : $USER  /opt/backups
+2. El script de respaldo automatizado ( backup_flota.sh )
+Creá el script en  /opt/backups/backup_flota.sh :
+Bash
+nano /opt/backups/backup_flota.sh
+Pegá el siguiente contenido:
+Bash
+#!/usr/bin/env bash
+# ==============================================================================
+# Script de Respaldo Integral: PostgreSQL + Odoo Filestore + Addons
+# ==============================================================================
+set  -eo pipefail
+# 1. Variables de configuración
+TIMESTAMP=$(date + "%Y%m%d_%H%M%S" )
+BACKUP_DIR= "/opt/backups/flota"
+TEMP_DIR= " ${BACKUP_DIR} /temp_ ${TIMESTAMP} "
+RETENTION_DAYS=7    # Días que se conservan backups locales en el VPS
+# Nombres de contenedores y base de datos (según tu docker-compose)
+DB_CONTAINER= "transporte_odoo-db-1"
+DB_USER= "odoo"
+DB_NAME= "flota_db"
+# Rutas del proyecto y volúmenes
+PROJECT_DIR= "/opt/transporte_odoo"
+ODOO_FILESTORE_VOLUME= "transporte_odoo_odoo-web-data"   # Nombre del volumen docker
+FINAL_ARCHIVE= " ${BACKUP_DIR} /backup_completo_ ${DB_NAME} _ ${TIMESTAMP} .tar.gz"
+echo   "[ $(date) ] Iniciando proceso de respaldo..."
+# Crear directorios temporales
+mkdir -p  " ${TEMP_DIR} /db"
+mkdir -p  " ${TEMP_DIR} /filestore"
+mkdir -p  " ${TEMP_DIR} /config_custom"
+# 2. Dump de la Base de Datos PostgreSQL (en formato binario comprimido)
+echo   "[ $(date) ] Extrayendo base de datos PostgreSQL ( ${DB_NAME} )..."
+docker  exec  -t  " ${DB_CONTAINER} "  pg_dump -U  " ${DB_USER} "  -d  " ${DB_NAME} "  -F c -b -v -f  "/tmp/db_dump_ ${TIMESTAMP} .dump"
+docker cp  " ${DB_CONTAINER} :/tmp/db_dump_ ${TIMESTAMP} .dump"   " ${TEMP_DIR} /db/ ${DB_NAME} .dump"
+docker  exec  -t  " ${DB_CONTAINER} "  rm  "/tmp/db_dump_ ${TIMESTAMP} .dump"
+# 3. Copia del Filestore de Odoo (imágenes, adjuntos, reportes PDF)
+echo   "[ $(date) ] Copiando filestore de Odoo..."
+# Se copia directamente del volumen local de Docker
+docker run --rm -v  " ${ODOO_FILESTORE_VOLUME} :/data:ro"  -v  " ${TEMP_DIR} /filestore:/backup"  alpine cp -a /data/filestore /backup/
+# 4. Copia de configuraciones y módulos custom
+echo   "[ $(date) ] Respaldando módulos personalizados y configuración..."
+cp -r  " ${PROJECT_DIR} /custom_addons"   " ${TEMP_DIR} /config_custom/"
+cp  " ${PROJECT_DIR} /config/odoo.conf"   " ${TEMP_DIR} /config_custom/"
+cp  " ${PROJECT_DIR} /docker-compose.yml"   " ${TEMP_DIR} /config_custom/"
+# 5. Comprimir todo en un único archivo .tar.gz
+echo   "[ $(date) ] Empaquetando y comprimiendo archivo final..."
+tar -czf  " ${FINAL_ARCHIVE} "  -C  " ${TEMP_DIR} "  .
+# Limpieza temporal
+rm -rf  " ${TEMP_DIR} "
+echo   "[ $(date) ] Archivo generado con éxito:  ${FINAL_ARCHIVE}  ( $(du -h  " ${FINAL_ARCHIVE} "  | awk '{print $1}') )"
+# 6. Purgar backups locales antiguos (mantener últimos 7 días)
+echo   "[ $(date) ] Eliminando backups locales con más de  ${RETENTION_DAYS}  días..."
+find  " ${BACKUP_DIR} "  -name  "backup_completo_*.tar.gz"  -mtime + " ${RETENTION_DAYS} "  - exec  rm -f {} \;
+# 7. Sincronizar a la nube con Rclone (Opcional pero crítico)
+# Si configurás un remote llamado 'remote_flota' (Google Drive, S3, etc.):
+if   command  -v rclone &> /dev/null;  then
+echo   "[ $(date) ] Sincronizando respaldo con almacenamiento en la nube (Rclone)..."
+rclone copy  " ${FINAL_ARCHIVE} "  remote_flota:backups_flota_vps/
+fi
+echo   "[ $(date) ] Proceso de respaldo finalizado exitosamente."
+Asignale permisos de ejecución:
+Bash
+chmod +x /opt/backups/backup_flota.sh
+3. Conectar a almacenamiento en la nube con Rclone (Google Drive o S3)
+Tener el backup solo en el disco del VPS no te protege si el proveedor del servidor tiene una falla de hardware o se corrompe el disco.  Rclone  es la herramienta estándar en Linux para enviar archivos a servicios externos:
+Instalar Rclone en el VPS:
+Bash
+sudo apt update && sudo apt install rclone -y
+Configurar el destino remoto:
+Bash
+rclone config
+Creá un nuevo remoto llamado  remote_flota .
+Podés elegir  Google Drive  (tipo  drive ),  AWS S3 / Cloudflare R2  (tipo  s3 ), o  SFTP  hacia otro servidor.
+Siguiendo los pasos interactivos, Rclone queda autenticado.
+4. Automatizar la ejecución diaria con Cron
+Para que el script se ejecute todas las madrugadas sin intervención manual:
+Abrí el crontab del usuario root:
+Bash
+sudo crontab -e
+Agregá la siguiente línea al final (se ejecutará todos los días a las  03:00 AM  y dejará un log de auditoría):
+Fragmento de código
+0 3 * * * /opt/backups/backup_flota.sh >> /var/log/backup_flota.log 2>&1
+5. ¿Cómo restaurar todo en caso de desastre?
+Si el VPS se borra por completo o levantás un servidor nuevo, la restauración toma menos de 10 minutos:
+1
+Descomprimir el archivo de respaldo
+1.  Descomprimir el archivo de respaldo:
+Extraé el contenido del archivo  .tar.gz :
+Bash
+mkdir /tmp/restore && tar -xzf backup_completo_flota_db_*.tar.gz -C /tmp/restore
+2
+Restaurar el código y levantar los contenedores
+2.  Restaurar el código y levantar los contenedores:
+Copiá tus carpetas  custom_addons ,  config  y  docker-compose.yml  a  /opt/transporte_odoo/  y levantá únicamente el contenedor de la base de datos:
+Bash
+docker compose up -d db
+3
+Restaurar la base de datos PostgreSQL
+3.  Restaurar la base de datos PostgreSQL:
+Copiá el archivo  .dump  dentro del contenedor de base de datos y ejecutá  pg_restore :
+Bash
+docker cp /tmp/restore/db/flota_db.dump transporte_odoo-db-1:/tmp/flota_db.dump
+docker exec -t transporte_odoo-db-1 pg_restore -U odoo -d flota_db --clean --no-owner /tmp/flota_db.dump
+4
+Restaurar el filestore de Odoo
+4.  Restaurar el filestore de Odoo:
+Copiá los adjuntos al volumen de Odoo:
+Bash
+docker run --rm -v transporte_odoo_odoo-web-data:/target -v /tmp/restore/filestore:/backup alpine cp -a /backup/filestore /target/
+5
+Iniciar todos los servicios
+5.  Iniciar todos los servicios:
+Levantá el entorno completo:
+Bash
+docker compose up -d
+Con este esquema tenés una política de respaldo 3-2-1 (copias locales de retención corta para restaurar rápido y copia externa en la nube para recuperación ante desastres).
+Para completar el despliegue del VPS en producción:
+Configurar Nginx con SSL/HTTPS gratuito (Certbot/Let's Encrypt)
+Configurar reglas de firewall (UFW) y seguridad básica para el VPS
+PDF
+Resolucion GVMT 65-2024
+Has dicho  Estos son los datos que el Viceministerio de Transporte había solicitado a las empresas para que env…
+Estos son los datos que el Viceministerio de Transporte había solicitado a las empresas para que envíen a sus servidores...
+Cómo le digo a la empresa de transporte que quiero también que apunte o envíe a mi servidor? Quiero la nota de pedido bien formateado en word, con las especificaciones técnicas...
+Aparte quiero las especificaciones técnicas de cómo enviará la empresa GPS los datos, para pasarle a mi Agente en el IDE Antigravity
+El requerimiento de la  Resolución GVMT N° 065/2024  establece la obligatoriedad de transmitir datos operativos mediante un  Broker de Mensajería , serializados en formato binario  Protocol Buffers (Protobuf v3)  cada  10 segundos                                                                                                     .
+PDF
+Para que la empresa de transporte (o su proveedor tecnológico de GPS) no tenga que desarrollar nada nuevo, el enfoque consiste en  solicitar un  mirroring  (espejado/doble publicación)  hacia tu propio broker. Como ya tienen la rutina armada y empaquetada para el Viceministerio, solo deben replicar el envío hacia las credenciales de tu servidor.
+PARTE 1: Modelo de Nota Formal para Word
+A continuación tienes la redacción formal con estructura ejecutiva. Puedes copiarla directamente en Microsoft Word:
+NOTA N.º [NÚMERO]/2026
+Asunción, [Día] de [Mes] de 2026
+Señores
+[NOMBRE DE LA EMPRESA OPERADORA DE TRANSPORTE / RAZÓN SOCIAL]
+Dirección de Operaciones / Departamento de Tecnología (TIC)
+Presente
+Referencia:  Solicitud de retransmisión ( mirroring ) de datos telemáticos y operativos según estándar de la Resolución GVMT N.º 065/2024.
+De nuestra mayor consideración:
+Por medio de la presente, nos dirigimos a ustedes con el propósito de coordinar la integración y recepción directa de la telemetría operativa correspondiente al parque automotor asignado a nuestros servicios, con el objetivo de alimentar de manera centralizada nuestro sistema integral de control de flota, cumplimiento de itinerarios y mantenimiento predictivo.
+Considerando que su representada ya cuenta con la infraestructura tecnológica y las rutinas de transmisión activas conforme a las disposiciones de la  Resolución GVMT N.º 065/2024  ( "Por la cual se establece la obligatoriedad de la transmisión de datos operativos por parte de las empresas operadoras de transporte público de pasajeros del Área Metropolitana de Asunción" ), solicitamos formalmente la habilitación de un canal secundario de publicación ( mirroring  o replicación de flujo) hacia nuestra infraestructura de servidores                                                                                                    .
+PDF
+A fin de evitar retrabajos de desarrollo por parte de su equipo técnico o de su proveedor de rastreo satelital/AVL,  nuestro servidor receptor adopta de forma nativa la misma especificación técnica, esquema Protocol Buffers y frecuencia estipulada en el Anexo 1 de la citada resolución ministerial                                                                                                     .
+PDF
+A tales efectos, solicitamos instruir a su área técnica o proveedor satelital para que configure la retransmisión hacia los siguientes parámetros de conexión:
+1. Parámetros de Conexión al Broker (Servidor Destino)
+Protocolo:  MQTT / MQTTS (TCP)
+Host / Servidor:   broker.tudominio.com   (o IP de tu VPS)
+Puerto:   1883  (estándar) /  8883  (TLS/SSL)
+Usuario (Username):   [USUARIO_ASIGNADO]
+Contraseña (Password):   [CONTRASEÑA_GENERADA]
+Tópico de publicación (Topic):   transporte/flota/[agency_id]/operacion
+Nivel de Servicio (QoS):  QoS 1
+2. Especificaciones de la Carga Útil (Payload)
+Formato del Mensaje:  Binario serializado en  Protocol Buffers v3  según esquema  Operation  (Anexo 1 - Res. GVMT N.º 065/2024)                                                                                                    .
+PDF
+Frecuencia de Envío:  Un (1) mensaje cada diez (10) segundos por unidad activa en servicio                                                                                                    .
+PDF
+Agradeceremos que su equipo técnico se ponga en contacto con nuestro responsable de desarrollo, el Sr.  [Tu Nombre/Contacto] , al correo electrónico  [tu-email@dominio.com]  o al teléfono  [+595 9XX XXXXXX] , a fin de coordinar las pruebas de conectividad y validación de tramas.
+Sin otro particular y agradeciendo desde ya su constante predisposición para la mejora tecnológica del servicio, les saludamos muy atentamente.
+_________________________________
+[Firma y Aclaración]
+[Cargo / Dirección de Operaciones]
+[Nombre de tu Organización / Empresa]
+PARTE 2: Especificación Técnica de Ingeniería (Para tu Agente en Antigravity / Cursor / Claude Code)
+Pega el siguiente bloque técnico directamente a tu agente de IA en el IDE para que genere el decodificador de Protobuf, el consumidor MQTT y el microservicio de ingesta:
+Markdown
+# ESPECIFICACIÓN TÉCNICA: INGESTA TELEMÁTICA DE TRANSPORTE PÚBLICO
+Estándar normativo: Resolución GVMT N° 065/2024 (Viceministerio de Transporte - Paraguay)
+## 1. Esquema Protocol Buffer (proto3)
+El proveedor transmitirá el payload en formato binario serializado respetando exactamente el siguiente contrato protobuf:
+```protobuf
+syntax = "proto3";
+package transit.telemetry;
+import "google/protobuf/timestamp.proto";
+message Operation {
+enum OperationType {
+INICIADO = 0;
+FINALIZADO = 1;
+OPERANDO = 2;
+SUSPENDIDO = 3;
+}
+// Campos Requeridos
+int32 identidad = 1;                    // ID de la entidad emisora
+string agency_id = 2;                   // ID de la Empresa Operadora de Transporte
+string mean_id = 3;                     // Identificador de la unidad/bus (placa o interno)
+string route_id = 4;                    // Identificador de la ruta o ramal
+string driver_id = 5;                   // ID o documento del conductor
+OperationType type = 6;                 // Estado operativo del servicio
+int32 accuracy = 7;                     // Precisión del GPS en metros
+double latitude = 8;                    // Latitud WGS 84
+double longitude = 9;                   // Longitud WGS 84
+google.protobuf.Timestamp datetime = 13;// Fecha/Hora UTC de emisión del mensaje
+// Campos Opcionales
+double altitude = 10;                   // Altitud en metros sobre el nivel del mar
+double bearing = 11;                    // Rumbo/Dirección en grados (0° a 360°)
+double speed = 12;                      // Velocidad del móvil en km/h
+}
+2. Requerimientos de Red y Transporte
+Protocolo de capa de aplicación:  MQTT v3.1.1 o v5.0.
+Frecuencia de muestreo:  10 segundos por bus.
+Topología de topics en el Broker:   transporte/flota/{agency_id}/operacion  (donde se publica el binario).
+3. Arquitectura del Ingestor en Antigravity
+Debes implementar un servicio consumidor desacoplado en Python (usando  aiomqtt  o  paho-mqtt  +  asyncpg ):
+Decodificación Protobuf:
+Compilar el archivo  .proto  con  protoc .
+Deserializar  Operation.FromString(payload_bytes) .
+Convertir  datetime  ( google.protobuf.Timestamp ) a objetos  datetime.datetime  con zona horaria UTC explícita.
+Capa de Almacenamiento (PostgreSQL + PostGIS):
+Insertar de forma masiva o asíncrona en la tabla particionada  telemetry_ping :
+bus_internal_code  =  mean_id
+recorded_at  =  datetime
+geom  =  ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+speed_kmh  =  speed
+heading_degrees  =  bearing
+Capa de Detección de Eventos (Hacia Odoo ERP):
+Evaluar si el bus cambia de estado ( type == INICIADO  o  type == FINALIZADO ) o si entra/sale de las geocercas de cabeceras/paradas.
+Si se detecta un hito de despacho, invocar el webhook HTTP de Odoo ( /api/v1/transit/events ) enviando  license_plate = mean_id ,  event_type  ('departure'/'arrival') y  timestamp .
+IMPORTANTE:  No enviar los pings continuos de  OPERANDO  a Odoo; solo los eventos discretos consolidados.
+Iniciar sesión
+Gemini puede mostrar información imprecisa (incluidos datos sobre personas), así que verifica sus respuestas.
+Política de Privacidad de Google  Se abre en una ventana nueva         Términos del Servicio de Google  Se abre en una ventana nueva          Tu privacidad y las aplicaciones de Gemini  Se abre en una ventana nueva                                           this.gbar_=this.gbar_||{};(function(_){var window=this;
+try{
+/*
+Copyright Google LLC
+SPDX-License-Identifier: Apache-2.0
+*/
+var Qd;_.Od=function(a){var b=a.length;if(b>0){let c=Array(b);for(let d=0;d b.substr(0,a.length+1).toLowerCase()===a+":")};_.Rd=globalThis.trustedTypes;_.Sd=class{constructor(a){this.j=a}toString(){return this.j}};_.Td=new _.Sd("about:invalid#zClosurez");_.Pd=class{constructor(a){this.Wi=a}};_.Ud=[Qd("data"),Qd("http"),Qd("https"),Qd("mailto"),Qd("ftp"),new _.Pd(a=>/^[^:]*([/?#]|$)/.test(a))];_.Vd=class{constructor(a){this.j=a}toString(){return this.j+""}};_.Wd=new _.Vd(_.Rd?_.Rd.emptyHTML:"");
+}catch(e){_._DumpException(e)}
+try{
+_.Xd=function(a){if(a==null)return a;if(typeof a==="string"&&a)a=+a;else if(typeof a!=="number")return;return(0,_.Ra)(a)?a|0:void 0};_.Yd=function(a,b){return a.lastIndexOf(b,0)==0};
+}catch(e){_._DumpException(e)}
+try{
+var $d,le,Zd,ae,oe,ge;$d=function(){var a=null;if(!Zd)return a;try{let b=c=>c;a=Zd.createPolicy("ogb-qtm#html",{createHTML:b,createScript:b,createScriptURL:b})}catch(b){}return a};_.be=function(){ae===void 0&&(ae=$d());return ae};_.de=function(a){var b=_.be();a=b?b.createScriptURL(a):a;return new _.ce(a)};_.ee=function(a){if(a instanceof _.ce)return a.j;throw Error("x");};_.fe=function(a){if(a instanceof _.Sd)return a.j;throw Error("x");};_.he=function(a){if(ge.test(a))return a};
+_.ie=function(a){return a instanceof _.Sd?_.fe(a):_.he(a)};_.je=function(a,b=document){var c,d=(c=b.querySelector)==null?void 0:c.call(b,`${a}[nonce]`);return d==null?"":d.nonce||d.getAttribute("nonce")||""};_.R=function(a,b,c){return _.Qa(_.Pc(a,b,c,_.Oc))};_.ke=function(a,b){return _.Xd(_.Pc(a,b,void 0,_.Oc))};le=class extends _.P{constructor(a){super(a)}oc(a){return _.N(this,24,a)}};_.me=function(){return _.E(_.kd,le,1)};
+_.ne=function(a){var b=_.Oa(a);return b=="array"||b=="object"&&typeof a.length=="number"};Zd=_.Rd;_.ce=class{constructor(a){this.j=a}toString(){return this.j+""}};ge=/^\s*(?!javascript:)(?:[\w+.-]+:|[^:/?#]*(?:[/?#]|$))/i;var ue,ye,pe;_.re=function(a){return a?new pe(_.qe(a)):oe||(oe=new pe)};_.se=function(a,b){return typeof b==="string"?a.getElementById(b):b};_.S=function(a,b){var c=b||document;c.getElementsByClassName?a=c.getElementsByClassName(a)[0]:(c=document,a=a?(b||c).querySelector(a?"."+a:""):_.te(c,"*",a,b)[0]||null);return a||null};_.te=function(a,b,c,d){a=d||a;return(b=b&&b!="*"?String(b).toUpperCase():"")||c?a.querySelectorAll(b+(c?"."+c:"")):a.getElementsByTagName("*")};
+_.ve=function(a,b){_.Db(b,function(c,d){d=="style"?a.style.cssText=c:d=="class"?a.className=c:d=="for"?a.htmlFor=c:ue.hasOwnProperty(d)?a.setAttribute(ue[d],c):_.Yd(d,"aria-")||_.Yd(d,"data-")?a.setAttribute(d,c):a[d]=c})};ue={cellpadding:"cellPadding",cellspacing:"cellSpacing",colspan:"colSpan",frameborder:"frameBorder",height:"height",maxlength:"maxLength",nonce:"nonce",role:"role",rowspan:"rowSpan",type:"type",usemap:"useMap",valign:"vAlign",width:"width"};
+_.we=function(a){return a?a.defaultView:window};_.ze=function(a,b){var c=b[1],d=_.xe(a,String(b[0]));c&&(typeof c==="string"?d.className=c:Array.isArray(c)?d.className=c.join(" "):_.ve(d,c));b.length>2&&ye(a,d,b,2);return d};ye=function(a,b,c,d){function e(f){f&&b.appendChild(typeof f==="string"?a.createTextNode(f):f)}for(;d 0?e(f):_.ec(f&&typeof f.length=="number"&&typeof f.item=="function"?_.Od(f):f,e)}};
+_.Ae=function(a){return _.xe(document,a)};_.xe=function(a,b){b=String(b);a.contentType==="application/xhtml+xml"&&(b=b.toLowerCase());return a.createElement(b)};_.Be=function(a,b){a.appendChild(b)};_.Ce=function(a){for(var b;b=a.firstChild;)a.removeChild(b)};_.De=function(a){return a&&a.parentNode?a.parentNode.removeChild(a):null};_.Ee=function(a,b){return a&&b?a==b||a.contains(b):!1};_.qe=function(a){return a.nodeType==9?a:a.ownerDocument||a.document};pe=function(a){this.j=a||_.t.document||document};
+_.m=pe.prototype;_.m.H=function(a){return _.se(this.j,a)};_.m.getElementsByTagName=function(a,b){return(b||this.j).getElementsByTagName(String(a))};_.m.Ta=function(a,b,c){return _.ze(this.j,arguments)};_.m.appendChild=_.Be;_.m.append=function(a,b){ye(_.qe(a),a,arguments,1)};_.m.canHaveChildren=function(a){if(a.nodeType!=1)return!1;switch(a.tagName){case "APPLET":case "AREA":case "BASE":case "BR":case "COL":case "COMMAND":case "EMBED":case "FRAME":case "HR":case "IMG":case "INPUT":case "IFRAME":case "ISINDEX":case "KEYGEN":case "LINK":case "NOFRAMES":case "NOSCRIPT":case "META":case "OBJECT":case "PARAM":case "SCRIPT":case "SOURCE":case "STYLE":case "TRACK":case "WBR":return!1}return!0};
+_.m.uf=_.Ce;_.m.Yg=_.De;_.m.contains=_.Ee;
+}catch(e){_._DumpException(e)}
+try{
+_.aj=function(a,b){a.src=_.ee(b).toString()};_.bj=function(a){var b=_.je("script",a.ownerDocument);b&&a.setAttribute("nonce",b)};_.cj=function(a,b){a.src=_.ee(b);_.bj(a)};_.dj=function(a){if(!a)return null;a=_.K(a,4);var b;a===null||a===void 0?b=null:b=_.de(a);return b};_.ej=function(a,b,c){a=a.ma;return _.Ab(a,a[_.v]|0,b,c)!==void 0};_.fj=class extends _.P{constructor(a){super(a)}};_.gj=function(a,b){return(b||document).getElementsByTagName(String(a))};
+}catch(e){_._DumpException(e)}
+try{
+var ij=function(a,b){a {window.setTimeout(pj,b)})}})();
+}catch(e){_._DumpException(e)}
+})(this.gbar_);
+// Google Inc.
+Aplicaciones de Google
+Copiar enlace público
+Denunciar
+Copiar petición
+Mostrar texto
+Más opciones
+Descargar código
+Copiar código

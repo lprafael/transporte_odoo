@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_move_form_inherit_sifen" model="ir.ui.view">
+        <field name="name">account.move.form.inherit.sifen</field>
+        <field name="model">account.move</field>
+        <field name="inherit_id" ref="account.view_move_form"/>
+        <field name="arch" type="xml">
+            <!-- Botón en cabecera para emitir a SIFEN -->
+            <xpath expr="//header" position="inside">
+                <button name="action_send_sifen_denarius"
+                        string="Emitir a SIFEN / Denarius"
+                        type="object"
+                        class="btn-success"
+                        invisible="state != 'posted' or sifen_estado == 'aprobado'"/>
+            </xpath>
+
+            <!-- Pestaña de Facturación Electrónica SIFEN Paraguay -->
+            <xpath expr="//notebook" position="inside">
+                <page string="Factura Electrónica SIFEN (Paraguay)">
+                    <group>
+                        <group string="Identificación Electrónica (CDC &amp; QR)">
+                            <field name="sifen_estado" widget="badge"
+                                   decoration-success="sifen_estado == 'aprobado'"
+                                   decoration-warning="sifen_estado in ('pendiente', 'firmado')"
+                                   decoration-danger="sifen_estado == 'rechazado'"
+                                   decoration-muted="sifen_estado == 'no_enviado'"/>
+                            <field name="sifen_cdc"/>
+                            <field name="sifen_qr_url" widget="url"/>
+                        </group>
+                        <group string="Datos del Comprobante">
+                            <field name="sifen_tipo_documento"/>
+                            <field name="sifen_establecimiento"/>
+                            <field name="sifen_punto_expedicion"/>
+                            <field name="sifen_numero"/>
+                        </group>
+                    </group>
+                    <group string="Auditoría y Mensaje de SIFEN / Denarius">
+                        <field name="sifen_mensaje_respuesta"/>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Herencia en vista de lista de Facturas -->
+    <record id="view_invoice_tree_inherit_sifen" model="ir.ui.view">
+        <field name="name">account.invoice.tree.inherit.sifen</field>
+        <field name="model">account.move</field>
+        <field name="inherit_id" ref="account.view_invoice_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='status_in_payment']" position="after">
+                <field name="sifen_estado" widget="badge"
+                       decoration-success="sifen_estado == 'aprobado'"
+                       decoration-warning="sifen_estado in ('pendiente', 'firmado')"
+                       decoration-danger="sifen_estado == 'rechazado'"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>
