@@ -8,6 +8,13 @@ class ResPartner(models.Model):
     # Campos de Conductor / Chofer y Concesionarias
     is_driver = fields.Boolean(string='Es Chofer / Conductor', default=False)
     is_concessionaire = fields.Boolean(string='Es Empresa Concesionaria / Operadora', default=False)
+    concessionaire_id = fields.Many2one(
+        'transit.concessionaire',
+        string='Empresa Concesionaria',
+        index=True,
+        tracking=True,
+        help='Empresa de transporte concesionada a la que pertenece el chofer o colaborador'
+    )
     driver_license_number = fields.Char(string='Nº Registro / Licencia')
     driver_license_category = fields.Selection([
         ('prof_a', 'Profesional A (Transporte Pasajeros Internacional)'),

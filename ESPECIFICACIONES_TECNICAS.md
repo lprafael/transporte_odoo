@@ -35,6 +35,8 @@ El sistema resuelve **once grandes capas** de negocio y tecnología:
     Administración y control directo en Odoo (`transit.timetable`) de los **692 despachos diarios oficiales** de los 6 ramales eléctricos (020c, 020d, 020e, 020f, 0210, 0211), con flexibilidad total para adecuar cuadros de marcha, frecuencias e intervalos sin depender de aprobaciones ni enlaces informáticos externos.
 11. **Capa de Autonomía Operativa y Soberanía Tecnológica (100% Desconectado / Offline-Ready):**  
     Arquitectura autosuficiente con **cero dependencia operativa** de servidores o bases de datos del Viceministerio de Transporte (VMT). La telemetría ingresa directamente desde las unidades en calle hacia el broker interno vía MQTT (Protobuf v3) o REST; los trazados PostGIS, paradas y cuadros de marcha residen localmente en Odoo y PostgreSQL. La extracción inicial desde el CID se realizó exclusivamente como estrategia de migración/siembra rápida (data bootstrapping) por única vez, garantizando inmunidad ante caídas de servicios gubernamentales.
+12. **Capa Multi-Tenant y Gobernanza por Concesionaria (`ir.rule` Security Isolation):**  
+    Arquitectura multi-empresa sobre una sola base de datos PostgreSQL/PostGIS. Cada empresa concesionaria (`transit.concessionaire`) cuenta con aislamiento lógico estricto: sus usuarios (despachadores, jefes de tráfico) solo pueden ver, despachar y auditar sus propios buses, rutas, horarios, choferes y boletos. El perfil de Administrador Global / Regulador (VMT) cuenta con visión 360° no restrictiva para fiscalizar la totalidad de la red metropolitana.
 
 
 ---

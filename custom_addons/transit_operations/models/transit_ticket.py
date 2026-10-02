@@ -9,6 +9,13 @@ class TransitTicket(models.Model):
 
     name = fields.Char(string='Número de Boleto', required=True, copy=False, readonly=True, default='Nuevo')
     dispatch_id = fields.Many2one('transit.dispatch', string='Despacho / Viaje', required=True, ondelete='cascade')
+    concessionaire_id = fields.Many2one(
+        'transit.concessionaire',
+        related='dispatch_id.concessionaire_id',
+        store=True,
+        string='Empresa Concesionaria',
+        index=True
+    )
     route_id = fields.Many2one('transit.route', string='Ruta', related='dispatch_id.route_id', store=True, readonly=True)
     date = fields.Datetime(string='Fecha y Hora', default=fields.Datetime.now, required=True)
 

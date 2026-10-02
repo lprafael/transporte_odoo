@@ -1,22 +1,161 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
+    <!-- Categoría del Módulo -->
     <record model="ir.module.category" id="module_category_transit">
         <field name="name">Operaciones de Transporte</field>
-        <field name="description">Gestión de despachos, rutas, horarios y control de flota de buses</field>
+        <field name="description">Gestión multitenant de despachos, rutas, horarios y control de flotas de buses</field>
         <field name="sequence">25</field>
     </record>
 
+    <!-- ================================================================= -->
+    <!-- GRUPOS DE USUARIOS (ROLES MULTITENANT)                            -->
+    <!-- ================================================================= -->
+
+    <!-- 1. Operador / Despachador de Empresa (Base de Acceso) -->
     <record id="group_transit_user" model="res.groups">
-        <field name="name">Operador / Despachador</field>
+        <field name="name">Operador / Despachador (Empresa)</field>
         <field name="category_id" ref="module_category_transit"/>
-        <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
-        <field name="comment">Acceso a registro de despachos, control de salidas y emisión de boletos.</field>
+        <field name="implied_ids" eval="[(4, ref('base.group_user')), (4, ref('fleet.fleet_group_user'))]"/>
+        <field name="comment">Acceso a registro de despachos, control de salidas y emisión de boletos de su propia empresa.</field>
     </record>
 
-    <record id="group_transit_manager" model="res.groups">
-        <field name="name">Jefe de Tráfico / Administrador</field>
+    <!-- 2. Jefe de Tráfico de Empresa -->
+    <record id="group_transit_company_manager" model="res.groups">
+        <field name="name">Jefe de Tráfico (Empresa)</field>
         <field name="category_id" ref="module_category_transit"/>
-        <field name="implied_ids" eval="[(4, ref('group_transit_user')), (4, ref('fleet.fleet_group_manager'))]"/>
-        <field name="comment">Control total sobre configuración de rutas, horarios, asignaciones y facturación electrónica.</field>
+        <field name="implied_ids" eval="[(4, ref('group_transit_user')), (4, ref('fleet.fleet_group_user'))]"/>
+        <field name="comment">Control de flota, conductores, rutas, cuadros de marcha y evaluaciones de su empresa concesionaria.</field>
+    </record>
+
+    <!-- 3. Administrador Global / Ente Regulador (Torre de Control / VMT) -->
+    <record id="group_transit_manager" model="res.groups">
+        <field name="name">Administrador Global / Regulador (Todas las Empresas)</field>
+        <field name="category_id" ref="module_category_transit"/>
+        <field name="implied_ids" eval="[(4, ref('group_transit_company_manager')), (4, ref('fleet.fleet_group_manager'))]"/>
+        <field name="comment">Control y visibilidad integral sobre todas las empresas concesionarias, auditoría y compensación central.</field>
+    </record>
+
+    <!-- ================================================================= -->
+    <!-- REGLAS DE REGISTRO MULTI-TENANT (RECORD RULES)                     -->
+    <!-- ================================================================= -->
+
+    <!-- 1. Flota de Vehículos: fleet.vehicle -->
+    <record id="fleet_vehicle_concessionaire_rule" model="ir.rule">
+        <field name="name">Flota: Aislamiento por Concesionaria</field>
+        <field name="model_id" ref="fleet.model_fleet_vehicle"/>
+        <field name="domain_force">['|', ('concessionaire_id', '=', False), '|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
+    </record>
+
+    <record id="fleet_vehicle_global_manager_rule" model="ir.rule">
+        <field name="name">Flota: Acceso Global Regulador</field>
+        <field name="model_id" ref="fleet.model_fleet_vehicle"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+    </record>
+
+    <!-- 2. Despachos Diarios: transit.dispatch -->
+    <record id="transit_dispatch_concessionaire_rule" model="ir.rule">
+        <field name="name">Despachos: Aislamiento por Concesionaria</field>
+        <field name="model_id" ref="model_transit_dispatch"/>
+        <field name="domain_force">['|', ('concessionaire_id', '=', False), '|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
+    </record>
+
+    <record id="transit_dispatch_global_manager_rule" model="ir.rule">
+        <field name="name">Despachos: Acceso Global Regulador</field>
+        <field name="model_id" ref="model_transit_dispatch"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+    </record>
+
+    <!-- 3. Rutas e Itinerarios: transit.route -->
+    <record id="transit_route_concessionaire_rule" model="ir.rule">
+        <field name="name">Rutas: Aislamiento por Concesionaria</field>
+        <field name="model_id" ref="model_transit_route"/>
+        <field name="domain_force">['|', ('concessionaire_id', '=', False), '|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
+    </record>
+
+    <record id="transit_route_global_manager_rule" model="ir.rule">
+        <field name="name">Rutas: Acceso Global Regulador</field>
+        <field name="model_id" ref="model_transit_route"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+    </record>
+
+    <!-- 4. Cuadro de Marchas y Horarios: transit.timetable -->
+    <record id="transit_timetable_concessionaire_rule" model="ir.rule">
+        <field name="name">Horarios: Aislamiento por Concesionaria</field>
+        <field name="model_id" ref="model_transit_timetable"/>
+        <field name="domain_force">['|', ('concessionaire_id', '=', False), '|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
+    </record>
+
+    <record id="transit_timetable_global_manager_rule" model="ir.rule">
+        <field name="name">Horarios: Acceso Global Regulador</field>
+        <field name="model_id" ref="model_transit_timetable"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+    </record>
+
+    <!-- 5. Choferes: res.partner -->
+    <record id="res_partner_driver_concessionaire_rule" model="ir.rule">
+        <field name="name">Choferes: Aislamiento por Concesionaria</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="domain_force">['|', ('is_driver', '=', False), '|', ('concessionaire_id', '=', False), '|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
+    </record>
+
+    <record id="res_partner_driver_global_manager_rule" model="ir.rule">
+        <field name="name">Choferes: Acceso Global Regulador</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+    </record>
+
+    <!-- 6. Concesionarias: transit.concessionaire -->
+    <record id="transit_concessionaire_company_rule" model="ir.rule">
+        <field name="name">Concesionaria: Aislamiento Propia Empresa</field>
+        <field name="model_id" ref="model_transit_concessionaire"/>
+        <field name="domain_force">['|', ('id', '=', user.concessionaire_id.id), ('id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
+    </record>
+
+    <record id="transit_concessionaire_global_manager_rule" model="ir.rule">
+        <field name="name">Concesionaria: Acceso Global Regulador</field>
+        <field name="model_id" ref="model_transit_concessionaire"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+    </record>
+
+    <!-- 7. Boletos / Pasajes: transit.ticket -->
+    <record id="transit_ticket_concessionaire_rule" model="ir.rule">
+        <field name="name">Boletos: Aislamiento por Concesionaria</field>
+        <field name="model_id" ref="model_transit_ticket"/>
+        <field name="domain_force">['|', ('concessionaire_id', '=', False), '|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
+    </record>
+
+    <record id="transit_ticket_global_manager_rule" model="ir.rule">
+        <field name="name">Boletos: Acceso Global Regulador</field>
+        <field name="model_id" ref="model_transit_ticket"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+    </record>
+
+    <!-- 8. Patios y Estaciones de Carga EV: transit.charging.station -->
+    <record id="transit_charging_station_concessionaire_rule" model="ir.rule">
+        <field name="name">Estaciones de Carga: Aislamiento por Concesionaria</field>
+        <field name="model_id" ref="model_transit_charging_station"/>
+        <field name="domain_force">['|', ('concessionaire_id', '=', False), '|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
+    </record>
+
+    <record id="transit_charging_station_global_manager_rule" model="ir.rule">
+        <field name="name">Estaciones de Carga: Acceso Global Regulador</field>
+        <field name="model_id" ref="model_transit_charging_station"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
     </record>
 </odoo>

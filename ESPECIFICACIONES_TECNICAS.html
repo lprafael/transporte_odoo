@@ -211,6 +211,10 @@
 <li><strong>Capa de Autonomía Operativa y Soberanía Tecnológica (100% Desconectado / Offline-Ready):</strong>  </li>
 </ol>
 <p>    Arquitectura autosuficiente con <strong>cero dependencia operativa</strong> de servidores o bases de datos del Viceministerio de Transporte (VMT). La telemetría ingresa directamente desde las unidades en calle hacia el broker interno vía MQTT (Protobuf v3) o REST; los trazados PostGIS, paradas y cuadros de marcha residen localmente en Odoo y PostgreSQL. La extracción inicial desde el CID se realizó exclusivamente como estrategia de migración/siembra rápida (data bootstrapping) por única vez, garantizando inmunidad ante caídas de servicios gubernamentales.</p>
+<ol>
+<li><strong>Capa Multi-Tenant y Gobernanza por Concesionaria (<code>ir.rule</code> Security Isolation):</strong>  </li>
+</ol>
+<p>    Arquitectura multi-empresa sobre una sola base de datos PostgreSQL/PostGIS. Cada empresa concesionaria (<code>transit.concessionaire</code>) cuenta con aislamiento lógico estricto: sus usuarios (despachadores, jefes de tráfico) solo pueden ver, despachar y auditar sus propios buses, rutas, horarios, choferes y boletos. El perfil de Administrador Global / Regulador (VMT) cuenta con visión 360° no restrictiva para fiscalizar la totalidad de la red metropolitana.</p>
 <br>
 <br>
 <hr>

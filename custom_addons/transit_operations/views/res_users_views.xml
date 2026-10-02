@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Extensión de Formulario de Usuarios (res.users) para Multi-Tenancy de Transporte -->
+    <record id="view_users_form_inherit_transit" model="ir.ui.view">
+        <field name="name">res.users.form.inherit.transit</field>
+        <field name="model">res.users</field>
+        <field name="inherit_id" ref="base.view_users_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="Concesión de Transporte (Multi-Tenant)" name="transit_tenancy">
+                    <group>
+                        <group string="Asignación Operativa">
+                            <field name="concessionaire_id" options="{'no_create': True}"/>
+                        </group>
+                        <group string="Acceso Multi-Empresa">
+                            <field name="concessionaire_ids" widget="many2many_tags" options="{'no_create': True}"/>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -220,6 +220,11 @@ class TransitDispatch(models.Model):
                 rec.check_validator
             )
 
+    @api.depends('vehicle_id.concessionaire_id', 'route_id.concessionaire_id')
+    def _compute_concessionaire_id(self):
+        for rec in self:
+            rec.concessionaire_id = rec.vehicle_id.concessionaire_id or rec.route_id.concessionaire_id or False
+
     @api.depends('scheduled_departure', 'timetable_id.scheduled_duration_minutes')
     def _compute_scheduled_arrival(self):
         for rec in self:

@@ -10,6 +10,7 @@
                     <group>
                         <group string="Habilitación de Chofer">
                             <field name="is_driver"/>
+                            <field name="concessionaire_id" invisible="not is_driver"/>
                             <field name="driver_license_number" invisible="not is_driver"/>
                             <field name="driver_license_category" invisible="not is_driver"/>
                             <field name="driver_license_expiry" invisible="not is_driver"/>

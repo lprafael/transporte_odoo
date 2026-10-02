@@ -45,6 +45,7 @@ Sistema Integral de Transporte de Pasajeros y Flota de Buses:
         'views/transit_concessionaire_views.xml',
         'views/fleet_vehicle_views.xml',
         'views/res_partner_views.xml',
+        'views/res_users_views.xml',
         'views/transit_route_views.xml',
         'views/transit_timetable_views.xml',
         'views/transit_dispatch_views.xml',

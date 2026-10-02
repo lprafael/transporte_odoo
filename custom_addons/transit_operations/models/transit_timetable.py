@@ -7,6 +7,13 @@ class TransitTimetable(models.Model):
     _order = 'departure_time_float asc'
 
     route_id = fields.Many2one('transit.route', string='Ruta / Ramal', required=True, ondelete='cascade')
+    concessionaire_id = fields.Many2one(
+        'transit.concessionaire',
+        related='route_id.concessionaire_id',
+        store=True,
+        string='Empresa Concesionaria',
+        index=True
+    )
     service_code = fields.Char(string='Código de Servicio / Vuelta', help='Ej: S01, V04')
     
     # Hora en formato decimal (ej: 6.5 = 06:30, 14.75 = 14:45)

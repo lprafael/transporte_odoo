@@ -3,6 +3,7 @@ from . import sifen_util
 from . import transit_concessionaire
 from . import fleet_vehicle
 from . import res_partner
+from . import res_users
 from . import transit_route
 from . import transit_route_shape
 from . import transit_route_checkpoint
