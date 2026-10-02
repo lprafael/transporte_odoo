@@ -103,9 +103,15 @@ El sistema resuelve **once grandes capas** de negocio y tecnología:
 
 #### 3.1. Gestión de Flota y Activos (`fleet.vehicle`)
 Extiende el módulo oficial `fleet` de Odoo 18:
-* **Identificación del Bus:** Campo `bus_internal_number` (Número de Coche/Interno, ej: `104` o `00016`).
-* **Capacidad de Pasajeros:** Asientos reglamentarios (`seating_capacity`) y capacidad de pasajeros de pie (`standing_capacity`).
-* **Equipamiento Operativo:** Aire Acondicionado (`has_air_conditioning`), Rampa para sillas de ruedas / Movilidad Reducida (`has_wheelchair_ramp`), e Identificador del Validador de Billetaje (`validator_terminal_id`).
+* **Identificación del Bus:** Campo `bus_internal_number` (Número de Coche/Interno, ej: `01` al `30`).
+* **Fabricante y Origen:** **Master Transportation Bus Manufacturing Ltd. (Master Bus)**, origen taiwanés. Complejo fabril y ensamblaje local instalado en Minga Guazú (Alto Paraná), dentro del Parque Tecnológico Inteligente de Taiwán, orientado al mercado nacional y exportación al Mercosur.
+* **Modelos Homologados en el Sistema:**
+  1. `Master Bus MB120NSE - 12m Piso Bajo Urbano (LTO Carga Rápida)`: 45 asientos, 25 parados (70 pasajeros totales), rampa de accesibilidad para movilidad reducida, batería LTO de 350 kWh y autonomía estimada de 280 km.
+  2. `Master Bus MB90NSE - 9m Piso Bajo Urbano (LTO Carga Rápida)`: 32 asientos, 18 parados (50 pasajeros totales), rampa para sillas de ruedas, batería LTO de 260 kWh y autonomía estimada de 240 km.
+  3. `Master Bus MB120Inter - 12m Interurbano (LTO Carga Rápida)`: 49 asientos reclinables, 10 parados (59 pasajeros totales), batería LTO de 380 kWh y autonomía de 320 km.
+* **Electrificación y Tecnología de Baterías:** Tecnología de **Baterías LTO (Lithium Titanate Oxide / Titanato de Litio)** de carga ultra-rápida (15-20 minutos en cabecera/patio), conector estándar **GB/T** (Res. GVMT 065/2024), telemetría de estado de carga (`current_soc`), estado de salud (`current_soh` ~99.5%) y validación de pre-acondicionamiento térmico de cabina.
+* **Flota Activa Vinculada (Sincronización CID / VMT):** 30 unidades 100% eléctricas (Coches 1 al 30) adjudicadas al Consorcio Arapoti (Agencia `004B` / Línea 20 Eléctrica), con chapas oficiales RUA (`IOT093` a `IOT129`), números de chasis (`RHVALCLE...`), IDSAM de validador de billetaje electrónico y certificados de Inspección Técnica Vehicular (ITV Ivesur) y seguros vigentes.
+* **Equipamiento Operativo:** Aire Acondicionado de alta capacidad (`has_air_conditioning`), Rampa para sillas de ruedas / Movilidad Reducida (`has_wheelchair_ramp`), e Identificador del Validador de Billetaje (`validator_terminal_id`).
 * **Control Legal y Vencimientos:** Fechas de expiración de **Inspección Técnica Vehicular (ITV)** y **Póliza de Seguros**, con semáforo dinámico de alerta:
   * `vigente` (Verde)
   * `por_vencer` (Amarillo: menos de 30 días)
