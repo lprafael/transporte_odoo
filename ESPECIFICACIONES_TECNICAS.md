@@ -718,29 +718,59 @@ eta_minutos     = (km_restantes / velocidad_media) * 60
 - API REST: `GET /api/v1/eta/{stop_code}` y `GET /api/v1/eta/all`
 - Muestra hasta 3 buses proximos ordenados por ETA
 
-#### 15.2. Dashboard de Cumplimiento Regulatorio (`compliance_service.py`)
+#### 15.2. Dashboard de Cumplimiento Regulatorio e ICF Provisorio (`compliance_service.py`)
 
-Monitoreo en tiempo real del cumplimiento de la cuota diaria de **692 despachos** exigida por la Resolucion GVMT 065/2024.
+Monitoreo y auditoría en tiempo real del cumplimiento de la programación operativa y cuotas regulatorias, 100% parametrizado desde base de datos (`transit_service`, `transit_route`, `transit_timetable`) con soporte multilínea (Línea 20 E1, E2, E3, Búhos B1-B4 y otras concesiones).
 
-**Metricas calculadas:**
-| Metrica | Fuente | Descripcion |
-|---|---|---|
-| Despachos ejecutados | `telemetry_ping (type=0)` | Pings de inicio de operacion (salida de cabecera) |
-| Despachos programados | `transit_timetable` | Cuadros de marcha vigentes del CID |
-| % Cumplimiento | Calculado | `(ejecutados / 692) * 100` |
-| Proyeccion al cierre | Calculado | Tasa horaria * horas restantes |
-| Historial 30 dias | `telemetry_ping` | Tendencia de cumplimiento reciente |
+**Cálculo Oficial de ICF Provisorio (Decreto N° 710/2023 - Apéndice 11):**
+$$\text{ICF (\%)} = \min\left(\frac{S_{\text{obs}}}{S_{\text{prog}}} \times 100, 100\right)$$
+- **Franjas Horarias Oficiales (Tipo Día 5 - Laboral):**
+  * Pico Mañana (05:00 - 08:00): Hora Pico
+  * Pos-Pico Día (08:00 - 16:00): Hora Pos-Pico
+  * Pico Tarde (16:00 - 19:00): Hora Pico
+  * Pos-Pico Noche (19:00 - 21:00): Hora Pos-Pico
+- **Fines de Semana y Feriados (Tipo Día 6 y 7):** Operación FdS/Feriado (Hora Pos-Pico).
+- **Escala de Reconocimiento Apéndice 11:**
+  * $\text{ICF} \ge 100\% \implies 100\%$ reconocimiento de salidas.
+  * $90\% \le \text{ICF} < 100\% \implies 80\%$ (Pico) / $85\%$ (Pos-Pico / FdS).
+  * $80\% \le \text{ICF} < 90\% \implies 70\%$ (Pico) / $75\%$ (Pos-Pico / FdS).
+  * $\text{ICF} < 80\% \implies 0\%$ reconocimiento (bloque bloqueado).
 
-**Alertas automaticas:**
-- **CRITICAL:** Cumplimiento < 85% con menos de 4 horas para cierre
-- **WARNING:** Proyeccion < 85% del cupo al cierre del dia
-- Por ramal: alerta si cumplimiento < 85% con < 6 horas restantes
+**Clasificación de Despachos en 5 Estados Operativos:**
+1. **Regular (A tiempo):** Despacho emparejado dentro de la tolerancia de salida $[-\text{tol}_{\text{antes}}, +\text{tol}_{\text{después}}]$.
+2. **Irregular:** Despacho ejecutado fuera de tolerancia horaria pero dentro de la ventana de servicio (hasta 45 min).
+3. **Refuerzo:** Salida extra no programada o asignada a una unidad de refuerzo operativo.
+4. **Incompleto:** Unidad que alcanzó la geocerca de retorno del 80% del trazado pero no completó la cabecera final.
+5. **No Realizado (Faltante):** Salida programada sin viaje real emparejado.
 
 **Endpoints:**
-- `GET /compliance` - Dashboard HTML interactivo
-- `GET /api/v1/compliance/today` - JSON completo del dia
-- `GET /api/v1/compliance/alerts` - Solo alertas activas
-- `GET /api/v1/compliance/history` - Historial de 30 dias
+- `GET /compliance` - Dashboard HTML interactivo con selector de servicio (`ALL`, `E1`, `E2`, `E3`) y selector de fecha.
+- `GET /api/v1/compliance/services` - Listado dinámico de servicios parametrizados y activos.
+- `GET /api/v1/compliance/today?service=E1&date=YYYY-MM-DD` - JSON completo del día con métricas, desglose ICF y ramales.
+- `GET /api/v1/compliance/alerts?service=E1` - Alertas activas de déficit de cumplimiento.
+- `GET /api/v1/compliance/history?service=E1` - Historial de cumplimiento de los últimos 30 días.
+
+---
+
+### 16. Generalización de la Plataforma y Simulador Operativo What-If
+
+#### 16.1. Modelo Parametrizado de Servicios y Concesiones (`transit.service` & `transit.holiday`)
+- **`transit.service`**: Representa cada línea o concesión (E1, E2, E3, etc.). Contiene:
+  * Cuota diaria exigida (`daily_target_departures`).
+  * Tolerancias de despacho (`tolerance_early_min`, `tolerance_late_min`).
+  * Parámetros espaciales de fiscalización (`geofence_radius_m`, `itinerary_buffer_m`, `compliance_threshold_pct`, `incomplete_threshold_pct`).
+  * Vinculación a empresa concesionaria (`concessionaire_id`), código GVMT (`agency_vmt_id`) y código CID (`cid_service_id`).
+- **`transit.holiday`**: Registro de feriados oficiales de la República del Paraguay. Al calcular programas o auditorías, conmuta automáticamente entre los regímenes de Tipo de Día 5 (Laboral L-V), Tipo de Día 6 (Sábado) y Tipo de Día 7 (Domingos y Feriados).
+
+#### 16.2. Motor de Simulación Operativa y Cobertura de Flota (`transit.simulation.wizard`)
+Herramienta de simulación de escenarios (What-If) para evaluar la capacidad de la flota activa frente a las exigencias de licitaciones y cuadros de marcha:
+- **Cálculo de Flota Pico Necesaria:**
+  $$B_{\text{pico}} = \left\lceil \frac{T_{\text{ciclo (min)}}}{\text{Headway}_{\text{pico (min)}}} \right\rceil$$
+- **Flota de Reserva Requerida:** Cálculo automático del margen de reserva técnica (10% a 25%).
+- **Balance y Diagnóstico de Cobertura:**
+  $$\text{Balance} = B_{\text{activos}} - B_{\text{total necesario}}, \quad \text{Cobertura (\%)} = \min\left(100, \frac{B_{\text{activos}}}{B_{\text{total necesario}}} \times 100\right)$$
+- **Intervalo Real Alcanzable (Headway Factible):** Frecuencia mínima que la flota actual puede sostener sin incurrir en déficit operativo.
+- **Factibilidad Energética EV:** Modelado de consumo kilovatio-hora ($1.15\text{ kWh/km}$), autonomía requerida vs capacidad de batería instalada ($350\text{ kWh}$) y verificación de margen de seguridad (mínimo 20% SoC restante).
 
 #### 15.3. API de Bunching Mejorada (`/api/v1/bunching/alerts`)
 
@@ -765,5 +795,53 @@ Endpoint dedicado que expone solo las alertas activas de pegonamiento en formato
   ]
 }
 ```
+
+---
+
+### 17. Programación Operativa Encadenada, Semáforo GPS, Flota de Reserva Técnica y Paradas Técnicas
+
+#### 17.1. Fundamento Empírico: Planillas de Tránsito Reales
+El módulo operacional (`transit.bus.schedule`, `transit.bus.schedule.line` y extensiones a `transit.dispatch`) toma como modelo directo la estructura operativa diaria de las planillas de tránsito de las líneas eléctricas (E1, E2, E3) documentadas en `Informe_empresa/PLANILLA PRINCIPAL TRANSITO E1/E2/E3 SEPTIEMBRE 2026.xlsx`.
+En la operación real:
+1. Una unidad realiza secuencias encadenadas de **Ida** (ej: San Lorenzo `SL` $\to$ O'Leary / Gral. Díaz `ODG`) y **Regreso** (ej: `ODG` $\to$ `SL`).
+2. Entre cada viaje existe un **tiempo de parada técnica** en cabecera o terminal (15 min en cabecera de regulación, 50 min en terminal de recarga/depósito).
+3. Se controla el estado de carga de batería eléctrica: `% BAT S` (SoC Salida) y `% BAT L` (SoC Llegada).
+4. El operador debe visualizar de forma intuitiva si la salida fue puntual, demorada, cancelada o cubierta por un **móvil de reserva técnica**.
+
+#### 17.2. Semáforo Operativo GPS en Tiempo Real
+Tanto en la programación diaria de turnos como en los despachos individuales, el sistema calcula un semáforo visual automatizado en base a las tolerancias configuradas para cada servicio:
+- 🟢 **Verde (`green`):** Salida ejecutada dentro del margen de tolerancia horaria respecto a la hora programada $[-\text{tol}_{\text{antes}}, +\text{tol}_{\text{después}}]$ (On Time).
+- 🟡 **Amarillo (`yellow`):** Salida ejecutada con retraso o adelanto fuera de tolerancia pero dentro de la ventana de servicio (Delayed / Early).
+- 🔴 **Rojo (`red`):** Despacho cancelado o no realizado / faltante (Unperformed / Canceled).
+- 🔵 **Azul (`blue`):** Despacho cubierto por un **Bus de Reserva Técnica** (Standby), preservando el cumplimiento de la frecuencia sin penalizaciones de servicio faltante.
+- ⚪ **Gris (`gray`):** Despacho pendiente / borrador programado aún no despachado.
+
+#### 17.3. Gestión de Flota de Reserva Técnica (Standby Pool)
+Para evitar la cancelación de salidas por averías imprevistas, retrasos acumulados o demoras en la recarga eléctrica:
+- **Identificación en Flota (`fleet.vehicle`):** Campo `is_reserve_unit` (Unidad de Reserva Técnica) con seguimiento de estado `reserve_status`:
+  * `available`: Disponible en base / terminal listo para salir.
+  * `active_substitute`: Sustituyendo activamente a un bus titular en ruta.
+  * `charging`: En recarga de oportunidad de baterías.
+  * `maintenance`: En chequeo mecánico en taller.
+- **Asistentes de Reemplazo en 1 Clic (`TransitBusScheduleReserveWizard` y `TransitDispatchReserveWizard`):**
+  * Permiten al jefe de tráfico asignar un móvil de reserva filtrando automáticamente solo las unidades disponibles.
+  * Registran el motivo del cambio (avería, retraso crítico, batería baja, limpieza profunda, accidente).
+  * Conmutan el semáforo a **Azul** y registran la trazabilidad completa en el chatter de auditoría de Odoo.
+
+#### 17.4. Validación de Tiempos de Parada Técnica (Layovers)
+El sistema impone la regla operativa de que un bus no puede llegar a una cabecera y partir inmediatamente de regreso. Se parametrizan los tiempos mínimos según la actividad:
+- **Regulación / Intervalo (`regulation`):** Mínimo 10 min.
+- **Recarga de Baterías EV (`charging`):** Mínimo 30 min (típico 50 min en terminal).
+- **Limpieza y Desinfección (`cleaning`):** Mínimo 15 min.
+- **Descanso Obligatorio del Conductor (`driver_rest`):** Mínimo 15 min.
+- **Chequeo / Mantenimiento Rápido (`maintenance`):** Mínimo 30 min.
+
+Si el tiempo programado entre la llegada y la salida siguiente es inferior al mínimo requerido, el sistema activa automáticamente una alerta visual (`layover_warning`, `has_layover_alert`) con mensajes destacados en color ámbar en las vistas Kanban, Lista y Formulario para prevenir retrasos en cadena.
+
+#### 17.5. Telemetría de Batería Eléctrica y Endpoint de Integración
+- Monitoreo de `% BAT S` (`battery_soc_departure`) y `% BAT L` (`battery_soc_arrival`).
+- Cálculo automático de consumo porcentual: $\Delta\text{SoC} = \text{SoC}_{\text{salida}} - \text{SoC}_{\text{llegada}}$.
+- Endpoint en el broker de telemetría (`GET /api/v1/schedules/today?date=YYYY-MM-DD&bus=X`) que sincroniza en tiempo real los turnos programados del día y el estado semafórico con el radar Leaflet.
+
 
 

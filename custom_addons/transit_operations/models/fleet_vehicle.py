@@ -12,6 +12,13 @@ class FleetVehicle(models.Model):
         tracking=True,
         help='Empresa operadora concesionada titular o responsable del bus'
     )
+    service_id = fields.Many2one(
+        'transit.service',
+        string='Servicio Operativo Asignado',
+        tracking=True,
+        index=True,
+        help='Línea o servicio especial al que está asignada prioritariamente la unidad'
+    )
 
     # Identificación Operativa de la Unidad
     bus_internal_number = fields.Char(
@@ -21,6 +28,30 @@ class FleetVehicle(models.Model):
         tracking=True,
         help='Número visible de la unidad para el servicio (ej: 04, 102)'
     )
+    mean_id = fields.Char(
+        string='ID Telemático GPS (Mean ID)',
+        index=True,
+        tracking=True,
+        help='Identificador único transmitido por la telemetría GPS a la plataforma de monitoreo'
+    )
+    is_reinforcement_unit = fields.Boolean(
+        string='Unidad de Refuerzo / Refuerzo Rápido',
+        default=False,
+        tracking=True,
+        help='Indica si esta unidad está destinada a cubrir picos de demanda o suplir coches demorados'
+    )
+    is_reserve_unit = fields.Boolean(
+        string='Unidad de Reserva Técnica (Standby)',
+        default=False,
+        tracking=True,
+        help='Indica si esta unidad está asignada a la reserva técnica de base para sustituir buses averiados, en recarga o con retraso crítico'
+    )
+    reserve_status = fields.Selection([
+        ('available', 'Disponible en Base'),
+        ('active_substitute', 'En Calle (Sustituyendo Titular)'),
+        ('charging', 'En Recarga de Baterías'),
+        ('maintenance', 'En Taller / Mantenimiento'),
+    ], string='Estado de Reserva', default='available', tracking=True)
     
     # Capacidad y Características
     seating_capacity = fields.Integer(string='Asientos', default=45, tracking=True)

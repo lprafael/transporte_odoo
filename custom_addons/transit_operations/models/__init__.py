@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from . import sifen_util
 from . import transit_concessionaire
+from . import transit_service
+from . import transit_holiday
 from . import fleet_vehicle
 from . import res_partner
 from . import res_users
@@ -17,3 +19,4 @@ from . import transit_clearing
 from . import transit_evaluation
 from . import transit_charging
 from . import transit_shift_preference
+from . import transit_bus_schedule

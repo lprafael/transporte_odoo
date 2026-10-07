@@ -254,11 +254,16 @@
         </div>
       </div>
 
-      <div class="callout callout-success">
-        <div>&#128274;</div>
+      <div class="callout callout-info">
+        <div>&#127963;</div>
         <div>
-          <strong>Sistema 100% Autonomo &mdash; Sin Dependencia del VMT:</strong><br>
-          Los cuadros de marcha son definidos y administrados directamente por la empresa dentro del propio ERP. El sistema opera de forma completamente independiente, sin necesidad de conexion a bases de datos externas del Viceministerio. La empresa configura sus propias frecuencias por ramal, dia de semana y horario, con total flexibilidad para modificarlos en cualquier momento.
+          <strong>Sincronizacion Oficial del CID / VMT (692 Despachos Diarios de Linea 20):</strong><br>
+          El sistema cuenta con la integracion nativa de la base del Viceministerio de Transporte (<code>servicios_especiales.programacion_operativa</code>), con <strong>692 salidas diarias homologadas exclusivamente para los Servicios Electricos de Linea 20 (E1, E2 y E3)</strong> a lo largo de sus 6 ramales oficiales (<code>020c</code>, <code>020d</code>, <code>020e</code>, <code>020f</code>, <code>0210</code>, <code>0211</code>):
+          <ul style="margin:.5rem 0 0 1.25rem;font-size:.88rem;color:var(--text-muted);">
+            <li><strong>Ramales 020C / 020D (E1):</strong> 110 despachos por sentido (46 dias habiles, 46 sabados, 18 domingos/feriados).</li>
+            <li><strong>Ramales 020E / 020F (E2 Variante):</strong> 150 despachos por sentido (63 dias habiles, 63 sabados, 24 domingos/feriados).</li>
+            <li><strong>Ramales 0210 / 0211 (E3 Luque):</strong> 86 despachos por sentido (34 dias habiles, 34 sabados, 18 domingos/feriados).</li>
+          </ul>
         </div>
       </div>
 
@@ -289,14 +294,35 @@
         </div>
       </div>
 
-      <div class="callout callout-info">
-        <div>&#128161;</div>
+      <!-- Semáforo de Despacho GPS -->
+      <div class="callout callout-info" style="margin:1.25rem 0;">
+        <div>&#128678;</div>
         <div>
-          <strong>Semaforo de Puntualidad y Regularidad:</strong><br>
-          El sistema compara la hora teorica vs real de salida:<br>
-          &bull; <span class="badge badge-success">Puntual (&plusmn;3 min)</span> Cumplimiento optimo del servicio.<br>
-          &bull; <span class="badge badge-danger">Con Retraso (&gt;3 min)</span> Salida demorada que genera acumulacion de pasajeros.<br>
-          &bull; <span class="badge badge-warning">Adelantado (&lt;-1 min)</span> Salida prematura que rompe el intervalo del servicio anterior.
+          <strong>Semaforo Operativo GPS en Tiempo Real (Segun Planillas de Transito Reales E1/E2/E3):</strong><br>
+          El sistema clasifica visualmente cada salida programada mediante un codigo cromatico intuitivo:<br>
+          &bull; <span class="badge badge-success">&#129001; Verde: Salida en Margen Correcto</span> Dentro de la tolerancia horaria configurada (a tiempo).<br>
+          &bull; <span class="badge badge-warning">&#129000; Amarillo: Salida Fuera de Tolerancia</span> Con retraso o adelanto segun la telemetria GPS.<br>
+          &bull; <span class="badge badge-danger">&#128997; Rojo: Despacho Cancelado o Faltante</span> Servicio no realizado o suspendido.<br>
+          &bull; <span class="badge badge-blue" style="background:#0284c7;color:#fff;">&#128998; Azul: Cubierto por Bus de Reserva</span> Servicio cubierto por unidad de reserva tecnica en cabecera para no penalizar el cumplimiento.
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128260;</span><div class="feature-card-title">Gestion de Flota de Reserva Tecnica (Standby)</div></div>
+          <p>Asistente de reemplazo en 1 clic: si un colectivo titular sufre una averia mecanica, demoras excesivas o falta de bateria, Trafico asigna una unidad de reserva disponible en base. El despacho conmuta a <strong>Azul</strong> y se mantiene la regularidad de la frecuencia.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#9200;</span><div class="feature-card-title">Validacion de Paradas Tecnicas (Layovers)</div></div>
+          <p>Un bus no puede llegar a una cabecera y partir instantaneamente. El sistema valida los tiempos minimos de parada segun la actividad: <strong>Regulacion (10-15m)</strong>, <strong>Recarga de Baterias EV (30-50m)</strong>, <strong>Limpieza (15m)</strong> o <strong>Descanso del chofer (15m)</strong>, alertando si el tiempo asignado es insuficiente.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-purple" style="margin:1.25rem 0;">
+        <div>&#128267;</div>
+        <div>
+          <strong>Monitoreo de Baterias Electricas por Rotacion (Planilla Transito E1):</strong><br>
+          Registro directo de <code>% BAT Salida</code> y <code>% BAT Llegada</code> (ej: Salida con 91% SoC, Llegada con 65% SoC). Calculo automatico del consumo porcentual por viaje y advertencia si el bus arriba a cabecera con carga insuficiente para la siguiente vuelta programada.
         </div>
       </div>
     </section>

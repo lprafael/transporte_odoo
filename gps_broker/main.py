@@ -1053,32 +1053,43 @@ async def stop_page(stop_code: str, request: Request):
 # ------------------------------------------------------------------------------
 # Dashboard de Cumplimiento VMT (Res. GVMT 065/2024)
 # ------------------------------------------------------------------------------
-from compliance_service import get_today_compliance, get_compliance_alerts, get_compliance_html
+from compliance_service import get_today_compliance, get_compliance_alerts, get_compliance_html, get_available_services
 
 @app.get("/compliance", response_class=HTMLResponse)
 async def compliance_dashboard():
     """
-    Dashboard interactivo de cumplimiento de la cuota diaria de 692 despachos
-    exigida por la Resolucion GVMT 065/2024 para la Linea 20 Electrica.
-    Muestra cumplimiento actual, proyeccion al cierre, detalle por ramal e historial.
+    Dashboard interactivo de cumplimiento regulatorio (Res. GVMT 065/2024 & Dec. 710/2023)
+    con soporte multilínea (Línea 20 E1, E2, E3, Búhos, etc.), cálculo de ICF Provisorio
+    y clasificación en 5 estados de despacho.
     """
     return get_compliance_html()
 
+@app.get("/api/v1/compliance/services")
+async def api_compliance_services():
+    """Lista de servicios operativos activos parametrizados en el sistema."""
+    return get_available_services()
+
 @app.get("/api/v1/compliance/today")
-async def api_compliance_today():
+async def api_compliance_today(
+    service: Optional[str] = Query(None, description="Filtrar por código de servicio (ej: ALL, E1, E2, E3)"),
+    date: Optional[str] = Query(None, description="Fecha de evaluación (YYYY-MM-DD)")
+):
     """
-    Datos JSON de cumplimiento del dia actual.
-    Incluye: despachos ejecutados, programados, % cumplimiento, proyeccion y alertas.
+    Datos JSON de cumplimiento del día actual o fecha evaluada.
+    Incluye: despachos ejecutados, programados, % cumplimiento, proyecciones,
+    desglose por ramales, cálculo de ICF Provisorio por franjas y auditoría en 5 estados.
     """
-    return get_today_compliance(redis_client)
+    return get_today_compliance(redis_client, service_code=service, target_date=date)
 
 @app.get("/api/v1/compliance/alerts")
-async def api_compliance_alerts():
+async def api_compliance_alerts(
+    service: Optional[str] = Query(None, description="Filtrar alertas por código de servicio")
+):
     """
-    Lista de alertas activas de deficit de cumplimiento.
+    Lista de alertas activas de déficit de cumplimiento.
     Se integra con notificaciones Odoo y MQTT.
     """
-    alerts = get_compliance_alerts(redis_client)
+    alerts = get_compliance_alerts(redis_client, service_code=service)
     return {
         "total": len(alerts),
         "has_alerts": len(alerts) > 0,
@@ -1086,12 +1097,122 @@ async def api_compliance_alerts():
     }
 
 @app.get("/api/v1/compliance/history")
-async def api_compliance_history():
-    """Historial de cumplimiento de los ultimos 30 dias."""
-    data = get_today_compliance(redis_client)
+async def api_compliance_history(
+    service: Optional[str] = Query(None, description="Filtrar historial por código de servicio")
+):
+    """Historial de cumplimiento de los últimos 30 días."""
+    data = get_today_compliance(redis_client, service_code=service)
     return {
         "daily_quota": data.get("daily_quota", 692),
         "history": data.get("history_30d", [])
+    }
+
+# ------------------------------------------------------------------------------
+# Hojas de Ruta y Encadenamiento Diario de Buses (Vehicle Duty API)
+# ------------------------------------------------------------------------------
+def get_daily_bus_schedules(target_date: Optional[str] = None, vehicle_code: Optional[str] = None) -> List[Dict[str, Any]]:
+    d = target_date or datetime.now().date().isoformat()
+    try:
+        conn = psycopg2.connect(
+            host=PG_HOST, port=PG_PORT, dbname=PG_DB,
+            user=PG_USER, password=PG_PASS, connect_timeout=3
+        )
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        query = """
+            SELECT
+                s.id AS schedule_id,
+                s.name AS schedule_name,
+                s.date::text AS date,
+                s.state AS schedule_state,
+                COALESCE(v.bus_internal_number, v.license_plate, 'Bus') AS bus_code,
+                v.license_plate,
+                COALESCE(c.name, 'Concesionaria') AS concessionaire,
+                COALESCE(p.name, 'Sin Chofer') AS driver_name,
+                l.id AS leg_id,
+                l.sequence,
+                l.leg_number,
+                r.code AS route_code,
+                r.name AS route_name,
+                r.direction,
+                r.origin,
+                r.destination,
+                r.distance_km,
+                l.departure_time_str,
+                l.duration_minutes,
+                l.arrival_time_str,
+                l.rest_minutes,
+                l.suggested_next_departure_str,
+                l.state AS leg_state
+            FROM transit_bus_schedule s
+            JOIN fleet_vehicle v ON v.id = s.vehicle_id
+            LEFT JOIN transit_concessionaire c ON c.id = s.concessionaire_id
+            LEFT JOIN res_partner p ON p.id = s.driver_id
+            LEFT JOIN transit_bus_schedule_line l ON l.schedule_id = s.id
+            LEFT JOIN transit_route r ON r.id = l.route_id
+            WHERE s.date = %s
+        """
+        params = [d]
+        if vehicle_code:
+            query += " AND (v.bus_internal_number = %s OR v.license_plate = %s)"
+            params.extend([vehicle_code, vehicle_code])
+        query += " ORDER BY v.bus_internal_number ASC, l.sequence ASC"
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        grouped: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            b_code = r["bus_code"]
+            if b_code not in grouped:
+                grouped[b_code] = {
+                    "schedule_id": r["schedule_id"],
+                    "schedule_name": r["schedule_name"],
+                    "date": r["date"],
+                    "state": r["schedule_state"],
+                    "bus_code": b_code,
+                    "license_plate": r["license_plate"],
+                    "concessionaire": r["concessionaire"],
+                    "driver_name": r["driver_name"],
+                    "legs": []
+                }
+            if r.get("leg_id"):
+                grouped[b_code]["legs"].append({
+                    "leg_number": r["leg_number"],
+                    "sequence": r["sequence"],
+                    "route_code": r["route_code"],
+                    "route_name": r["route_name"],
+                    "direction": r["direction"],
+                    "origin": r["origin"],
+                    "destination": r["destination"],
+                    "distance_km": r["distance_km"],
+                    "departure_time": r["departure_time_str"],
+                    "duration_minutes": r["duration_minutes"],
+                    "arrival_time": r["arrival_time_str"],
+                    "rest_minutes": r["rest_minutes"],
+                    "next_departure_suggested": r["suggested_next_departure_str"],
+                    "state": r["leg_state"]
+                })
+        return list(grouped.values())
+    except Exception as e:
+        logger.debug(f"Aviso al consultar transit_bus_schedule: {e}")
+        return []
+
+@app.get("/api/v1/schedules/today")
+async def api_schedules_today(
+    date: Optional[str] = Query(None, description="Fecha YYYY-MM-DD (por defecto hoy)"),
+    bus: Optional[str] = Query(None, description="Filtrar por número de interno o matrícula de bus")
+):
+    """
+    Retorna la programación diaria de hojas de ruta y secuencias de itinerarios por bus.
+    Muestra el encadenamiento de viajes (ida, retorno, rotación) con horas exactas y descansos.
+    """
+    data = get_daily_bus_schedules(target_date=date, vehicle_code=bus)
+    return {
+        "date": date or datetime.now().date().isoformat(),
+        "total_vehicles_scheduled": len(data),
+        "schedules": data
     }
 
 # ------------------------------------------------------------------------------

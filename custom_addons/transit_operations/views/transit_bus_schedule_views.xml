@@ -1,0 +1,471 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ================================================================== -->
+    <!-- 1. Vistas de Hoja de Ruta y Encadenamiento Diario (transit.bus.schedule) -->
+    <!-- ================================================================== -->
+
+    <!-- Vista Lista / Árbol -->
+    <record id="view_transit_bus_schedule_tree" model="ir.ui.view">
+        <field name="name">transit.bus.schedule.list</field>
+        <field name="model">transit.bus.schedule</field>
+        <field name="arch" type="xml">
+            <list string="Programación y Hojas de Ruta de Buses"
+                  decoration-muted="state == 'canceled'"
+                  decoration-info="state == 'draft'"
+                  decoration-primary="state == 'confirmed'"
+                  decoration-warning="state == 'in_progress'"
+                  decoration-success="state == 'done'">
+                <field name="name" decoration-bf="1"/>
+                <field name="date"/>
+                <field name="concessionaire_id"/>
+                <field name="vehicle_id" decoration-bf="1"/>
+                <field name="driver_id"/>
+                <field name="service_id"/>
+                <field name="total_legs" string="Tramos"/>
+                <field name="first_departure_str" string="1ª Salida"/>
+                <field name="last_arrival_str" string="Última Llegada"/>
+                <field name="green_count" string="🟢 A Tiempo" sum="Total Verdes"/>
+                <field name="yellow_count" string="🟡 Retrasos" sum="Total Amarillos"/>
+                <field name="red_count" string="🔴 Cancelados" sum="Total Rojos"/>
+                <field name="blue_count" string="🔵 Reserva" sum="Total Reservas"/>
+                <field name="total_distance_km" string="Km Total"/>
+                <field name="total_operating_hours" string="Horas Serv." widget="float_time"/>
+                <field name="dispatch_count" string="Despachos"/>
+                <field name="state" widget="badge"
+                       decoration-info="state == 'draft'"
+                       decoration-primary="state == 'confirmed'"
+                       decoration-warning="state == 'in_progress'"
+                       decoration-success="state == 'done'"
+                       decoration-danger="state == 'canceled'"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Formulario Principal (Panel Intuitivo de Programación) -->
+    <record id="view_transit_bus_schedule_form" model="ir.ui.view">
+        <field name="name">transit.bus.schedule.form</field>
+        <field name="model">transit.bus.schedule</field>
+        <field name="arch" type="xml">
+            <form string="Hoja de Ruta y Encadenamiento Diario de Bus">
+                <header>
+                    <button name="action_open_chain_wizard" type="object"
+                            string="Asistente de Encadenamiento Rápido"
+                            class="oe_highlight btn-primary"
+                            icon="fa-magic"
+                            invisible="state in ('done', 'canceled')"/>
+                    <button name="action_add_next_return_leg" type="object"
+                            string="Agregar Tramo Siguiente (Auto)"
+                            class="btn-secondary"
+                            icon="fa-plus-circle"
+                            invisible="state in ('done', 'canceled')"/>
+                    <button name="action_generate_dispatches" type="object"
+                            string="Generar / Sincronizar Despachos"
+                            class="oe_highlight btn-success"
+                            icon="fa-play"
+                            invisible="state in ('done', 'canceled')"/>
+                    <button name="action_confirm" type="object"
+                            string="Confirmar Turno"
+                            class="btn-info"
+                            invisible="state != 'draft'"/>
+                    <button name="action_set_done" type="object"
+                            string="Finalizar Turno"
+                            class="btn-secondary"
+                            invisible="state not in ('confirmed', 'in_progress')"/>
+                    <button name="action_set_draft" type="object"
+                            string="Volver a Borrador"
+                            class="btn-secondary"
+                            invisible="state == 'draft'"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="draft,confirmed,in_progress,done"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button class="oe_stat_button" icon="fa-exchange" type="object"
+                                name="action_view_dispatches">
+                            <field name="dispatch_count" string="Despachos" widget="statinfo"/>
+                        </button>
+                        <div class="oe_stat_button" icon="fa-road">
+                            <div class="o_stat_info">
+                                <span class="o_stat_value">
+                                    <field name="total_distance_km"/> km
+                                </span>
+                                <span class="o_stat_text">Recorrido Total</span>
+                            </div>
+                        </div>
+                        <div class="oe_stat_button" icon="fa-clock-o">
+                            <div class="o_stat_info">
+                                <span class="o_stat_value">
+                                    <field name="total_operating_hours" widget="float_time"/> h
+                                </span>
+                                <span class="o_stat_text">Tiempo en Ruta</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <widget name="web_ribbon" title="Finalizado" bg_color="bg-success" invisible="state != 'done'"/>
+                    <widget name="web_ribbon" title="Cancelado" bg_color="bg-danger" invisible="state != 'canceled'"/>
+
+                    <div class="oe_title">
+                        <span class="o_form_label">Hoja de Ruta / Encadenamiento</span>
+                        <h1>
+                            <field name="name" readonly="1"/>
+                        </h1>
+                        <h2>
+                            <span class="text-muted">Unidad: </span>
+                            <field name="vehicle_id" placeholder="Seleccione el Bus a programar..." class="oe_inline"/>
+                        </h2>
+                    </div>
+
+                    <!-- Semáforo de Desempeño Operativo GPS -->
+                    <div class="d-flex gap-3 my-3 p-3 bg-light rounded border align-items-center flex-wrap">
+                        <div class="fw-bold text-uppercase small text-muted">Semáforo de Despachos GPS:</div>
+                        <div class="badge bg-success p-2 fs-6">
+                            🟢 A Tiempo: <field name="green_count" class="fw-bold"/>
+                        </div>
+                        <div class="badge bg-warning text-dark p-2 fs-6">
+                            🟡 Retrasos: <field name="yellow_count" class="fw-bold"/>
+                        </div>
+                        <div class="badge bg-danger p-2 fs-6">
+                            🔴 Cancelados / Faltantes: <field name="red_count" class="fw-bold"/>
+                        </div>
+                        <div class="badge bg-info text-dark p-2 fs-6">
+                            🔵 Cubiertos c/ Reserva: <field name="blue_count" class="fw-bold"/>
+                        </div>
+                    </div>
+
+                    <!-- Alerta de Tiempo Insuficiente en Parada / Recarga -->
+                    <div class="alert alert-warning my-2" role="alert" invisible="not has_layover_alerts">
+                        <strong>⚠️ Alerta de Parada Técnica / Recarga:</strong> <field name="layover_alerts_summary" class="fw-bold"/>
+                        <div class="small mt-1 text-muted">El bus requiere un tiempo técnico mínimo en cabecera según la actividad asignada (Recarga: 30m, Limpieza: 15m, Mantenimiento: 30m, Descanso: 20m). Ajuste los minutos de parada en los tramos señalados.</div>
+                    </div>
+
+                    <group>
+                        <group string="Programación del Turno">
+                            <field name="date"/>
+                            <field name="concessionaire_id"/>
+                            <field name="service_id"/>
+                        </group>
+                        <group string="Conducción y Resumen">
+                            <field name="driver_id"/>
+                            <field name="first_departure_str"/>
+                            <field name="last_arrival_str"/>
+                            <field name="total_legs"/>
+                            <field name="has_layover_alerts" invisible="1"/>
+                        </group>
+                    </group>
+
+                    <div class="alert alert-info mt-2 mb-3" role="alert">
+                        <strong>💡 Encadenamiento Operativo:</strong> Cada colectivo puede operar más de una ruta (ej: Ida por E1, Retorno por E2 con tiempos de parada técnica para recarga de batería, limpieza o regulación). Use el botón <strong>"Asistente de Encadenamiento Rápido"</strong> para generar la jornada en 1 clic.
+                    </div>
+
+                    <notebook>
+                        <page string="Secuencia de Tramos e Itinerarios" name="legs">
+                            <field name="line_ids">
+                                <list editable="bottom" string="Tramos del Bus"
+                                      decoration-muted="state == 'canceled'"
+                                      decoration-danger="semaphore_color == 'red' or has_layover_alert"
+                                      decoration-warning="semaphore_color == 'yellow'"
+                                      decoration-success="semaphore_color == 'green'"
+                                      decoration-info="semaphore_color == 'blue'">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="leg_number" string="Nº"/>
+                                    <field name="semaphore_color" widget="badge" string="Semáforo GPS"
+                                           decoration-success="semaphore_color == 'green'"
+                                           decoration-warning="semaphore_color == 'yellow'"
+                                           decoration-danger="semaphore_color == 'red'"
+                                           decoration-info="semaphore_color == 'blue'"
+                                           decoration-muted="semaphore_color == 'gray'"/>
+                                    <field name="route_id" string="Itinerario / Ruta"
+                                           options="{'no_create': True}"/>
+                                    <field name="service_id" optional="show"/>
+                                    <field name="direction" optional="show"/>
+                                    <field name="distance_km" string="Km" sum="Total Km"/>
+                                    <field name="departure_time" widget="float_time" string="Salida"/>
+                                    <field name="departure_time_str" optional="show" string="Salida (HH:MM)"/>
+                                    <field name="duration_minutes" string="Duración (min)"/>
+                                    <field name="arrival_time_str" string="Llegada (HH:MM)"/>
+                                    
+                                    <!-- Parada Técnica / Mantenimiento / Recarga -->
+                                    <field name="layover_type" string="Actividad en Cabecera"/>
+                                    <field name="rest_minutes" string="Parada (min)"/>
+                                    <field name="has_layover_alert" column_invisible="True"/>
+                                    <field name="layover_alert_msg" optional="show" string="Alerta Parada"
+                                           decoration-danger="has_layover_alert"/>
+                                    <field name="suggested_next_departure_str" optional="show" string="Próx. Salida"/>
+                                    
+                                    <!-- Batería EV (SoC) como planilla real -->
+                                    <field name="battery_soc_departure" optional="show" string="% BAT S"/>
+                                    <field name="battery_soc_arrival" optional="show" string="% BAT L"/>
+                                    <field name="battery_consumption_pct" optional="hide" string="Consumo %"/>
+
+                                    <!-- Reserva Técnica -->
+                                    <field name="is_reserve_substituted" optional="show" string="Es Reserva" widget="boolean_toggle"/>
+                                    <field name="substituted_vehicle_id" optional="show" string="Bus Reserva"/>
+                                    <button name="action_assign_reserve_bus" type="object"
+                                            string="Sustituir Reserva" icon="fa-refresh"
+                                            title="Asignar un bus de reserva técnica si el titular está demorado o en taller"/>
+
+                                    <field name="driver_id" optional="show" string="Chofer Relevo"/>
+                                    <field name="state" widget="badge" optional="show"
+                                           decoration-info="state == 'draft'"
+                                           decoration-primary="state == 'scheduled'"
+                                           decoration-warning="state == 'in_progress'"
+                                           decoration-success="state == 'completed'"/>
+                                    <field name="dispatch_id" optional="show" string="Despacho Oficial"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Observaciones / Bitácora" name="notes">
+                            <field name="notes" placeholder="Notas sobre relevos, condiciones de tránsito, cambios de ruta autorizados..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vista Calendario de Turnos de Buses -->
+    <record id="view_transit_bus_schedule_calendar" model="ir.ui.view">
+        <field name="name">transit.bus.schedule.calendar</field>
+        <field name="model">transit.bus.schedule</field>
+        <field name="arch" type="xml">
+            <calendar string="Calendario de Hojas de Ruta"
+                      date_start="date"
+                      color="vehicle_id"
+                      mode="month">
+                <field name="vehicle_id"/>
+                <field name="driver_id"/>
+                <field name="total_legs"/>
+                <field name="green_count"/>
+                <field name="yellow_count"/>
+                <field name="red_count"/>
+                <field name="state"/>
+            </calendar>
+        </field>
+    </record>
+
+    <!-- Vista Kanban de Hojas de Ruta -->
+    <record id="view_transit_bus_schedule_kanban" model="ir.ui.view">
+        <field name="name">transit.bus.schedule.kanban</field>
+        <field name="model">transit.bus.schedule</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="state" sample="1">
+                <field name="name"/>
+                <field name="vehicle_id"/>
+                <field name="driver_id"/>
+                <field name="date"/>
+                <field name="total_legs"/>
+                <field name="total_distance_km"/>
+                <field name="first_departure_str"/>
+                <field name="last_arrival_str"/>
+                <field name="green_count"/>
+                <field name="yellow_count"/>
+                <field name="red_count"/>
+                <field name="blue_count"/>
+                <field name="has_layover_alerts"/>
+                <field name="state"/>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div class="oe_kanban_global_click p-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <strong class="o_kanban_record_title" style="font-size: 15px;">
+                                    <t t-esc="record.vehicle_id.value"/>
+                                </strong>
+                                <span class="badge rounded-pill bg-light text-dark">
+                                    <t t-esc="record.name.value"/>
+                                </span>
+                            </div>
+                            <div class="text-muted small mb-1">
+                                📅 <t t-esc="record.date.value"/> • 👤 <t t-esc="record.driver_id.value or 'Sin chofer'"/>
+                            </div>
+                            <div class="d-flex justify-content-between small text-muted my-2 p-2 bg-light rounded">
+                                <div><strong><t t-esc="record.total_legs.value"/></strong> tramos</div>
+                                <div><strong><t t-esc="record.total_distance_km.value"/></strong> km</div>
+                                <div>🕒 <t t-esc="record.first_departure_str.value"/> - <t t-esc="record.last_arrival_str.value"/></div>
+                            </div>
+                            <!-- Mini Semáforo en tarjeta Kanban -->
+                            <div class="d-flex gap-2 justify-content-center mt-2 small">
+                                <span class="badge bg-success" title="A tiempo">🟢 <t t-esc="record.green_count.value"/></span>
+                                <span class="badge bg-warning text-dark" title="Retrasos">🟡 <t t-esc="record.yellow_count.value"/></span>
+                                <span class="badge bg-danger" title="Cancelados">🔴 <t t-esc="record.red_count.value"/></span>
+                                <span class="badge bg-info text-dark" title="Reserva">🔵 <t t-esc="record.blue_count.value"/></span>
+                            </div>
+                            <div t-if="record.has_layover_alerts.raw_value" class="text-danger small mt-2 fw-bold text-center">
+                                ⚠️ Alerta Parada Técnica / Recarga
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- Vista Búsqueda / Filtros -->
+    <record id="view_transit_bus_schedule_search" model="ir.ui.view">
+        <field name="name">transit.bus.schedule.search</field>
+        <field name="model">transit.bus.schedule</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Hojas de Ruta">
+                <field name="name"/>
+                <field name="vehicle_id"/>
+                <field name="driver_id"/>
+                <field name="concessionaire_id"/>
+                <field name="service_id"/>
+                <filter name="today" string="Hoy" domain="[('date', '=', context_today())]"/>
+                <filter name="tomorrow" string="Mañana"
+                        domain="[('date', '=', (context_today() + datetime.timedelta(days=1)).strftime('%Y-%m-%d'))]"/>
+                <separator/>
+                <filter name="with_alerts" string="Con Alertas de Parada" domain="[('has_layover_alerts', '=', True)]"/>
+                <filter name="has_delays" string="Con Retrasos (Amarillo)" domain="[('yellow_count', '>', 0)]"/>
+                <filter name="has_canceled" string="Con Cancelados (Rojo)" domain="[('red_count', '>', 0)]"/>
+                <filter name="has_reserves" string="Con Unidades de Reserva (Azul)" domain="[('blue_count', '>', 0)]"/>
+                <separator/>
+                <filter name="draft" string="Borrador" domain="[('state', '=', 'draft')]"/>
+                <filter name="confirmed" string="Confirmados" domain="[('state', '=', 'confirmed')]"/>
+                <filter name="in_progress" string="En Operación" domain="[('state', '=', 'in_progress')]"/>
+                <filter name="done" string="Finalizados" domain="[('state', '=', 'done')]"/>
+                <group expand="0" string="Agrupar Por">
+                    <filter name="group_date" string="Fecha Operativa" context="{'group_by': 'date'}"/>
+                    <filter name="group_vehicle" string="Bus / Unidad" context="{'group_by': 'vehicle_id'}"/>
+                    <filter name="group_concessionaire" string="Empresa Operadora" context="{'group_by': 'concessionaire_id'}"/>
+                    <filter name="group_driver" string="Conductor" context="{'group_by': 'driver_id'}"/>
+                    <filter name="group_state" string="Estado" context="{'group_by': 'state'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana para Hoja de Ruta -->
+    <record id="action_transit_bus_schedule" model="ir.actions.act_window">
+        <field name="name">Hojas de Ruta y Encadenamiento de Buses</field>
+        <field name="res_model">transit.bus.schedule</field>
+        <field name="view_mode">list,form,calendar,kanban</field>
+        <field name="context">{'search_default_today': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Cree una nueva Hoja de Ruta diaria para programar los itinerarios de un bus.
+            </p>
+            <p>
+                Configure secuencias encadenadas de viajes (ej: Ida por Ruta E1, Retorno por Ruta E2, vuelta siguiente...) y gestione tiempos técnicos de recarga, limpieza y unidades de reserva técnica.
+            </p>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- 2. Vista del Asistente de Encadenamiento Rápido de Itinerarios      -->
+    <!-- ================================================================== -->
+    <record id="view_transit_bus_schedule_chain_wizard_form" model="ir.ui.view">
+        <field name="name">transit.bus.schedule.chain.wizard.form</field>
+        <field name="model">transit.bus.schedule.chain.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Generador Rápido de Encadenamiento de Itinerarios">
+                <sheet>
+                    <div class="alert alert-primary mb-3" role="alert">
+                        <strong>🎯 Encadenamiento de Rutas &amp; Tiempos Técnicos:</strong> Seleccione los itinerarios que realizará el colectivo en su ciclo de rotación (Ida y Vuelta / Retorno por otra línea) y defina el tiempo de parada para descanso, limpieza o recarga de baterías.
+                    </div>
+                    <group>
+                        <group string="Itinerarios del Ciclo Operativo">
+                            <field name="schedule_id" invisible="1"/>
+                            <field name="concessionaire_id" invisible="1"/>
+                            <field name="route_1_id" options="{'no_create': True}"
+                                   domain="[('concessionaire_id', '=', concessionaire_id)] if concessionaire_id else []"/>
+                            <field name="route_2_id" options="{'no_create': True}"
+                                   domain="[('concessionaire_id', '=', concessionaire_id)] if concessionaire_id else []"/>
+                            <field name="route_3_id" options="{'no_create': True}"
+                                   domain="[('concessionaire_id', '=', concessionaire_id)] if concessionaire_id else []"/>
+                        </group>
+                        <group string="Tiempos, Parada Técnica y Batería EV">
+                            <field name="first_departure_time" widget="float_time"/>
+                            <field name="default_layover_type"/>
+                            <field name="rest_minutes"/>
+                            <field name="initial_battery_soc"/>
+                            <field name="cycles_count"/>
+                            <field name="clear_existing"/>
+                        </group>
+                    </group>
+                </sheet>
+                <footer>
+                    <button name="action_generate_chain" type="object"
+                            string="Generar Encadenamiento de Tramos"
+                            class="oe_highlight btn-primary"/>
+                    <button string="Cancelar" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- 3. Asistente para Asignar Bus de Reserva (transit.bus.schedule)    -->
+    <!-- ================================================================== -->
+    <record id="view_transit_bus_schedule_reserve_wizard_form" model="ir.ui.view">
+        <field name="name">transit.bus.schedule.reserve.wizard.form</field>
+        <field name="model">transit.bus.schedule.reserve.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Asignar Bus de Reserva Técnica">
+                <sheet>
+                    <div class="alert alert-info mb-3" role="alert">
+                        <strong>🔁 Activación de Flota de Reserva:</strong> Sustituya la unidad titular por un colectivo de reserva disponible en base para evitar cancelaciones de servicio y mantener la regularidad.
+                    </div>
+                    <group>
+                        <group string="Unidad Titular Afectada">
+                            <field name="schedule_line_id" invisible="1"/>
+                            <field name="concessionaire_id" invisible="1"/>
+                            <field name="titular_vehicle_id"/>
+                            <field name="reason"/>
+                        </group>
+                        <group string="Unidad de Reserva Técnica">
+                            <field name="reserve_vehicle_id" options="{'no_create': True}"/>
+                            <field name="driver_id"/>
+                            <field name="notes" placeholder="Detalle del incidente o motivo del reemplazo..."/>
+                        </group>
+                    </group>
+                </sheet>
+                <footer>
+                    <button name="action_confirm_substitution" type="object"
+                            string="Confirmar Sustitución c/ Reserva"
+                            class="oe_highlight btn-primary"/>
+                    <button string="Cancelar" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- 4. Asistente para Asignar Bus de Reserva en Despacho                -->
+    <!-- ================================================================== -->
+    <record id="view_transit_dispatch_reserve_wizard_form" model="ir.ui.view">
+        <field name="name">transit.dispatch.reserve.wizard.form</field>
+        <field name="model">transit.dispatch.reserve.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Asignar Bus de Reserva Técnica para Despacho">
+                <sheet>
+                    <div class="alert alert-info mb-3" role="alert">
+                        <strong>🔁 Activación de Flota de Reserva:</strong> Asigne un móvil de reserva técnica en cabecera para cubrir esta salida y evitar que el despacho sea cancelado o computado como faltante.
+                    </div>
+                    <group>
+                        <group string="Despacho y Bus Afectado">
+                            <field name="dispatch_id" invisible="1"/>
+                            <field name="concessionaire_id" invisible="1"/>
+                            <field name="titular_vehicle_id"/>
+                            <field name="reason"/>
+                        </group>
+                        <group string="Unidad de Reserva Asignada">
+                            <field name="reserve_vehicle_id" options="{'no_create': True}"/>
+                            <field name="driver_id"/>
+                            <field name="notes" placeholder="Detalle de la asignación de reserva..."/>
+                        </group>
+                    </group>
+                </sheet>
+                <footer>
+                    <button name="action_confirm_substitution" type="object"
+                            string="Asignar Bus de Reserva"
+                            class="oe_highlight btn-primary"/>
+                    <button string="Cancelar" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+</odoo>

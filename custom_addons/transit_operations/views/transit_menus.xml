@@ -15,6 +15,12 @@
               parent="menu_transit_root"
               sequence="10"/>
 
+    <menuitem id="menu_transit_bus_schedule"
+              name="Hojas de Ruta Diarias (Turnos de Buses)"
+              parent="menu_transit_daily_operations"
+              action="action_transit_bus_schedule"
+              sequence="5"/>
+
     <menuitem id="menu_transit_dispatch"
               name="Despachos Diarios (Tablero en Vivo)"
               parent="menu_transit_daily_operations"
@@ -34,6 +40,12 @@
         <field name="target">new</field>
     </record>
 
+    <record id="action_transit_compliance_dashboard" model="ir.actions.act_url">
+        <field name="name">Tablero de Cumplimiento VMT e ICF Provisorio</field>
+        <field name="url">http://localhost:8088/compliance</field>
+        <field name="target">new</field>
+    </record>
+
     <menuitem id="menu_transit_headway"
               name="Tablero Lineal de Intervalos (Headway)"
               parent="menu_transit_daily_operations"
@@ -45,6 +57,12 @@
               parent="menu_transit_daily_operations"
               action="action_transit_live_radar"
               sequence="14"/>
+
+    <menuitem id="menu_transit_compliance"
+              name="Tablero Cumplimiento e ICF (En Vivo)"
+              parent="menu_transit_daily_operations"
+              action="action_transit_compliance_dashboard"
+              sequence="16"/>
 
     <menuitem id="menu_transit_ticket"
               name="Venta de Pasajes / Boletos"
@@ -74,6 +92,18 @@
               parent="menu_transit_root"
               sequence="20"/>
 
+    <menuitem id="menu_transit_service"
+              name="Servicios Operativos (Líneas / E1-E3...)"
+              parent="menu_transit_planning"
+              action="action_transit_service"
+              sequence="5"/>
+
+    <menuitem id="menu_transit_holiday"
+              name="Calendario de Feriados (Régimen GVMT)"
+              parent="menu_transit_planning"
+              action="action_transit_holiday"
+              sequence="8"/>
+
     <menuitem id="menu_transit_route"
               name="Rutas e Itinerarios"
               parent="menu_transit_planning"
@@ -91,6 +121,12 @@
               parent="menu_transit_planning"
               action="action_transit_timetable"
               sequence="20"/>
+
+    <menuitem id="menu_transit_bus_schedule_planning"
+              name="Programación de Turnos por Bus (Encadenamiento)"
+              parent="menu_transit_planning"
+              action="action_transit_bus_schedule"
+              sequence="25"/>
 
     <menuitem id="menu_transit_schedule_generator"
               name="Generar Programación Operativa"

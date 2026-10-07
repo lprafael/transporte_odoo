@@ -300,14 +300,35 @@ HTML = """<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="callout callout-info">
-        <div>&#128161;</div>
+      <!-- Semáforo de Despacho GPS -->
+      <div class="callout callout-info" style="margin:1.25rem 0;">
+        <div>&#128678;</div>
         <div>
-          <strong>Semaforo de Puntualidad y Regularidad:</strong><br>
-          El sistema compara la hora teorica vs real de salida:<br>
-          &bull; <span class="badge badge-success">Puntual (&plusmn;3 min)</span> Cumplimiento optimo del servicio.<br>
-          &bull; <span class="badge badge-danger">Con Retraso (&gt;3 min)</span> Salida demorada que genera acumulacion de pasajeros.<br>
-          &bull; <span class="badge badge-warning">Adelantado (&lt;-1 min)</span> Salida prematura que rompe el intervalo del servicio anterior.
+          <strong>Semaforo Operativo GPS en Tiempo Real (Segun Planillas de Transito Reales E1/E2/E3):</strong><br>
+          El sistema clasifica visualmente cada salida programada mediante un codigo cromatico intuitivo:<br>
+          &bull; <span class="badge badge-success">&#129001; Verde: Salida en Margen Correcto</span> Dentro de la tolerancia horaria configurada (a tiempo).<br>
+          &bull; <span class="badge badge-warning">&#129000; Amarillo: Salida Fuera de Tolerancia</span> Con retraso o adelanto segun la telemetria GPS.<br>
+          &bull; <span class="badge badge-danger">&#128997; Rojo: Despacho Cancelado o Faltante</span> Servicio no realizado o suspendido.<br>
+          &bull; <span class="badge badge-blue" style="background:#0284c7;color:#fff;">&#128998; Azul: Cubierto por Bus de Reserva</span> Servicio cubierto por unidad de reserva tecnica en cabecera para no penalizar el cumplimiento.
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#128260;</span><div class="feature-card-title">Gestion de Flota de Reserva Tecnica (Standby)</div></div>
+          <p>Asistente de reemplazo en 1 clic: si un colectivo titular sufre una averia mecanica, demoras excesivas o falta de bateria, Trafico asigna una unidad de reserva disponible en base. El despacho conmuta a <strong>Azul</strong> y se mantiene la regularidad de la frecuencia.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-header"><span class="feature-card-icon">&#9200;</span><div class="feature-card-title">Validacion de Paradas Tecnicas (Layovers)</div></div>
+          <p>Un bus no puede llegar a una cabecera y partir instantaneamente. El sistema valida los tiempos minimos de parada segun la actividad: <strong>Regulacion (10-15m)</strong>, <strong>Recarga de Baterias EV (30-50m)</strong>, <strong>Limpieza (15m)</strong> o <strong>Descanso del chofer (15m)</strong>, alertando si el tiempo asignado es insuficiente.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-purple" style="margin:1.25rem 0;">
+        <div>&#128267;</div>
+        <div>
+          <strong>Monitoreo de Baterias Electricas por Rotacion (Planilla Transito E1):</strong><br>
+          Registro directo de <code>% BAT Salida</code> y <code>% BAT Llegada</code> (ej: Salida con 91% SoC, Llegada con 65% SoC). Calculo automatico del consumo porcentual por viaje y advertencia si el bus arriba a cabecera con carga insuficiente para la siguiente vuelta programada.
         </div>
       </div>
     </section>

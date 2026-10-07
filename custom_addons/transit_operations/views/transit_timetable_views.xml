@@ -4,14 +4,23 @@
         <field name="name">transit.timetable.list</field>
         <field name="model">transit.timetable</field>
         <field name="arch" type="xml">
-            <list string="Horarios Programados">
+            <list string="Horarios Programados (Cuadro de Marcha)">
+                <field name="service_id"/>
                 <field name="route_id"/>
                 <field name="direction"/>
+                <field name="service_number" string="Nº Serv"/>
                 <field name="service_code"/>
-                <field name="departure_time_float" widget="float_time"/>
-                <field name="arrival_time_float" widget="float_time" optional="show"/>
-                <field name="scheduled_duration_minutes"/>
-                <field name="day_of_week"/>
+                <field name="tipo_dia" widget="badge"
+                       decoration-info="tipo_dia == '5'"
+                       decoration-warning="tipo_dia == '6'"
+                       decoration-danger="tipo_dia == '7'"/>
+                <field name="departure_time_float" widget="float_time" string="Salida"/>
+                <field name="arrival_time_float" widget="float_time" optional="show" string="Llegada"/>
+                <field name="scheduled_duration_minutes" string="Duración (min)"/>
+                <field name="franja_horaria" optional="show"/>
+                <field name="tipo_franja_icf" widget="badge"
+                       decoration-primary="tipo_franja_icf == 'pico'"
+                       decoration-muted="tipo_franja_icf == 'pos_pico'" optional="show"/>
                 <field name="valid_from" optional="show"/>
                 <field name="cid_programacion_id" optional="hide"/>
                 <field name="active" widget="boolean_toggle"/>
@@ -26,18 +35,22 @@
             <form string="Horario Programado">
                 <sheet>
                     <group>
-                        <group string="Servicio y Ruta">
+                        <group string="Servicio y Ramal">
+                            <field name="service_id"/>
                             <field name="route_id"/>
                             <field name="direction"/>
+                            <field name="service_number"/>
                             <field name="service_code" placeholder="Ej: S01"/>
                             <field name="cid_programacion_id" readonly="1"/>
-                            <field name="active"/>
+                            <field name="active" widget="boolean_toggle"/>
                         </group>
-                        <group string="Programación Horaria y Vigencia">
+                        <group string="Programación Horaria y Régimen">
+                            <field name="tipo_dia"/>
                             <field name="departure_time_float" widget="float_time"/>
                             <field name="arrival_time_float" widget="float_time"/>
                             <field name="scheduled_duration_minutes"/>
-                            <field name="day_of_week"/>
+                            <field name="franja_horaria"/>
+                            <field name="tipo_franja_icf"/>
                             <field name="valid_from"/>
                             <field name="valid_until"/>
                         </group>
@@ -52,19 +65,25 @@
         <field name="model">transit.timetable</field>
         <field name="arch" type="xml">
             <search string="Buscar Horarios">
+                <field name="service_id"/>
                 <field name="route_id"/>
                 <field name="service_code"/>
                 <field name="direction"/>
                 <filter string="Ida" name="filter_ida" domain="[('direction', '=', 'ida')]"/>
                 <filter string="Vuelta" name="filter_vuelta" domain="[('direction', '=', 'vuelta')]"/>
                 <separator/>
-                <filter string="Lunes a Viernes" name="weekday" domain="[('day_of_week', 'in', ['all', 'weekday', '0', '1', '2', '3', '4'])]"/>
-                <filter string="Sábados" name="saturday" domain="[('day_of_week', 'in', ['all', 'weekend', '5'])]"/>
-                <filter string="Domingos / Feriados" name="sunday" domain="[('day_of_week', 'in', ['all', 'weekend', '6'])]"/>
+                <filter string="Laboral (L-V)" name="filter_laboral" domain="[('tipo_dia', '=', '5')]"/>
+                <filter string="Sábados" name="filter_sabado" domain="[('tipo_dia', '=', '6')]"/>
+                <filter string="Domingos y Feriados" name="filter_dom_fer" domain="[('tipo_dia', '=', '7')]"/>
+                <separator/>
+                <filter string="Hora Pico" name="filter_pico" domain="[('tipo_franja_icf', '=', 'pico')]"/>
+                <filter string="Hora Pos-Pico" name="filter_pos_pico" domain="[('tipo_franja_icf', '=', 'pos_pico')]"/>
                 <group expand="0" string="Agrupar Por">
-                    <filter string="Ruta" name="group_route" context="{'group_by': 'route_id'}"/>
+                    <filter string="Servicio" name="group_service" context="{'group_by': 'service_id'}"/>
+                    <filter string="Ruta / Ramal" name="group_route" context="{'group_by': 'route_id'}"/>
+                    <filter string="Régimen / Tipo de Día" name="group_tipo_dia" context="{'group_by': 'tipo_dia'}"/>
                     <filter string="Sentido" name="group_direction" context="{'group_by': 'direction'}"/>
-                    <filter string="Día" name="group_day" context="{'group_by': 'day_of_week'}"/>
+                    <filter string="Franja Horaria ICF" name="group_franja" context="{'group_by': 'franja_horaria'}"/>
                 </group>
             </search>
         </field>

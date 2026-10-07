@@ -4,76 +4,104 @@
         <field name="name">transit.simulation.wizard.form</field>
         <field name="model">transit.simulation.wizard</field>
         <field name="arch" type="xml">
-            <form string="Simulador Predictivo What-If para Licitaciones y Redes">
+            <form string="Simulador de Operación y Cobertura de Flota Actual">
                 <sheet>
-                    <div class="alert alert-primary mb-3" role="alert">
-                        <strong>Modelado Predictivo Tipo Optibus:</strong>
-                        Simule en tiempo real los requerimientos de flota, cuadrantes de choferes, kilometraje en vacío (deadhead) y estructura de costos operativos para formular ofertas de licitación pública hiper-competitivas.
+                    <div class="alert alert-info mb-3" role="alert">
+                        <strong>⚡ Simulador de Operación y Cobertura de Red (Multi-Servicio):</strong>
+                        Evalúe en tiempo real la capacidad de cobertura que su flota actual (eléctrica y convencional) tiene para cumplir al 100% los cuadros de marcha, frecuencias e intervalos requeridos en los servicios de la empresa.
                     </div>
 
                     <div class="oe_title">
-                        <label for="name" string="Nombre de la Alternativa / Concurso"/>
+                        <label for="name" string="Escenario de Simulación"/>
                         <h1><field name="name"/></h1>
                     </div>
 
                     <group>
-                        <group string="1. Parámetros Operativos del Corredor">
-                            <field name="target_route_id"/>
-                            <field name="route_distance_km"/>
-                            <field name="commercial_speed_kmh"/>
-                            <field name="peak_headway_minutes"/>
-                            <field name="offpeak_headway_minutes"/>
-                            <field name="daily_operating_hours"/>
-                            <field name="peak_hours_per_day"/>
-                            <field name="reserve_fleet_percentage"/>
+                        <group string="1. Configuración de Operadora y Servicios">
+                            <field name="concessionaire_id"/>
+                            <field name="service_ids" widget="many2many_tags" placeholder="Seleccione servicios a simular (ej: E1, E2, E3)..."/>
+                            <field name="simulation_day_type"/>
                         </group>
-                        <group string="2. Estructura de Costos y Demanda">
-                            <field name="is_electric" widget="boolean_toggle"/>
-                            <field name="energy_cost_per_km" widget="monetary"/>
-                            <field name="driver_hourly_cost" widget="monetary"/>
-                            <field name="fixed_daily_depot_cost" widget="monetary"/>
-                            <field name="expected_daily_passengers"/>
+                        <group string="2. Flota Actual Disponible (Censo / What-If)">
+                            <field name="total_fleet_available" style="font-weight:bold;"/>
+                            <field name="electric_fleet_available"/>
+                            <field name="conventional_fleet_available"/>
+                            <field name="depot_chargers_available"/>
                         </group>
                     </group>
 
-                    <div class="mt-4 p-3 bg-light border rounded">
-                        <h4 class="text-primary mb-3">📊 Resultados de la Simulación Predictiva</h4>
+                    <group>
+                        <group string="3. Parámetros de Tráfico y Regulación">
+                            <field name="commercial_speed_kmh"/>
+                            <field name="headway_buffer_pct"/>
+                            <field name="reserve_fleet_pct"/>
+                        </group>
+                        <group string="4. Parámetros de Batería y Autonomía EV">
+                            <field name="battery_usable_kwh"/>
+                            <field name="avg_ev_consumption_kwh_km"/>
+                            <field name="min_departure_soc_pct"/>
+                        </group>
+                    </group>
+
+                    <div class="text-center my-3">
+                        <button name="action_calculate_simulation" string="🔄 Calcular Simulación de Cobertura" type="object" class="btn-primary btn-lg shadow-sm"/>
+                    </div>
+
+                    <!-- Panel de Resultados de Cobertura -->
+                    <div class="mt-4 p-3 bg-light border rounded" invisible="not line_ids">
+                        <h4 class="text-primary mb-3">📊 Indicadores Consolidados de Cobertura y Factibilidad</h4>
                         <div class="row text-center mb-3">
                             <div class="col-md-3 border-end">
-                                <small class="text-muted text-uppercase fw-bold">Flota Total Necesaria</small>
-                                <h2 class="text-primary mt-1 mb-0"><field name="total_fleet_needed"/></h2>
-                                <small class="text-muted"><field name="required_peak_buses"/> pico + <field name="reserve_buses"/> reserva</small>
+                                <small class="text-muted text-uppercase fw-bold">Porcentaje de Cobertura</small>
+                                <h1 class="mt-1 mb-0" style="color: #059669;"><field name="coverage_percentage"/>%</h1>
+                                <small><field name="coverage_status"/></small>
                             </div>
                             <div class="col-md-3 border-end">
-                                <small class="text-muted text-uppercase fw-bold">Choferes en Cuadrante</small>
-                                <h2 class="text-success mt-1 mb-0"><field name="drivers_needed"/></h2>
-                                <small class="text-muted">Turnos ergonómicos</small>
+                                <small class="text-muted text-uppercase fw-bold">Balance de Flota</small>
+                                <h2 class="mt-1 mb-0"><field name="fleet_balance"/> buses</h2>
+                                <small class="text-muted"><field name="total_fleet_available"/> disponibles vs <field name="total_fleet_needed"/> requeridos</small>
                             </div>
                             <div class="col-md-3 border-end">
-                                <small class="text-muted text-uppercase fw-bold">Km Totales Diarios</small>
-                                <h2 class="text-dark mt-1 mb-0"><field name="total_daily_km" digits="[10, 0]"/></h2>
-                                <small class="text-muted"><field name="daily_deadhead_km" digits="[10, 0]"/> km en vacío</small>
+                                <small class="text-muted text-uppercase fw-bold">Intervalo Factible en Pico</small>
+                                <h2 class="text-primary mt-1 mb-0"><field name="achievable_peak_headway_minutes"/> min</h2>
+                                <small class="text-muted">Garantizado con flota actual</small>
                             </div>
                             <div class="col-md-3">
-                                <small class="text-muted text-uppercase fw-bold">Tarifa de Equilibrio</small>
-                                <h2 class="text-danger mt-1 mb-0"><field name="breakeven_fare" widget="monetary"/></h2>
-                                <small class="text-muted">Por pasajero transportado</small>
+                                <small class="text-muted text-uppercase fw-bold">Factibilidad Energética EV</small>
+                                <h3 class="mt-1 mb-0"><field name="energy_feasibility"/></h3>
+                                <small class="text-muted"><field name="avg_km_per_bus"/> km/bus diario</small>
                             </div>
                         </div>
 
-                        <group>
-                            <group string="Desglose de Costos Diarios Proyectados">
-                                <field name="daily_energy_cost" widget="monetary"/>
-                                <field name="daily_driver_cost" widget="monetary"/>
-                                <field name="daily_depot_fixed_cost" widget="monetary"/>
-                                <field name="total_daily_operating_cost" widget="monetary" class="fw-bold fs-5 text-primary"/>
-                            </group>
-                            <group string="Indicadores de Eficiencia Operacional">
-                                <field name="cycle_time_minutes"/>
-                                <field name="daily_trips"/>
-                                <field name="breakeven_cost_per_km" widget="monetary"/>
-                            </group>
-                        </group>
+                        <notebook>
+                            <page string="Desglose por Servicio" name="lines">
+                                <field name="line_ids" readonly="1">
+                                    <list>
+                                        <field name="service_code" decoration-bf="1"/>
+                                        <field name="service_name"/>
+                                        <field name="cycle_distance_km" string="Km Ciclo"/>
+                                        <field name="cycle_time_minutes" string="Tiempo Ciclo (min)"/>
+                                        <field name="peak_headway_minutes" string="Headway Pico (min)"/>
+                                        <field name="scheduled_departures" string="Salidas/Día"/>
+                                        <field name="peak_buses_needed" string="Buses Pico"/>
+                                        <field name="reserve_buses_needed" string="Reserva"/>
+                                        <field name="total_buses_needed" string="Total Necesario" decoration-bf="1"/>
+                                        <field name="daily_commercial_km" string="Km Totales"/>
+                                    </list>
+                                </field>
+                                <group col="4">
+                                    <field name="total_peak_buses_needed"/>
+                                    <field name="total_reserve_buses_needed"/>
+                                    <field name="total_daily_trips"/>
+                                    <field name="total_daily_km"/>
+                                    <field name="total_daily_energy_kwh"/>
+                                </group>
+                            </page>
+
+                            <page string="Dictamen y Recomendaciones de Tráfico" name="recommendations">
+                                <field name="recommendation_notes" widget="text" readonly="1" style="font-family: monospace; font-size: 13px; line-height: 1.6;"/>
+                            </page>
+                        </notebook>
                     </div>
 
                     <footer>
@@ -85,7 +113,7 @@
     </record>
 
     <record id="action_transit_simulation_wizard" model="ir.actions.act_window">
-        <field name="name">Simulador What-If para Licitaciones</field>
+        <field name="name">Simulador de Operación y Cobertura de Flota</field>
         <field name="res_model">transit.simulation.wizard</field>
         <field name="view_mode">form</field>
         <field name="target">new</field>

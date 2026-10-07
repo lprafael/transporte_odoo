@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Vista Lista de Servicios -->
+    <record id="view_transit_service_tree" model="ir.ui.view">
+        <field name="name">transit.service.list</field>
+        <field name="model">transit.service</field>
+        <field name="arch" type="xml">
+            <list string="Servicios Operativos / Concesiones">
+                <field name="code" decoration-bf="1"/>
+                <field name="name"/>
+                <field name="concessionaire_id"/>
+                <field name="daily_target_departures"/>
+                <field name="vehicle_count" string="Flota Asignada"/>
+                <field name="route_count" string="Ramales"/>
+                <field name="timetable_count" string="Salidas en Cuadro"/>
+                <field name="compliance_threshold_pct" widget="percentage" string="Umbral Válido"/>
+                <field name="tolerance_early_min" string="Tol. Adelanto"/>
+                <field name="tolerance_late_min" string="Tol. Atraso"/>
+                <field name="active" widget="boolean_toggle"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Formulario de Servicio -->
+    <record id="view_transit_service_form" model="ir.ui.view">
+        <field name="name">transit.service.form</field>
+        <field name="model">transit.service</field>
+        <field name="arch" type="xml">
+            <form string="Servicio Operativo / Concesión">
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button class="oe_stat_button" icon="fa-bus" type="action"
+                                name="%(fleet.fleet_vehicle_action)d"
+                                context="{'search_default_service_id': id, 'default_service_id': id}">
+                            <field name="vehicle_count" string="Buses" widget="statinfo"/>
+                        </button>
+                        <button class="oe_stat_button" icon="fa-road" type="action"
+                                name="%(action_transit_route)d"
+                                context="{'search_default_service_id': id, 'default_service_id': id}">
+                            <field name="route_count" string="Ramales" widget="statinfo"/>
+                        </button>
+                        <button class="oe_stat_button" icon="fa-clock-o" type="action"
+                                name="%(action_transit_timetable)d"
+                                context="{'search_default_service_id': id, 'default_service_id': id}">
+                            <field name="timetable_count" string="Cuadro Marcha" widget="statinfo"/>
+                        </button>
+                        <button class="oe_stat_button" icon="fa-exchange" type="action"
+                                name="%(action_transit_dispatch)d"
+                                context="{'search_default_service_id': id, 'default_service_id': id}">
+                            <field name="dispatch_count" string="Despachos" widget="statinfo"/>
+                        </button>
+                    </div>
+
+                    <widget name="web_ribbon" title="Inactivo" bg_color="bg-danger" invisible="active"/>
+
+                    <div class="oe_title">
+                        <span class="o_form_label">Código de Servicio</span>
+                        <h1>
+                            <field name="code" placeholder="Ej: E1, E2, B1..." style="width: 200px;"/>
+                        </h1>
+                        <label for="name" string="Denominación Oficial"/>
+                        <h2>
+                            <field name="name" placeholder="Ej: Línea 20 - Eléctrico 1 (San Lorenzo - Asunción)"/>
+                        </h2>
+                    </div>
+
+                    <group>
+                        <group string="Concesión y Operadora">
+                            <field name="concessionaire_id"/>
+                            <field name="agency_vmt_id"/>
+                            <field name="emisor_id"/>
+                            <field name="cid_service_id"/>
+                            <field name="active" widget="boolean_toggle"/>
+                        </group>
+                        <group string="Vigencia y Metas">
+                            <field name="contract_start_date"/>
+                            <field name="contract_end_date"/>
+                            <field name="daily_target_departures"/>
+                            <field name="external_dashboard_url" widget="url"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Parámetros de Monitoreo y Tolerancia" name="monitoring_params">
+                            <group>
+                                <group string="Geocercas e Itinerario (Resolución GVMT)">
+                                    <field name="geofence_radius_m"/>
+                                    <field name="itinerary_buffer_m"/>
+                                    <field name="compliance_threshold_pct"/>
+                                    <field name="incomplete_threshold_pct"/>
+                                </group>
+                                <group string="Tolerancias Horarias y Franja Operativa">
+                                    <field name="tolerance_early_min"/>
+                                    <field name="tolerance_late_min"/>
+                                    <field name="operating_window_start"/>
+                                    <field name="operating_window_end"/>
+                                    <field name="spans_next_day"/>
+                                </group>
+                            </group>
+                        </page>
+
+                        <page string="Ramales / Rutas Asignadas" name="routes">
+                            <field name="route_ids" context="{'default_service_id': id, 'default_concessionaire_id': concessionaire_id}">
+                                <list>
+                                    <field name="code"/>
+                                    <field name="name"/>
+                                    <field name="direction"/>
+                                    <field name="origin"/>
+                                    <field name="destination"/>
+                                    <field name="distance_km"/>
+                                    <field name="standard_duration_minutes"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Flota de Buses Asignada" name="vehicles">
+                            <field name="vehicle_ids" context="{'default_service_id': id, 'default_concessionaire_id': concessionaire_id}">
+                                <list>
+                                    <field name="bus_internal_number"/>
+                                    <field name="license_plate"/>
+                                    <field name="model_id"/>
+                                    <field name="mean_id"/>
+                                    <field name="validator_terminal_id"/>
+                                    <field name="is_electric" widget="boolean_toggle"/>
+                                    <field name="current_soc" invisible="not is_electric"/>
+                                    <field name="is_reinforcement_unit" widget="boolean_toggle"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Descripción / Notas" name="notes">
+                            <field name="description" placeholder="Detalle técnico de la traza, paradas y condiciones operativas..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vista Búsqueda de Servicios -->
+    <record id="view_transit_service_search" model="ir.ui.view">
+        <field name="name">transit.service.search</field>
+        <field name="model">transit.service</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Servicios Operativos">
+                <field name="name"/>
+                <field name="code"/>
+                <field name="concessionaire_id"/>
+                <filter name="active" string="Activos" domain="[('active', '=', True)]"/>
+                <filter name="inactive" string="Inactivos" domain="[('active', '=', False)]"/>
+                <group expand="0" string="Agrupar Por">
+                    <filter name="group_concessionaire" string="Empresa Operadora" context="{'group_by': 'concessionaire_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana para Servicios -->
+    <record id="action_transit_service" model="ir.actions.act_window">
+        <field name="name">Servicios Operativos / Concesiones</field>
+        <field name="res_model">transit.service</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'search_default_active': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Cree un nuevo servicio operativo (ej: E1, E2, E3, Búho 1...).
+            </p>
+            <p>
+                Configure sus parámetros de monitoreo, radios de geocercas, tolerancias horarias y asigne su flota y ramales.
+            </p>
+        </field>
+    </record>
+</odoo>

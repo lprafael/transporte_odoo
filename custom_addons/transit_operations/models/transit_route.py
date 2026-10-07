@@ -9,6 +9,7 @@ class TransitRoute(models.Model):
     name = fields.Char(string='Nombre del Ramal / Línea', required=True)
     code = fields.Char(string='Código de Línea / Ramal', required=True, index=True)
     concessionaire_id = fields.Many2one('transit.concessionaire', string='Empresa Concesionaria Operadora', index=True)
+    service_id = fields.Many2one('transit.service', string='Servicio Operativo / Concesión', index=True, ondelete='set null')
     direction = fields.Selection([
         ('inbound', 'Ida'),
         ('outbound', 'Vuelta'),
@@ -29,6 +30,11 @@ class TransitRoute(models.Model):
     destination_latitude = fields.Float(string='Latitud Destino', digits=(10, 6), default=-25.2867)
     destination_longitude = fields.Float(string='Longitud Destino', digits=(10, 6), default=-57.6470)
     destination_radius_meters = fields.Integer(string='Radio Cabecera Destino (m)', default=100)
+
+    # Geocerca de Retorno al 80% (Detección de Servicios Incompletos - Tipo 5 CID)
+    return_80_latitude = fields.Float(string='Latitud Punto de Retorno (80%)', digits=(10, 6))
+    return_80_longitude = fields.Float(string='Longitud Punto de Retorno (80%)', digits=(10, 6))
+    return_80_radius_meters = fields.Integer(string='Radio Punto de Retorno (m)', default=150)
 
     checkpoint_ids = fields.One2many('transit.route.checkpoint', 'route_id', string='Puntos de Control / Geocercas')
     checkpoint_count = fields.Integer(string='Geocercas Configuradas', compute='_compute_checkpoint_count')
