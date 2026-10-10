@@ -54,7 +54,8 @@ def fetch_latest_positions_per_bus(conn, agency_id="004B", sample_size=2000):
             longitude,
             rumbo,
             velocidad,
-            fecha_hora
+            fecha_hora,
+            fecha_hora_procesamiento
         FROM (
             SELECT 
                 id,
@@ -66,7 +67,8 @@ def fetch_latest_positions_per_bus(conn, agency_id="004B", sample_size=2000):
                 longitude,
                 rumbo,
                 velocidad,
-                fecha_hora
+                fecha_hora,
+                fecha_hora_procesamiento
             FROM app_monitoreo_mensajeoperativo
             WHERE agency_id = %s
             ORDER BY id DESC
@@ -93,10 +95,11 @@ def fetch_latest_events(conn, agency_id="004B", limit=25):
             longitude,
             rumbo,
             velocidad,
-            fecha_hora
+            fecha_hora,
+            fecha_hora_procesamiento
         FROM app_monitoreo_mensajeoperativo
         WHERE agency_id = %s
-        ORDER BY fecha_hora DESC
+        ORDER BY id DESC
         LIMIT %s;
     """
     cursor.execute(query, (agency_id, limit))
@@ -112,9 +115,13 @@ def forward_to_broker(rows, broker_url=BROKER_URL, token=BROKER_TOKEN):
     sent = 0
     for row in rows:
         bus_id = f"BUS-{row['mean_id']}"
-        rec_time = row['fecha_hora']
+        # Usar fecha_hora_procesamiento (hora local real de Asunción al llegar al servidor VMT)
+        # para evitar el desfase de 3.3 horas del reloj interno del hardware GPS
+        rec_time = row.get('fecha_hora_procesamiento') or row.get('fecha_hora')
         if isinstance(rec_time, datetime):
-            rec_time = rec_time.isoformat()
+            rec_time_str = rec_time.isoformat()
+        else:
+            rec_time_str = str(rec_time)
 
         payload = {
             "agency_id": row["agency_id"],
@@ -125,7 +132,8 @@ def forward_to_broker(rows, broker_url=BROKER_URL, token=BROKER_TOKEN):
             "longitude": float(row["longitude"]),
             "velocidad": float(row["velocidad"] or 0.0),
             "rumbo": float(row["rumbo"] or 0.0),
-            "fecha_hora": rec_time,
+            "fecha_hora": rec_time_str,
+            "fecha_hora_procesamiento": rec_time_str,
             "precision": row.get("precision")
         }
         

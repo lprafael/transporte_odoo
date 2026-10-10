@@ -267,34 +267,32 @@
                 <field name="has_layover_alerts"/>
                 <field name="state"/>
                 <templates>
-                    <t t-name="kanban-box">
-                        <div class="oe_kanban_global_click p-3">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <strong class="o_kanban_record_title" style="font-size: 15px;">
-                                    <t t-esc="record.vehicle_id.value"/>
-                                </strong>
-                                <span class="badge rounded-pill bg-light text-dark">
-                                    <t t-esc="record.name.value"/>
-                                </span>
-                            </div>
-                            <div class="text-muted small mb-1">
-                                📅 <t t-esc="record.date.value"/> • 👤 <t t-esc="record.driver_id.value or 'Sin chofer'"/>
-                            </div>
-                            <div class="d-flex justify-content-between small text-muted my-2 p-2 bg-light rounded">
-                                <div><strong><t t-esc="record.total_legs.value"/></strong> tramos</div>
-                                <div><strong><t t-esc="record.total_distance_km.value"/></strong> km</div>
-                                <div>🕒 <t t-esc="record.first_departure_str.value"/> - <t t-esc="record.last_arrival_str.value"/></div>
-                            </div>
-                            <!-- Mini Semáforo en tarjeta Kanban -->
-                            <div class="d-flex gap-2 justify-content-center mt-2 small">
-                                <span class="badge bg-success" title="A tiempo">🟢 <t t-esc="record.green_count.value"/></span>
-                                <span class="badge bg-warning text-dark" title="Retrasos">🟡 <t t-esc="record.yellow_count.value"/></span>
-                                <span class="badge bg-danger" title="Cancelados">🔴 <t t-esc="record.red_count.value"/></span>
-                                <span class="badge bg-info text-dark" title="Reserva">🔵 <t t-esc="record.blue_count.value"/></span>
-                            </div>
-                            <div t-if="record.has_layover_alerts.raw_value" class="text-danger small mt-2 fw-bold text-center">
-                                ⚠️ Alerta Parada Técnica / Recarga
-                            </div>
+                    <t t-name="card">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <strong class="o_kanban_record_title" style="font-size: 15px;">
+                                <t t-esc="record.vehicle_id.value"/>
+                            </strong>
+                            <span class="badge rounded-pill bg-light text-dark">
+                                <t t-esc="record.name.value"/>
+                            </span>
+                        </div>
+                        <div class="text-muted small mb-1">
+                            📅 <t t-esc="record.date.value"/> • 👤 <t t-esc="record.driver_id.value or 'Sin chofer'"/>
+                        </div>
+                        <div class="d-flex justify-content-between small text-muted my-2 p-2 bg-light rounded">
+                            <div><strong><t t-esc="record.total_legs.value"/></strong> tramos</div>
+                            <div><strong><t t-esc="record.total_distance_km.value"/></strong> km</div>
+                            <div>🕒 <t t-esc="record.first_departure_str.value"/> - <t t-esc="record.last_arrival_str.value"/></div>
+                        </div>
+                        <!-- Mini Semáforo en tarjeta Kanban -->
+                        <div class="d-flex gap-2 justify-content-center mt-2 small">
+                            <span class="badge bg-success" title="A tiempo">🟢 <t t-esc="record.green_count.value"/></span>
+                            <span class="badge bg-warning text-dark" title="Retrasos">🟡 <t t-esc="record.yellow_count.value"/></span>
+                            <span class="badge bg-danger" title="Cancelados">🔴 <t t-esc="record.red_count.value"/></span>
+                            <span class="badge bg-info text-dark" title="Reserva">🔵 <t t-esc="record.blue_count.value"/></span>
+                        </div>
+                        <div t-if="record.has_layover_alerts.raw_value" class="text-danger small mt-2 fw-bold text-center">
+                            ⚠️ Alerta Parada Técnica / Recarga
                         </div>
                     </t>
                 </templates>

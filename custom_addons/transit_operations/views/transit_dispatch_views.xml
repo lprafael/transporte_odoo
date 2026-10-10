@@ -76,49 +76,47 @@
                 <field name="deviation_alert"/>
                 <field name="state"/>
                 <templates>
-                    <t t-name="kanban-box">
-                        <div t-attf-class="oe_kanban_global_click oe_kanban_card">
-                            <div class="o_kanban_record_top mb-2">
-                                <div class="o_kanban_record_headings">
-                                    <strong class="o_kanban_record_title font-weight-bold">
-                                        <field name="name"/>
-                                    </strong>
-                                    <span class="text-muted d-block">
-                                        <field name="route_id"/>
-                                    </span>
-                                </div>
-                                <div>
-                                    <span class="badge me-1" t-attf-class="#{record.semaphore_color.raw_value == 'green' ? 'text-bg-success' : record.semaphore_color.raw_value == 'yellow' ? 'text-bg-warning' : record.semaphore_color.raw_value == 'red' ? 'text-bg-danger' : record.semaphore_color.raw_value == 'blue' ? 'text-bg-info' : 'text-bg-secondary'}">
-                                        <t t-if="record.semaphore_color.raw_value == 'green'">🟢 En Horario</t>
-                                        <t t-elif="record.semaphore_color.raw_value == 'yellow'">🟡 Retraso</t>
-                                        <t t-elif="record.semaphore_color.raw_value == 'red'">🔴 Cancelado</t>
-                                        <t t-elif="record.semaphore_color.raw_value == 'blue'">🔵 Reserva</t>
-                                        <t t-else="">⚪ Programado</t>
-                                    </span>
-                                </div>
+                    <t t-name="card">
+                        <div class="o_kanban_record_top mb-2">
+                            <div class="o_kanban_record_headings">
+                                <strong class="o_kanban_record_title font-weight-bold">
+                                    <field name="name"/>
+                                </strong>
+                                <span class="text-muted d-block">
+                                    <field name="route_id"/>
+                                </span>
                             </div>
-                            <div class="o_kanban_record_body">
-                                <div><i class="fa fa-bus text-primary me-1"></i> <field name="vehicle_id"/></div>
-                                <div><i class="fa fa-user text-secondary me-1"></i> <field name="driver_id"/></div>
-                                <div><i class="fa fa-clock-o text-muted me-1"></i> Salida: <field name="scheduled_departure"/></div>
-                                <div t-if="record.is_reserve_substituted.raw_value" class="text-info fw-bold">
-                                    <i class="fa fa-retweet me-1"></i> Bus de Reserva Técnica
-                                </div>
-                                <div t-if="record.layover_warning.raw_value" class="text-warning fw-bold">
-                                    <i class="fa fa-hourglass-end me-1"></i> ¡Parada Insuficiente!
-                                </div>
-                                <div t-if="record.current_geofence_status.raw_value">
-                                    <i class="fa fa-map-marker text-success me-1"></i> <field name="current_geofence_status"/>
-                                </div>
-                                <div t-if="record.departure_delay_minutes.raw_value">
-                                    <i class="fa fa-tachometer text-info me-1"></i> Desvío: <strong><field name="departure_delay_minutes"/> min</strong>
-                                </div>
-                                <div t-if="record.speed_alert.raw_value" class="text-danger font-weight-bold mt-1">
-                                    <i class="fa fa-warning me-1"></i> ¡Exceso Velocidad! (<field name="last_speed_kmh"/> km/h)
-                                </div>
-                                <div t-if="record.deviation_alert.raw_value" class="text-danger font-weight-bold mt-1">
-                                    <i class="fa fa-exclamation-triangle me-1"></i> ¡Desvío de Itinerario!
-                                </div>
+                            <div>
+                                <span class="badge me-1" t-attf-class="#{record.semaphore_color.raw_value == 'green' ? 'text-bg-success' : record.semaphore_color.raw_value == 'yellow' ? 'text-bg-warning' : record.semaphore_color.raw_value == 'red' ? 'text-bg-danger' : record.semaphore_color.raw_value == 'blue' ? 'text-bg-info' : 'text-bg-secondary'}">
+                                    <t t-if="record.semaphore_color.raw_value == 'green'">🟢 En Horario</t>
+                                    <t t-elif="record.semaphore_color.raw_value == 'yellow'">🟡 Retraso</t>
+                                    <t t-elif="record.semaphore_color.raw_value == 'red'">🔴 Cancelado</t>
+                                    <t t-elif="record.semaphore_color.raw_value == 'blue'">🔵 Reserva</t>
+                                    <t t-else="">⚪ Programado</t>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="o_kanban_record_body">
+                            <div><i class="fa fa-bus text-primary me-1"></i> <field name="vehicle_id"/></div>
+                            <div><i class="fa fa-user text-secondary me-1"></i> <field name="driver_id"/></div>
+                            <div><i class="fa fa-clock-o text-muted me-1"></i> Salida: <field name="scheduled_departure"/></div>
+                            <div t-if="record.is_reserve_substituted.raw_value" class="text-info fw-bold">
+                                <i class="fa fa-retweet me-1"></i> Bus de Reserva Técnica
+                            </div>
+                            <div t-if="record.layover_warning.raw_value" class="text-warning fw-bold">
+                                <i class="fa fa-hourglass-end me-1"></i> ¡Parada Insuficiente!
+                            </div>
+                            <div t-if="record.current_geofence_status.raw_value">
+                                <i class="fa fa-map-marker text-success me-1"></i> <field name="current_geofence_status"/>
+                            </div>
+                            <div t-if="record.departure_delay_minutes.raw_value">
+                                <i class="fa fa-tachometer text-info me-1"></i> Desvío: <strong><field name="departure_delay_minutes"/> min</strong>
+                            </div>
+                            <div t-if="record.speed_alert.raw_value" class="text-danger font-weight-bold mt-1">
+                                <i class="fa fa-warning me-1"></i> ¡Exceso Velocidad! (<field name="last_speed_kmh"/> km/h)
+                            </div>
+                            <div t-if="record.deviation_alert.raw_value" class="text-danger font-weight-bold mt-1">
+                                <i class="fa fa-exclamation-triangle me-1"></i> ¡Desvío de Itinerario!
                             </div>
                         </div>
                     </t>

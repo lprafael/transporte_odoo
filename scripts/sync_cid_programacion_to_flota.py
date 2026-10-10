@@ -317,9 +317,105 @@ def sync():
     print(f"  [OK] servicios_especiales.programacion_operativa (Eléctricos): {len(progs)} registros sincronizados en flota_db.")
 
     # -------------------------------------------------------------
-    # PASO 3: Asegurar Rutas en Odoo (transit_route) - SOLO LOS 6 ELÉCTRICOS
+    # PASO 3: Asegurar Servicios (transit_service) y Rutas en Odoo (transit_route)
     # -------------------------------------------------------------
-    print("\n[+] Paso 3: Asegurando catálogo de los 6 ramales eléctricos en transit_route...")
+    print("\n[+] Paso 3: Asegurando transit_service y catálogo de ramales en transit_route...")
+    
+    # 3.1 Concesionaria Titular
+    local_cur.execute("SELECT id FROM transit_concessionaire WHERE id = 1;")
+    conc_row = local_cur.fetchone()
+    concessionaire_id = conc_row['id'] if conc_row else 1
+
+    # 3.2 Asegurar transit_service para E1, E2, E3
+    SERVICES_METADATA = [
+        {
+            'cid_id': 3,
+            'code': 'E1',
+            'name': 'Línea 20 Eléctrico 1 (San Lorenzo - Asunción)',
+            'description': 'Servicio de Buses Eléctricos que van por Eusebio Ayala (San Lorenzo - Asunción)',
+            'daily_target': 220,
+            'geofence_r': 150,
+            'buffer': 50,
+            'comp_pct': 70.0,
+            'incomp_pct': 80.0,
+            'tol_early': 5,
+            'tol_late': 10,
+            'routes': ['020c', '020d']
+        },
+        {
+            'cid_id': 8,
+            'code': 'E2',
+            'name': 'Línea 20 Eléctrico 2 (San Lorenzo - Asunción Variante)',
+            'description': 'Servicio de Buses Eléctricos Variante (San Lorenzo - Asunción)',
+            'daily_target': 300,
+            'geofence_r': 150,
+            'buffer': 50,
+            'comp_pct': 80.0,
+            'incomp_pct': 80.0,
+            'tol_early': 5,
+            'tol_late': 10,
+            'routes': ['020e', '020f']
+        },
+        {
+            'cid_id': 10,
+            'code': 'E3',
+            'name': 'Línea 20 Eléctrico 3 (Luque - Asunción)',
+            'description': 'Servicio de Buses Eléctricos por Mcal López y Aviadores (Luque - Asunción)',
+            'daily_target': 172,
+            'geofence_r': 100,
+            'buffer': 50,
+            'comp_pct': 60.0,
+            'incomp_pct': 80.0,
+            'tol_early': 5,
+            'tol_late': 10,
+            'routes': ['0210', '0211']
+        }
+    ]
+
+    service_code_to_id = {}
+    route_to_service_id = {}
+    for s in SERVICES_METADATA:
+        local_cur.execute("SELECT id FROM transit_service WHERE code = %s;", (s['code'],))
+        s_row = local_cur.fetchone()
+        if s_row:
+            s_id = s_row['id']
+            local_cur.execute("""
+                UPDATE transit_service
+                SET name = %s, description = %s, concessionaire_id = %s, cid_service_id = %s,
+                    daily_target_departures = %s, geofence_radius_m = %s, itinerary_buffer_m = %s,
+                    compliance_threshold_pct = %s, incomplete_threshold_pct = %s,
+                    tolerance_early_min = %s, tolerance_late_min = %s, agency_vmt_id = '004B',
+                    active = TRUE, write_date = NOW()
+                WHERE id = %s;
+            """, (s['name'], s['description'], concessionaire_id, s['cid_id'],
+                  s['daily_target'], s['geofence_r'], s['buffer'], s['comp_pct'], s['incomp_pct'],
+                  s['tol_early'], s['tol_late'], s_id))
+        else:
+            local_cur.execute("""
+                INSERT INTO transit_service
+                    (name, code, description, concessionaire_id, cid_service_id,
+                     daily_target_departures, geofence_radius_m, itinerary_buffer_m,
+                     compliance_threshold_pct, incomplete_threshold_pct,
+                     tolerance_early_min, tolerance_late_min, agency_vmt_id,
+                     operating_window_start, operating_window_end, spans_next_day,
+                     active, create_uid, write_uid, create_date, write_date)
+                VALUES
+                    (%s, %s, %s, %s, %s,
+                     %s, %s, %s,
+                     %s, %s,
+                     %s, %s, '004B',
+                     '04:00:00', '03:30:59', TRUE,
+                     TRUE, 1, 1, NOW(), NOW())
+                RETURNING id;
+            """, (s['name'], s['code'], s['description'], concessionaire_id, s['cid_id'],
+                  s['daily_target'], s['geofence_r'], s['buffer'], s['comp_pct'], s['incomp_pct'],
+                  s['tol_early'], s['tol_late']))
+            s_id = local_cur.fetchone()['id']
+        service_code_to_id[s['code']] = s_id
+        for r_code in s['routes']:
+            route_to_service_id[r_code] = s_id
+
+    # 3.3 Catálogo de los 6 Ramales Eléctricos
     ELECTRIC_ROUTES_CATALOG = {
         '020c': {'name': 'Ramal 020C - Eléctrico 1 (San Lorenzo a Asunción)', 'direction': 'inbound', 'origin': 'San Lorenzo', 'destination': 'Asunción Centro', 'km': 19.46},
         '020d': {'name': 'Ramal 020D - Eléctrico 1 (Asunción a San Lorenzo)', 'direction': 'outbound', 'origin': 'Asunción Centro', 'destination': 'San Lorenzo', 'km': 19.78},
@@ -331,26 +427,29 @@ def sync():
 
     route_code_to_id = {}
     for code, info in ELECTRIC_ROUTES_CATALOG.items():
+        s_id = route_to_service_id.get(code)
         local_cur.execute("SELECT id FROM transit_route WHERE code = %s;", (code,))
         row = local_cur.fetchone()
         if row:
             route_code_to_id[code] = row['id']
             local_cur.execute("""
                 UPDATE transit_route 
-                SET name = %s, direction = %s, origin = %s, destination = %s, distance_km = %s
+                SET name = %s, direction = %s, origin = %s, destination = %s, distance_km = %s,
+                    service_id = %s, concessionaire_id = %s
                 WHERE id = %s;
-            """, (info['name'], info['direction'], info['origin'], info['destination'], info['km'], row['id']))
+            """, (info['name'], info['direction'], info['origin'], info['destination'], info['km'],
+                  s_id, concessionaire_id, row['id']))
         else:
             local_cur.execute("""
-                INSERT INTO transit_route (code, name, agency_id, direction, origin, destination, distance_km, active)
-                VALUES (%s, %s, '004B', %s, %s, %s, %s, TRUE)
+                INSERT INTO transit_route (code, name, agency_id, direction, origin, destination, distance_km, service_id, concessionaire_id, active)
+                VALUES (%s, %s, '004B', %s, %s, %s, %s, %s, %s, TRUE)
                 RETURNING id;
-            """, (code, info['name'], info['direction'], info['origin'], info['destination'], info['km']))
+            """, (code, info['name'], info['direction'], info['origin'], info['destination'], info['km'], s_id, concessionaire_id))
             route_code_to_id[code] = local_cur.fetchone()['id']
             print(f"  [+] Ruta creada en transit_route: {code} -> ID {route_code_to_id[code]}")
 
     local_conn.commit()
-    print("  [OK] Los 6 Ramales Eléctricos asegurados en transit_route.")
+    print("  [OK] transit_service y transit_route perfectamente vinculados.")
 
     # -------------------------------------------------------------
     # PASO 4: Cargar Horarios Planificados en Odoo (transit_timetable)
@@ -394,6 +493,7 @@ def sync():
             continue
 
         route_id = route_code_to_id[ruta_hex]
+        parent_service_id = route_to_service_id.get(ruta_hex)
 
         # Hora salida decimal
         dep_float = salida.hour + (salida.minute / 60.0) + (salida.second / 3600.0)
@@ -424,10 +524,14 @@ def sync():
             local_cur.execute("""
                 UPDATE transit_timetable
                 SET route_id = %s,
+                    service_id = %s,
+                    concessionaire_id = %s,
                     service_code = %s,
+                    service_number = %s,
                     departure_time_float = %s,
                     arrival_time_float = %s,
                     scheduled_duration_minutes = %s,
+                    tipo_dia = %s,
                     day_of_week = %s,
                     direction = %s,
                     valid_from = %s,
@@ -435,17 +539,18 @@ def sync():
                     active = TRUE,
                     write_date = NOW()
                 WHERE id = %s;
-            """, (route_id, service_code, dep_float, arr_float, duration_minutes, day_code, sentido, f_inicio, f_fin, exist['id']))
+            """, (route_id, parent_service_id, concessionaire_id, service_code, num_serv, dep_float, arr_float, duration_minutes, str(tipo_dia), day_code, sentido, f_inicio, f_fin, exist['id']))
             timetable_updated += 1
         else:
             local_cur.execute("""
                 INSERT INTO transit_timetable
-                    (route_id, service_code, departure_time_float, arrival_time_float, scheduled_duration_minutes,
-                     day_of_week, direction, valid_from, valid_until, cid_programacion_id, active,
+                    (route_id, service_id, concessionaire_id, service_code, service_number,
+                     departure_time_float, arrival_time_float, scheduled_duration_minutes,
+                     tipo_dia, day_of_week, direction, valid_from, valid_until, cid_programacion_id, active,
                      create_uid, write_uid, create_date, write_date)
                 VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, 1, 1, NOW(), NOW());
-            """, (route_id, service_code, dep_float, arr_float, duration_minutes, day_code, sentido, f_inicio, f_fin, id_prog))
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, 1, 1, NOW(), NOW());
+            """, (route_id, parent_service_id, concessionaire_id, service_code, num_serv, dep_float, arr_float, duration_minutes, str(tipo_dia), day_code, sentido, f_inicio, f_fin, id_prog))
             timetable_inserted += 1
 
     local_conn.commit()

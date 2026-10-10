@@ -7,8 +7,8 @@ class TransitHoliday(models.Model):
     _description = 'Calendario Oficial de Feriados y Régimen Operativo'
     _order = 'date desc'
 
-    name = fields.Char(string='Descripción del Feriado', required=True, tracking=True)
-    date = fields.Date(string='Fecha', required=True, index=True, tracking=True)
+    name = fields.Char(string='Descripción del Feriado', required=True)
+    date = fields.Date(string='Fecha', required=True, index=True)
     active = fields.Boolean(default=True)
     is_national = fields.Boolean(string='Feriado Nacional Oficial', default=True)
     notes = fields.Text(string='Observaciones / Decreto')

@@ -121,20 +121,22 @@ class TransitBusSchedule(models.Model):
     )
 
     # Semáforo de Desempeño Operativo
-    green_count = fields.Integer(string='A Tiempo (Verde)', compute='_compute_semaphore_counts')
-    yellow_count = fields.Integer(string='Retrasos (Amarillo)', compute='_compute_semaphore_counts')
-    red_count = fields.Integer(string='Cancelados / Faltantes (Rojo)', compute='_compute_semaphore_counts')
-    blue_count = fields.Integer(string='Cubiertos con Reserva (Azul)', compute='_compute_semaphore_counts')
+    green_count = fields.Integer(string='A Tiempo (Verde)', compute='_compute_semaphore_counts', store=True)
+    yellow_count = fields.Integer(string='Retrasos (Amarillo)', compute='_compute_semaphore_counts', store=True)
+    red_count = fields.Integer(string='Cancelados / Faltantes (Rojo)', compute='_compute_semaphore_counts', store=True)
+    blue_count = fields.Integer(string='Cubiertos con Reserva (Azul)', compute='_compute_semaphore_counts', store=True)
 
     # Alertas Técnicas
     has_layover_alerts = fields.Boolean(
         string='Alertas de Tiempo en Parada',
         compute='_compute_layover_alerts',
+        store=True,
         help='Indica si algún tramo no cumple el tiempo mínimo de recarga, limpieza o mantenimiento'
     )
     layover_alerts_summary = fields.Char(
         string='Resumen Alertas Técnicas',
-        compute='_compute_layover_alerts'
+        compute='_compute_layover_alerts',
+        store=True
     )
 
     notes = fields.Text(string='Observaciones de Tráfico')

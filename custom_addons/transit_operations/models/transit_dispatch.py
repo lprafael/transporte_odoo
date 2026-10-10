@@ -161,6 +161,7 @@ class TransitDispatch(models.Model):
         string='Desvío Salida (min)',
         compute='_compute_performance',
         store=True,
+        aggregator='avg',
         help='Positivo indica retraso; negativo indica salida adelantada'
     )
     compliance_status = fields.Selection([
@@ -220,6 +221,7 @@ class TransitDispatch(models.Model):
         string='Km Recorridos',
         compute='_compute_km',
         store=True,
+        aggregator='sum',
         digits=(10, 1)
     )
 
@@ -254,8 +256,18 @@ class TransitDispatch(models.Model):
         'dispatch_id',
         string='Boletos / Pasajes'
     )
-    total_passengers = fields.Integer(string='Pasajeros Transportados', compute='_compute_passengers_revenue')
-    total_revenue = fields.Float(string='Recaudación Total (Gs.)', compute='_compute_passengers_revenue')
+    total_passengers = fields.Integer(
+        string='Pasajeros Transportados',
+        compute='_compute_passengers_revenue',
+        store=True,
+        aggregator='sum'
+    )
+    total_revenue = fields.Float(
+        string='Recaudación Total (Gs.)',
+        compute='_compute_passengers_revenue',
+        store=True,
+        aggregator='sum'
+    )
 
     @api.model_create_multi
     def create(self, vals_list):

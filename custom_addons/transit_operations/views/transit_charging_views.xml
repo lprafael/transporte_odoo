@@ -99,23 +99,21 @@
                 <field name="current_output_kw"/>
                 <field name="current_vehicle_id"/>
                 <templates>
-                    <t t-name="kanban-box">
-                        <div class="oe_kanban_global_click p-3">
-                            <div class="d-flex justify-content-between mb-2">
-                                <strong class="fs-6"><t t-esc="record.name.value"/></strong>
-                                <span t-attf-class="badge #{record.status.raw_value == 'available' ? 'text-bg-success' : record.status.raw_value == 'charging' ? 'text-bg-warning' : 'text-bg-danger'}">
-                                    <t t-esc="record.status.value"/>
-                                </span>
-                            </div>
-                            <div class="text-muted small mb-1">
-                                OCPP ID: <strong><t t-esc="record.ocpp_id.value"/></strong>
-                            </div>
-                            <div class="small mb-1">
-                                Potencia: <strong><t t-esc="record.current_output_kw.value"/> / <t t-esc="record.max_nominal_power_kw.value"/> kW</strong>
-                            </div>
-                            <div t-if="record.current_vehicle_id.raw_value" class="mt-2 text-primary fw-bold small">
-                                🔌 Bus: <t t-esc="record.current_vehicle_id.value"/>
-                            </div>
+                    <t t-name="card">
+                        <div class="d-flex justify-content-between mb-2">
+                            <strong class="fs-6"><t t-esc="record.name.value"/></strong>
+                            <span t-attf-class="badge #{record.status.raw_value == 'available' ? 'text-bg-success' : record.status.raw_value == 'charging' ? 'text-bg-warning' : 'text-bg-danger'}">
+                                <t t-esc="record.status.value"/>
+                            </span>
+                        </div>
+                        <div class="text-muted small mb-1">
+                            OCPP ID: <strong><t t-esc="record.ocpp_id.value"/></strong>
+                        </div>
+                        <div class="small mb-1">
+                            Potencia: <strong><t t-esc="record.current_output_kw.value"/> / <t t-esc="record.max_nominal_power_kw.value"/> kW</strong>
+                        </div>
+                        <div t-if="record.current_vehicle_id.raw_value" class="mt-2 text-primary fw-bold small">
+                            🔌 Bus: <t t-esc="record.current_vehicle_id.value"/>
                         </div>
                     </t>
                 </templates>

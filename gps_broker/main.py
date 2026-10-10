@@ -35,10 +35,18 @@ from typing import Dict, Any, List, Optional, Set
 
 import requests
 import psycopg2
-from psycopg2.extras import execute_values
+from psycopg2.extras import execute_values, RealDictCursor
 from fastapi import FastAPI, BackgroundTasks, Header, HTTPException, WebSocket, WebSocketDisconnect, Request, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from auth import (
+    get_current_user, get_current_user_optional, require_admin,
+    authenticate_user_db, create_session_token, verify_session_token, COOKIE_NAME
+)
+from admin_service import (
+    get_login_html, get_admin_users_html, list_system_users, list_concessionaires,
+    create_system_user, update_user_status, update_user_concessionaire, create_concessionaire
+)
 from pydantic import BaseModel, Field
 
 # Configuración de Logging
@@ -124,7 +132,7 @@ def save_vehicle_state(bus_id: str, state: Dict[str, Any]):
         try:
             serializable = dict(state)
             serializable["crossed_checkpoints"] = list(state.get("crossed_checkpoints", []))
-            redis_client.set(f"vehicle:{bus_id}", json.dumps(serializable), ex=86400)
+            redis_client.set(f"vehicle:{bus_id}", json.dumps(serializable))
             redis_client.sadd("active_buses_set", bus_id)
         except Exception as e:
             logger.debug(f"Redis set error: {e}")
@@ -132,8 +140,44 @@ def save_vehicle_state(bus_id: str, state: Dict[str, Any]):
 def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
     lat = v.get("latitude") if v.get("latitude") is not None else v.get("last_latitude")
     lon = v.get("longitude") if v.get("longitude") is not None else v.get("last_longitude")
-    speed = v.get("speed_kmh") if v.get("speed_kmh") is not None else v.get("last_speed_kmh", 0.0)
-    state = v.get("state") or v.get("current_state") or "IN_TRANSIT"
+    raw_speed = v.get("speed_kmh") if v.get("speed_kmh") is not None else v.get("last_speed_kmh", 0.0)
+
+    last_ping = v.get("last_ping_time", "")
+    minutes_ago = None
+    is_gps_fault = False
+    if last_ping:
+        try:
+            clean_ts = str(last_ping).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(clean_ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            minutes_ago = max(0.0, round((datetime.now(timezone.utc) - dt).total_seconds() / 60.0, 1))
+            if minutes_ago > 30.0:
+                is_gps_fault = True
+            else:
+                is_gps_fault = False
+        except Exception:
+            pass
+    else:
+        is_gps_fault = True
+        minutes_ago = 999.0
+
+    if is_gps_fault:
+        state = "GPS_FAULT"
+        speed = 0.0
+        status_disp = f"Falla de GPS ({int(minutes_ago or 30)}m sin reporte)"
+        geofence_name = f"Falla GPS (Sin señal >30m)"
+    else:
+        # Recuperar estado operativo real sin quedar atrapado en GPS_FAULT
+        state = v.get("current_state") or v.get("state") or "IN_TRANSIT"
+        if state == "GPS_FAULT":
+            state = "IN_TRANSIT"
+        speed = raw_speed
+        status_disp = v.get("status_display") or ("En Circulación" if state == "IN_TRANSIT" else state)
+        if status_disp.startswith("Falla de GPS"):
+            status_disp = "En Circulación" if state == "IN_TRANSIT" else ("En Cabecera" if state in ("AT_ORIGIN", "AT_DESTINATION") else state)
+        geofence_name = v.get("current_geofence_name", "En Ruta")
+
     checkpoints = v.get("crossed_checkpoints", [])
     if isinstance(checkpoints, set):
         checkpoints = list(checkpoints)
@@ -144,7 +188,7 @@ def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
         "route_id": v.get("route_id", ""),
         "state": state,
         "current_state": state,
-        "status_display": v.get("status_display") or ("En Circulación" if state == "IN_TRANSIT" else state),
+        "status_display": status_disp,
         "street_name": v.get("street_name", ""),
         "approaching": v.get("approaching", ""),
         "latitude": lat,
@@ -153,11 +197,15 @@ def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
         "last_longitude": lon,
         "speed_kmh": speed,
         "last_speed_kmh": speed,
+        "calculated_speed_kmh": v.get("calculated_speed_kmh"),
+        "is_gps_fault": is_gps_fault,
+        "minutes_since_ping": minutes_ago,
+        "gps_status": "GPS_FAULT" if is_gps_fault else "ONLINE",
         "heading_deg": v.get("heading_deg", 0.0),
         "odometer_km": v.get("odometer_km", 0.0),
         "last_ping_time": v.get("last_ping_time", ""),
-        "geofence_name": v.get("current_geofence_name", "En Ruta"),
-        "current_geofence_name": v.get("current_geofence_name", "En Ruta"),
+        "geofence_name": geofence_name,
+        "current_geofence_name": geofence_name,
         "speed_alert": bool(v.get("speed_alert", False)),
         "deviation_alert": bool(v.get("deviation_alert", False)),
         "progress_percent": v.get("progress_percent", 0.0),
@@ -202,29 +250,52 @@ def record_event_history(event: Dict[str, Any]):
 class WebSocketManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
+        self.connection_agency: Dict[WebSocket, Optional[str]] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, agency_id: Optional[str] = None):
         await websocket.accept()
         self.active_connections.add(websocket)
-        logger.info(f"Nuevo cliente WebSocket conectado. Total activos: {len(self.active_connections)}")
+        self.connection_agency[websocket] = agency_id.upper() if agency_id else None
+        logger.info(f"Nuevo cliente WebSocket conectado (Agency: {agency_id or 'GLOBAL'}). Total activos: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.discard(websocket)
+        self.connection_agency.pop(websocket, None)
         logger.info(f"Cliente WebSocket desconectado. Total activos: {len(self.active_connections)}")
 
     async def broadcast(self, message: Dict[str, Any]):
         if not self.active_connections:
             return
+        msg_agency = None
+        if message.get("type") == "vehicle_update":
+            veh = message.get("vehicle") or {}
+            msg_agency = (veh.get("agency_id") or "").upper()
+
         dead_connections = set()
-        for conn in self.active_connections:
+        for conn in list(self.active_connections):
             try:
+                client_agency = self.connection_agency.get(conn)
+                # Aislamiento Multi-Tenant: si el cliente es de una empresa, solo recibe pings de su flota
+                if client_agency and msg_agency and client_agency != msg_agency:
+                    continue
                 await conn.send_json(message)
             except Exception:
                 dead_connections.add(conn)
         for dead in dead_connections:
-            self.active_connections.discard(dead)
+            self.disconnect(dead)
+
+    def broadcast_sync(self, message: Dict[str, Any]):
+        if not self.active_connections:
+            return
+        global main_event_loop
+        if main_event_loop and main_event_loop.is_running():
+            try:
+                asyncio.run_coroutine_threadsafe(self.broadcast(message), main_event_loop)
+            except Exception as e:
+                logger.debug(f"broadcast_sync error: {e}")
 
 ws_manager = WebSocketManager()
+main_event_loop = None
 
 # ------------------------------------------------------------------------------
 # Modelos de Datos
@@ -247,6 +318,7 @@ class TelemetryPing(BaseModel):
     odometer_km: Optional[float] = Field(0.0)
     timestamp: Optional[str] = Field(None)
     fecha_hora: Optional[str] = Field(None)
+    fecha_hora_procesamiento: Optional[str] = Field(None)
     type: Optional[int] = Field(None)
     usuario_broker: Optional[str] = Field(None)
 
@@ -278,7 +350,8 @@ class TelemetryPing(BaseModel):
 
     @property
     def effective_timestamp(self) -> str:
-        return self.fecha_hora or self.timestamp or datetime.now(timezone.utc).isoformat()
+        # Priorizar fecha_hora_procesamiento (hora local real de Asunción en la llegada a VMT)
+        return self.fecha_hora_procesamiento or self.fecha_hora or self.timestamp or datetime.now(timezone.utc).isoformat()
 
 # ------------------------------------------------------------------------------
 # Motor Geodésico Espacial (Haversine & PostGIS)
@@ -291,6 +364,15 @@ def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
     a = math.sin(delta_phi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0)**2
     c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     return R * c
+
+def calculate_bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calcula el rumbo o azimut geodésico en grados (0 a 360) entre dos coordenadas."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_lambda = math.radians(lon2 - lon1)
+    y = math.sin(delta_lambda) * math.cos(phi2)
+    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(delta_lambda)
+    bearing_deg = (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+    return round(bearing_deg, 1)
 
 def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id: str = "004B") -> Optional[Dict[str, Any]]:
     """Calcula con PostGIS el porcentaje del recorrido completado y la distancia al trazado oficial."""
@@ -573,47 +655,197 @@ def sync_geofences_from_odoo():
         logger.debug(f"Aviso Odoo geocercas sync: {e}")
     return sync_geofences_from_postgis()
 
-@app.on_event("startup")
-def startup_event():
-    logger.info("🚀 Iniciando Broker GPS con Redis, PostgreSQL, PostGIS y WebSockets...")
-    sync_geofences_from_postgis()
+def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
+    """
+    Restaura el estado de la flota activa desde PostgreSQL (telemetry_ping)
+    hacia Redis y la memoria interna si Redis está vacío o si se fuerza la hidratación.
+    Garantiza que al reiniciar el broker o el contenedor, los buses sigan apareciendo
+    inmediatamente en /headway, /map, /compliance y demás dashboards.
+    """
+    global active_vehicles_memory
+    if not force and redis_client:
+        try:
+            keys = redis_client.keys("vehicle:*")
+            if len(keys) > 0:
+                logger.info(f"Redis ya contiene {len(keys)} vehículos activos en caché.")
+                return len(keys)
+        except Exception as e:
+            logger.debug(f"Aviso consultando Redis en hidratación: {e}")
 
-    # Iniciar Consumidor Mosquitto MQTT en hilo desacoplado
     try:
-        from mqtt_consumer import start_consumer_thread
-        start_consumer_thread()
-        logger.info("✅ Consumidor MQTT Mosquitto iniciado en background.")
+        conn = psycopg2.connect(
+            host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=3
+        )
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT DISTINCT ON (bus_internal_code)
+                bus_internal_code as mean_id,
+                license_plate,
+                route_id,
+                agency_id,
+                latitude,
+                longitude,
+                speed_kmh as velocidad,
+                heading_deg as rumbo,
+                odometer_km,
+                recorded_at as fecha_hora
+            FROM telemetry_ping
+            WHERE route_id IN ('020c', '020d', '020e', '020f', '0210', '0211')
+            ORDER BY bus_internal_code, recorded_at DESC;
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        count = 0
+        now_utc = datetime.now(timezone.utc)
+        for r in rows:
+            bus_key = str(r["mean_id"])
+            route_code = (r["route_id"] or "020f").lower()
+            plate = r["license_plate"] or f"COCHE-{bus_key}"
+            lat = float(r["latitude"])
+            lon = float(r["longitude"])
+            raw_speed = float(r["velocidad"] or 0.0)
+            heading = float(r["rumbo"] or 0.0)
+            rec_time = r["fecha_hora"].isoformat() if hasattr(r["fecha_hora"], "isoformat") else str(r["fecha_hora"])
+
+            # Comprobar antigüedad del ping (>30 min => Falla GPS)
+            minutes_old = 0.0
+            is_stale = False
+            try:
+                dt_p = r["fecha_hora"]
+                if not hasattr(dt_p, "tzinfo") or dt_p.tzinfo is None:
+                    dt_p = dt_p.replace(tzinfo=timezone.utc)
+                minutes_old = round((now_utc - dt_p).total_seconds() / 60.0, 1)
+                if minutes_old > 30.0:
+                    is_stale = True
+            except Exception:
+                pass
+
+            progress = calculate_shape_progress(lat, lon, route_code, r["agency_id"] or "004B")
+            pct = progress["progress_percent"] if progress else 0.0
+            dist_km = progress["distance_traveled_km"] if progress else 0.0
+            total_km = progress["total_km"] if progress else 0.0
+            dev_m = progress["deviation_meters"] if progress else 0.0
+
+            if is_stale:
+                curr_state = "GPS_FAULT"
+                geofence = f"Falla GPS (Sin señal hace {int(minutes_old)}m)"
+                speed = 0.0
+            elif route_code in ("0000", "", "depot", "taller"):
+                curr_state = "DEPOT"
+                geofence = "En Depósito / Patio"
+                speed = raw_speed
+            elif dev_m > MAX_DEVIATION_METERS:
+                curr_state = "OFF_ROUTE"
+                geofence = f"Desviado ({round(dev_m)}m)"
+                speed = raw_speed
+            elif pct >= 97.5 or (total_km > 0 and (total_km - dist_km) <= 0.35):
+                curr_state = "AT_DESTINATION"
+                geofence = "Terminal Llegada"
+                speed = raw_speed
+            elif (pct < 2.5 or dist_km < 0.35) and raw_speed < 5.0:
+                curr_state = "AT_ORIGIN"
+                geofence = "En Cabecera (Origen)"
+                speed = raw_speed
+            else:
+                curr_state = "IN_TRANSIT"
+                geofence = "En Itinerario"
+                speed = raw_speed
+
+            v_state = {
+                "bus_id": bus_key,
+                "license_plate": plate,
+                "agency_id": r["agency_id"] or "004B",
+                "route_id": route_code,
+                "current_state": curr_state,
+                "state": curr_state,
+                "crossed_checkpoints": set(),
+                "latitude": lat,
+                "longitude": lon,
+                "last_latitude": lat,
+                "last_longitude": lon,
+                "speed_kmh": speed,
+                "last_speed_kmh": speed,
+                "is_gps_fault": is_stale,
+                "minutes_since_ping": minutes_old,
+                "heading_deg": heading,
+                "odometer_km": float(r["odometer_km"] or 0.0),
+                "last_ping_time": rec_time,
+                "speed_alert": False,
+                "deviation_alert": (dev_m > MAX_DEVIATION_METERS) if not is_stale else False,
+                "current_geofence_name": geofence,
+                "progress_percent": pct,
+                "distance_traveled_km": dist_km,
+                "route_total_km": total_km,
+                "deviation_meters": dev_m,
+            }
+
+            if is_stale:
+                v_state["status_display"] = f"Falla de GPS ({int(minutes_old)}m sin reporte)"
+            elif street_resolver:
+                try:
+                    st_info = street_resolver.format_bus_status(
+                        current_state=curr_state,
+                        route_code=route_code,
+                        lat=lat,
+                        lon=lon,
+                        distance_km=dist_km,
+                        speed_kmh=speed,
+                        deviation_meters=dev_m
+                    )
+                    v_state["status_display"] = st_info["status_display"]
+                    v_state["street_name"] = st_info["street_name"]
+                    v_state["approaching"] = st_info["approaching"]
+                except Exception:
+                    v_state["status_display"] = "En Circulación" if curr_state == "IN_TRANSIT" else curr_state
+            else:
+                v_state["status_display"] = "En Circulación" if curr_state == "IN_TRANSIT" else curr_state
+
+            save_vehicle_state(bus_key, v_state)
+            count += 1
+
+        logger.info(f"✅ Hidratados {count} vehículos activos desde PostgreSQL a Redis / Memoria.")
+        return count
     except Exception as e:
-        logger.warning(f"No se pudo iniciar el consumidor MQTT: {e}")
+        logger.error(f"Error hidratando flota desde PostgreSQL: {e}")
+        return 0
 
 # ------------------------------------------------------------------------------
-# Endpoints de Telemetría (Ingesta HTTP & MQTT)
+# Hilo Continuo de Sincronización Directa contra VMT Monitoreo Central (.env L49-L55)
+# Permite consultar la flota Arapotí en tiempo real mientras el broker no reciba directo
 # ------------------------------------------------------------------------------
-@app.post("/api/v1/telemetry")
-@app.post("/telemetry/gps")
-@app.post("/api/v1/vmt/telemetry")
-async def receive_telemetry(
-    ping: TelemetryPing, 
-    background_tasks: BackgroundTasks,
-    x_device_token: Optional[str] = Header(None, alias="X-Device-Token")
-):
+VMT_DB_HOST = os.getenv("VMT_DB_HOST", "monitoreo.vmt.gov.py")
+VMT_DB_PORT = int(os.getenv("VMT_DB_PORT", "5432"))
+VMT_DB_NAME = os.getenv("VMT_DB_NAME", "bbdd-monitoreo-prod")
+VMT_DB_USER = os.getenv("VMT_DB_USER", "jefe-CID")
+VMT_DB_PASS = os.getenv("VMT_DB_PASS", "vmtdmt")
+VMT_AGENCY_ID = os.getenv("VMT_AGENCY_ID", "004B")
+
+def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optional[BackgroundTasks] = None) -> Dict[str, Any]:
     bus_key = ping.effective_bus_id
     now_iso = ping.effective_timestamp
     speed = ping.effective_speed
     heading = ping.effective_heading
     plate = ping.effective_license_plate
 
-    # 1. Validación de Token
-    if DEVICE_API_TOKEN and x_device_token != DEVICE_API_TOKEN:
-        raise HTTPException(status_code=401, detail="Dispositivo no autorizado. Provea X-Device-Token válido.")
+    # Validación de desfase de reloj del GPS (>2 horas de diferencia => alinear a tiempo real actual)
+    now_dt = datetime.now(timezone.utc)
+    try:
+        clean_ts = str(now_iso).replace("Z", "+00:00")
+        dt_ping = datetime.fromisoformat(clean_ts)
+        if dt_ping.tzinfo is None:
+            dt_ping = dt_ping.replace(tzinfo=timezone.utc)
+        diff_hours = abs((now_dt - dt_ping).total_seconds()) / 3600.0
+        if diff_hours > 2.0:
+            now_iso = now_dt.isoformat()
+    except Exception:
+        now_iso = now_dt.isoformat()
 
-    # 1.1 Validación de Coordenadas Geográficas (Res. GVMT 065/2024 Sección 5.1)
+    # Validación de Coordenadas Geográficas (Res. GVMT 065/2024 Sección 5.1)
     if (abs(ping.latitude) < 1e-6 and abs(ping.longitude) < 1e-6) or not (-90.0 <= ping.latitude <= 90.0) or not (-180.0 <= ping.longitude <= 180.0):
         logger.warning(f"Coordenadas descartadas (inválidas o 0,0): ({ping.latitude}, {ping.longitude}) para móvil {bus_key}")
         return {"status": "ignored", "reason": "invalid_coordinates", "bus_id": bus_key}
-
-    # Bandera de baja precisión GPS (>50m según Res. GVMT 065/2024 Sección 5.1)
-    is_low_accuracy = bool(ping.precision and ping.precision > 50)
 
     # 2. Recuperar o Inicializar Estado
     v_state = get_vehicle_state(bus_key)
@@ -624,10 +856,12 @@ async def receive_telemetry(
             "agency_id": ping.agency_id or "004B",
             "route_id": ping.route_id or "020f",
             "current_state": "AT_ORIGIN",
+            "state": "AT_ORIGIN",
             "crossed_checkpoints": set(),
             "last_latitude": ping.latitude,
             "last_longitude": ping.longitude,
             "last_speed_kmh": speed,
+            "speed_kmh": speed,
             "heading_deg": heading,
             "odometer_km": ping.odometer_km or 0.0,
             "last_ping_time": now_iso,
@@ -640,10 +874,46 @@ async def receive_telemetry(
             "deviation_meters": 0.0,
         }
 
+    # 2.1 Cálculo Diferencial de Velocidad con los dos últimos puntos GPS
+    prev_lat = v_state.get("last_latitude")
+    prev_lon = v_state.get("last_longitude")
+    prev_time = v_state.get("last_ping_time")
+    calculated_speed = None
+
+    if prev_lat is not None and prev_lon is not None and prev_time:
+        try:
+            dt_prev = datetime.fromisoformat(str(prev_time).replace("Z", "+00:00"))
+            dt_curr = datetime.fromisoformat(str(now_iso).replace("Z", "+00:00"))
+            delta_sec = (dt_curr - dt_prev).total_seconds()
+            if 0.5 <= delta_sec <= 600:
+                dist_m = haversine_meters(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
+                if dist_m < 1.0: # Umbral cinemático exacto: si desplazamiento < 1m, bus detenido
+                    calculated_speed = 0.0
+                else:
+                    calc_kmh = round((dist_m / delta_sec) * 3.6, 1)
+                    if calc_kmh <= 120.0:
+                        calculated_speed = calc_kmh
+                    # Cálculo cinemático de rumbo real entre los 2 últimos puntos
+                    calc_heading = calculate_bearing_deg(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
+                    if calc_heading is not None:
+                        heading = calc_heading
+        except Exception as e:
+            logger.debug(f"Error cálculo velocidad/rumbo 2 últimos puntos: {e}")
+
+    if calculated_speed is not None:
+        speed = calculated_speed
+
+    v_state["prev_latitude"] = prev_lat
+    v_state["prev_longitude"] = prev_lon
+    v_state["prev_ping_time"] = prev_time
+    v_state["calculated_speed_kmh"] = calculated_speed
     v_state["last_latitude"] = ping.latitude
     v_state["last_longitude"] = ping.longitude
     v_state["last_speed_kmh"] = speed
+    v_state["speed_kmh"] = speed
     v_state["heading_deg"] = heading
+    v_state["is_gps_fault"] = False
+    v_state["minutes_since_ping"] = 0.0
     if ping.route_id:
         v_state["route_id"] = ping.route_id
     if ping.agency_id:
@@ -653,7 +923,10 @@ async def receive_telemetry(
     v_state["last_ping_time"] = now_iso
 
     # 3. Guardado Asíncrono en PostgreSQL
-    background_tasks.add_task(insert_telemetry_to_pg, ping)
+    if background_tasks:
+        background_tasks.add_task(insert_telemetry_to_pg, ping)
+    else:
+        threading.Thread(target=insert_telemetry_to_pg, args=(ping,), daemon=True).start()
 
     # 4. Cálculo PostGIS de Progreso en Ruta y Desvío Exacto
     progress = calculate_shape_progress(
@@ -674,86 +947,36 @@ async def receive_telemetry(
         v_state["route_total_km"] = total_km
         v_state["deviation_meters"] = dev_m
 
-        # Alerta por desvío de la traza de ruta (> MAX_DEVIATION_METERS)
         if dev_m > MAX_DEVIATION_METERS:
-            if not v_state.get("deviation_alert"):
-                v_state["deviation_alert"] = True
-                event_data = {
-                    "license_plate": plate,
-                    "internal_number": bus_key,
-                    "event_type": "deviation_alert",
-                    "timestamp": now_iso,
-                    "location": {"latitude": ping.latitude, "longitude": ping.longitude},
-                    "telemetry": {"deviation_meters": dev_m}
-                }
-                background_tasks.add_task(dispatch_odoo_webhook_with_retry, event_data)
-                record_event_history({"time": now_iso, "bus": bus_key, "type": "deviation", "desc": f"Desvío de trazado ({round(dev_m)}m)"})
+            v_state["deviation_alert"] = True
         else:
             v_state["deviation_alert"] = False
 
-        # --- DETERMINACIÓN DEL ESTADO OPERATIVO INTELIGENTE ---
         if route_code in ("0000", "", "depot", "taller"):
             v_state["current_state"] = "DEPOT"
             v_state["current_geofence_name"] = "En Depósito / Patio"
-
         elif dev_m > MAX_DEVIATION_METERS:
             v_state["current_state"] = "OFF_ROUTE"
             v_state["current_geofence_name"] = f"Desviado ({round(dev_m)}m)"
-
         elif ping.type == 1 or pct >= 97.5 or (total_km > 0 and (total_km - dist_km) <= 0.35):
-            # Llegada a terminal destino
             v_state["current_state"] = "AT_DESTINATION"
             v_state["current_geofence_name"] = "Terminal Llegada"
-
         elif (pct < 2.5 or dist_km < 0.35) and speed < 5.0 and ping.type != 0:
-            # En cabecera de origen esperando salida
             v_state["current_state"] = "AT_ORIGIN"
             v_state["current_geofence_name"] = "En Cabecera (Origen)"
-
         else:
-            # En circulación activa a lo largo del itinerario
             v_state["current_state"] = "IN_TRANSIT"
             v_state["current_geofence_name"] = "En Itinerario"
 
-    # Notificaciones automáticas de transición de estado hacia Odoo
-    if old_state == "AT_ORIGIN" and v_state["current_state"] == "IN_TRANSIT":
-        event_data = {
-            "license_plate": plate,
-            "internal_number": bus_key,
-            "event_type": "departure",
-            "timestamp": now_iso,
-            "location": {"checkpoint_name": "Salida a Itinerario", "latitude": ping.latitude, "longitude": ping.longitude},
-            "telemetry": {"odometer_km": v_state["odometer_km"], "speed_kmh": speed}
-        }
-        background_tasks.add_task(dispatch_odoo_webhook_with_retry, event_data)
-        record_event_history({"time": now_iso, "bus": bus_key, "type": "departure", "desc": f"Salida de cabecera a circulación (km {round(v_state.get('distance_traveled_km', 0.0), 1)})"})
-
-    elif old_state == "IN_TRANSIT" and v_state["current_state"] == "AT_DESTINATION":
-        event_data = {
-            "license_plate": plate,
-            "internal_number": bus_key,
-            "event_type": "arrival",
-            "timestamp": now_iso,
-            "location": {"checkpoint_name": "Llegada a Destino", "latitude": ping.latitude, "longitude": ping.longitude},
-            "telemetry": {"odometer_km": v_state["odometer_km"], "speed_kmh": speed}
-        }
-        background_tasks.add_task(dispatch_odoo_webhook_with_retry, event_data)
-        record_event_history({"time": now_iso, "bus": bus_key, "type": "arrival", "desc": f"Llegada a terminal destino (km {round(v_state.get('distance_traveled_km', 0.0), 1)})"})
+    v_state["state"] = v_state["current_state"]
 
     # Alerta por Velocidad
-    if speed > SPEED_LIMIT_KMH and not v_state["speed_alert"]:
+    if speed > SPEED_LIMIT_KMH and not v_state.get("speed_alert"):
         v_state["speed_alert"] = True
-        event_data = {
-            "license_plate": plate,
-            "internal_number": bus_key,
-            "event_type": "speeding_alert",
-            "timestamp": now_iso,
-            "location": {"latitude": ping.latitude, "longitude": ping.longitude},
-            "telemetry": {"speed_kmh": speed}
-        }
-        background_tasks.add_task(dispatch_odoo_webhook_with_retry, event_data)
-        record_event_history({"time": now_iso, "bus": bus_key, "type": "speeding", "desc": f"Exceso de velocidad: {speed} km/h"})
-    # 5.5 Resolución Contextual de Calles e Intersección ("Circulando (Calle X aprox. a Calle Y)")
+    elif speed <= SPEED_LIMIT_KMH:
+        v_state["speed_alert"] = False
+
+    # 5.5 Resolución Contextual de Calles e Intersección
     if street_resolver:
         try:
             st_info = street_resolver.format_bus_status(
@@ -782,7 +1005,10 @@ async def receive_telemetry(
         "type": "vehicle_update",
         "vehicle": format_vehicle_for_client(v_state)
     }
-    background_tasks.add_task(ws_manager.broadcast, ws_payload)
+    if background_tasks:
+        background_tasks.add_task(ws_manager.broadcast, ws_payload)
+    else:
+        ws_manager.broadcast_sync(ws_payload)
 
     return {
         "status": "success",
@@ -793,6 +1019,135 @@ async def receive_telemetry(
         "geofence": v_state["current_geofence_name"],
         "timestamp": now_iso
     }
+
+def vmt_continuous_sync_worker():
+    """Hilo continuo que consulta la BD del Viceministerio de Transporte (VMT) según .env"""
+    logger.info(f"🔄 Iniciando sincronización continua con VMT ({VMT_DB_HOST}:{VMT_DB_PORT}/{VMT_DB_NAME}) para Agencia {VMT_AGENCY_ID}...")
+    conn = None
+    while True:
+        try:
+            if not conn or conn.closed:
+                conn = psycopg2.connect(
+                    host=VMT_DB_HOST,
+                    port=VMT_DB_PORT,
+                    dbname=VMT_DB_NAME,
+                    user=VMT_DB_USER,
+                    password=VMT_DB_PASS,
+                    sslmode="require",
+                    connect_timeout=10
+                )
+                logger.info(f"✅ Conexión establecida con VMT Monitoreo Central ({VMT_DB_HOST}). Flota en sincronía.")
+
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            # Resolver dinámicamente todas las empresas concesionarias activas en la BD local
+            target_agencies = [VMT_AGENCY_ID]
+            try:
+                pg_c = psycopg2.connect(host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2)
+                cur_c = pg_c.cursor()
+                cur_c.execute("SELECT code FROM transit_concessionaire WHERE active = true")
+                db_codes = [row[0].strip().upper() for row in cur_c.fetchall() if row[0]]
+                cur_c.close()
+                pg_c.close()
+                if db_codes:
+                    target_agencies = db_codes
+            except Exception:
+                pass
+
+            query = """
+                SELECT mean_id, agency_id, route_id, driver_id, latitude, longitude, rumbo, velocidad,
+                       fecha_hora, fecha_hora_procesamiento, rn
+                FROM (
+                    SELECT id, agency_id, mean_id, route_id, driver_id, latitude, longitude, rumbo, velocidad,
+                           fecha_hora, fecha_hora_procesamiento,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY mean_id 
+                               ORDER BY COALESCE(fecha_hora_procesamiento, fecha_hora) DESC
+                           ) as rn
+                    FROM app_monitoreo_mensajeoperativo
+                    WHERE agency_id = ANY(%s)
+                      AND (fecha_hora_procesamiento >= NOW() - INTERVAL '4 hour' OR fecha_hora >= NOW() - INTERVAL '4 hour')
+                ) t
+                WHERE rn <= 2
+                ORDER BY mean_id, rn DESC;
+            """
+            cur.execute(query, (target_agencies,))
+            rows = cur.fetchall()
+            cur.close()
+
+            for r in rows:
+                bus_key = str(r["mean_id"]).strip()
+                if not bus_key:
+                    continue
+                # Hora real de llegada al servidor VMT en Asunción
+                rec_dt = r.get("fecha_hora_procesamiento") or r.get("fecha_hora")
+                rec_iso = rec_dt.isoformat() if hasattr(rec_dt, "isoformat") else str(rec_dt)
+
+                ping_obj = TelemetryPing(
+                    bus_id=bus_key,
+                    mean_id=bus_key,
+                    agency_id=r.get("agency_id") or VMT_AGENCY_ID,
+                    route_id=r.get("route_id") or "020f",
+                    driver_id=r.get("driver_id") or "",
+                    latitude=float(r["latitude"]),
+                    longitude=float(r["longitude"]),
+                    velocidad=float(r["velocidad"] or 0.0),
+                    rumbo=float(r["rumbo"] or 0.0),
+                    fecha_hora=rec_iso,
+                    fecha_hora_procesamiento=rec_iso
+                )
+                process_telemetry_ping_internal(ping_obj)
+
+        except Exception as e:
+            logger.warning(f"Aviso en sincronización continua VMT: {e}")
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+            conn = None
+
+        time.sleep(5)
+
+def start_vmt_poller_thread():
+    t = threading.Thread(target=vmt_continuous_sync_worker, daemon=True, name="VMT-Continuous-Poller")
+    t.start()
+
+@app.on_event("startup")
+def startup_event():
+    global main_event_loop
+    try:
+        main_event_loop = asyncio.get_running_loop()
+    except Exception:
+        pass
+    logger.info("🚀 Iniciando Broker GPS con Redis, PostgreSQL, PostGIS y WebSockets...")
+    sync_geofences_from_postgis()
+    hydrate_active_fleet_from_postgis()
+
+    # Iniciar Consumidor Mosquitto MQTT en hilo desacoplado
+    try:
+        from mqtt_consumer import start_consumer_thread
+        start_consumer_thread()
+        logger.info("✅ Consumidor MQTT Mosquitto iniciado en background.")
+    except Exception as e:
+        logger.warning(f"No se pudo iniciar el consumidor MQTT: {e}")
+
+    # Iniciar Sincronizador Continuo directo a BD Monitoreo VMT (.env: VMT_DB_HOST, VMT_AGENCY_ID)
+    start_vmt_poller_thread()
+
+# ------------------------------------------------------------------------------
+# Endpoints de Telemetría (Ingesta HTTP & MQTT)
+# ------------------------------------------------------------------------------
+@app.post("/api/v1/telemetry")
+@app.post("/telemetry/gps")
+@app.post("/api/v1/vmt/telemetry")
+async def receive_telemetry(
+    ping: TelemetryPing, 
+    background_tasks: BackgroundTasks,
+    x_device_token: Optional[str] = Header(None, alias="X-Device-Token")
+):
+    if DEVICE_API_TOKEN and x_device_token != DEVICE_API_TOKEN:
+        raise HTTPException(status_code=401, detail="Dispositivo no autorizado. Provea X-Device-Token válido.")
+    return process_telemetry_ping_internal(ping, background_tasks=background_tasks)
 
 # ------------------------------------------------------------------------------
 # Endpoints REST de Shapes, Paradas y Rutas
@@ -896,13 +1251,115 @@ async def test_mqtt_ping(
 # ------------------------------------------------------------------------------
 # WebSocket y Radar Dashboard
 # ------------------------------------------------------------------------------
+PG_CONFIG = {
+    "host": PG_HOST,
+    "port": PG_PORT,
+    "dbname": PG_DB,
+    "user": PG_USER,
+    "password": PG_PASS
+}
+
+# ------------------------------------------------------------------------------
+# Rutas de Autenticación & Control de Sesiones Multi-Tenant
+# ------------------------------------------------------------------------------
+@app.get("/", include_in_schema=False)
+async def root_redirect(request: Request):
+    user = get_current_user_optional(request)
+    if user:
+        return RedirectResponse("/map", status_code=303)
+    return RedirectResponse("/login", status_code=303)
+
+@app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+async def login_page(request: Request):
+    user = get_current_user_optional(request)
+    if user:
+        return RedirectResponse("/map", status_code=303)
+    return get_login_html()
+
+@app.post("/login", include_in_schema=False)
+async def login_action(request: Request):
+    form = await request.form()
+    login_str = form.get("login", "").strip()
+    password_str = form.get("password", "")
+
+    user_data = authenticate_user_db(login_str, password_str, PG_CONFIG)
+    if not user_data:
+        return HTMLResponse(get_login_html("Credenciales incorrectas o usuario no habilitado."), status_code=401)
+
+    token = create_session_token(user_data)
+    response = RedirectResponse("/map", status_code=303)
+    response.set_cookie(key=COOKIE_NAME, value=token, httponly=True, max_age=86400 * 7, samesite="lax")
+    return response
+
+@app.get("/logout", include_in_schema=False)
+async def logout_action():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(COOKIE_NAME)
+    return response
+
+# ------------------------------------------------------------------------------
+# Panel y APIs de Administración Multi-Tenant
+# ------------------------------------------------------------------------------
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users_view(request: Request):
+    user = get_current_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado: Se requieren permisos de Administrador Global.")
+    return get_admin_users_html(user)
+
+@app.post("/api/v1/admin/users/create")
+async def api_admin_create_user(request: Request):
+    user = require_admin(request)
+    data = await request.json()
+    res = create_system_user(
+        login=data.get("login", ""),
+        password=data.get("password", ""),
+        concessionaire_id=data.get("concessionaire_id"),
+        is_admin=data.get("is_admin", False)
+    )
+    return res
+
+@app.post("/api/v1/admin/users/toggle")
+async def api_admin_toggle_user(request: Request):
+    user = require_admin(request)
+    data = await request.json()
+    return update_user_status(user_id=int(data["user_id"]), active=bool(data["active"]))
+
+@app.post("/api/v1/admin/users/update")
+async def api_admin_update_user(request: Request):
+    user = require_admin(request)
+    data = await request.json()
+    return update_user_concessionaire(
+        user_id=int(data["user_id"]),
+        concessionaire_id=data.get("concessionaire_id"),
+        new_password=data.get("new_password")
+    )
+
+@app.post("/api/v1/admin/concessionaires/create")
+async def api_admin_create_concessionaire(request: Request):
+    user = require_admin(request)
+    data = await request.json()
+    return create_concessionaire(name=data.get("name", ""), code=data.get("code", ""))
+
+# ------------------------------------------------------------------------------
+# WebSocket y API Telemetría con Aislamiento de Flota por Tenant
+# ------------------------------------------------------------------------------
 @app.websocket("/ws/live")
 async def websocket_live_radar(websocket: WebSocket):
-    await ws_manager.connect(websocket)
+    # Identificar tenant mediante cookie de sesión en WebSocket
+    token = websocket.cookies.get(COOKIE_NAME)
+    user = verify_session_token(token) if token else None
+    client_agency = user.get("agency_id") if (user and not user.get("is_admin")) else None
+
+    await ws_manager.connect(websocket, agency_id=client_agency)
     try:
+        vehicles = get_all_active_vehicles()
+        if client_agency:
+            vehicles = [v for v in vehicles if (v.get("agency_id") or "").upper() == client_agency.upper()]
+
         initial_data = {
             "type": "init",
-            "vehicles": get_all_active_vehicles(),
+            "vehicles": vehicles,
             "events": event_history_memory[-10:],
             "shapes": get_active_shapes_geojson(),
             "stops": get_active_stops_geojson()
@@ -920,8 +1377,22 @@ async def websocket_live_radar(websocket: WebSocket):
         ws_manager.disconnect(websocket)
 
 @app.get("/api/v1/live")
-async def get_live_fleet():
+async def get_live_fleet(request: Request, agency_id: Optional[str] = Query(None)):
+    user = get_current_user_optional(request)
     vehicles = get_all_active_vehicles()
+    if not vehicles:
+        hydrate_active_fleet_from_postgis(force=True)
+        vehicles = get_all_active_vehicles()
+
+    # Filtrar estrictamente según el usuario logueado
+    if user:
+        if not user.get("is_admin") and user.get("agency_id"):
+            # Operador de concesionaria: SOLO ve su flota
+            vehicles = [v for v in vehicles if (v.get("agency_id") or "").upper() == user["agency_id"].upper()]
+        elif user.get("is_admin") and agency_id:
+            # Administrador Global con filtro opcional de empresa
+            vehicles = [v for v in vehicles if (v.get("agency_id") or "").upper() == agency_id.upper()]
+
     return {
         "status": "success",
         "count": len(vehicles),
@@ -968,17 +1439,47 @@ async def health_check():
         }
     }
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
+
+@app.get("/.well-known/appspecific/{path:path}", include_in_schema=False)
+async def devtools_probe(path: str):
+    return Response(status_code=204)
+
 # ------------------------------------------------------------------------------
 # Tablero Lineal de Frecuencias & Detector de Pegonamiento (Headway Monitoring)
 # ------------------------------------------------------------------------------
 from headway_service import get_headway_data, get_headway_html
 
+@app.post("/api/v1/fleet/hydrate")
+async def api_hydrate_fleet(force: bool = Query(True, description="Forzar recarga completa desde PostgreSQL")):
+    """Recarga el estado de los buses activos desde PostgreSQL hacia Redis y memoria."""
+    count = hydrate_active_fleet_from_postgis(force=force)
+    return {"status": "success", "hydrated_buses": count}
+
 @app.get("/api/v1/headway/data")
-async def api_headway_data():
-    return get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory)
+async def api_headway_data(request: Request, agency_id: Optional[str] = Query(None)):
+    user = get_current_user_optional(request)
+    target_agency = None
+    if user:
+        if not user.get("is_admin") and user.get("agency_id"):
+            target_agency = user["agency_id"]
+        elif user.get("is_admin") and agency_id:
+            target_agency = agency_id
+
+    hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory, agency_id=target_agency)
+    if hw_data.get("total_active_buses", 0) == 0:
+        logger.info("Headway solicitó datos pero encontró 0 buses. Ejecutando auto-hidratación desde PostgreSQL...")
+        hydrate_active_fleet_from_postgis(force=True)
+        hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory, agency_id=target_agency)
+    return hw_data
 
 @app.get("/headway", response_class=HTMLResponse)
-async def headway_dashboard_view():
+async def headway_dashboard_view(request: Request):
+    user = get_current_user_optional(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
     return get_headway_html()
 
 @app.get("/api/v1/bunching/alerts")
@@ -1216,62 +1717,141 @@ async def api_schedules_today(
     }
 
 # ------------------------------------------------------------------------------
+# Conexión e Integración Waze for Cities (Connected Citizens Program - CCP)
+# ------------------------------------------------------------------------------
+from waze_service import fetch_waze_ccp_feed, correlate_waze_with_transit, get_waze_deep_link
+
+@app.get("/api/v1/waze/traffic")
+async def api_waze_traffic(refresh: bool = Query(False, description="Forzar refresco del feed Waze")):
+    """
+    Retorna el feed de tráfico en tiempo real de Waze for Cities (CCP):
+    Incidentes (accidentes, obras, peligros) y congestiones viales (jams con nivel y retraso).
+    """
+    return fetch_waze_ccp_feed(force_refresh=refresh)
+
+@app.get("/api/v1/waze/corridor-impacts")
+async def api_waze_corridor_impacts():
+    """
+    Cruza los incidentes y atascos de Waze con los 6 corredores de transporte de la flota.
+    Calcula demoras inducidas y lista coches afectados en cada ramal.
+    """
+    waze_data = fetch_waze_ccp_feed()
+    hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "waze_source": waze_data.get("source"),
+        "total_alerts": waze_data.get("total_alerts", 0),
+        "total_jams": waze_data.get("total_jams", 0),
+        "corridor_impacts": correlate_waze_with_transit(waze_data, hw_data.get("routes", []))
+    }
+
+# ------------------------------------------------------------------------------
 # Dashboard Radar Web en Vivo con PostGIS Shapes y Visor Histórico
 # ------------------------------------------------------------------------------
 @app.get("/map", response_class=HTMLResponse)
-async def live_map_view():
+async def live_map_view(request: Request):
+    user = get_current_user_optional(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    
+    concessionaires = list_concessionaires()
+    conc_select_options = "".join([
+        f'<option value="{c["code"]}">[{c["code"]}] {c["name"]}</option>'
+        for c in concessionaires
+    ])
+
+    if user.get("is_admin"):
+        tenant_badge = f'''
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <select id="admin-tenant-select" onchange="switchAdminTenant(this.value)" style="background: #1e293b; color: #38bdf8; border: 1px solid #334155; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; outline: none; cursor: pointer;">
+                <option value="">🏢 Todas las Flotas (Vista Regulador)</option>
+                {conc_select_options}
+            </select>
+            <a href="/admin/users" class="btn-hist" style="background: rgba(56, 189, 248, 0.2); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; text-decoration: none;">👥 Usuarios & Concesionarias</a>
+        </div>
+        '''
+    else:
+        tenant_badge = f'<span class="badge badge-info">🏢 {user.get("concessionaire_name", "Mi Empresa")} ({user.get("agency_id", "--")})</span>'
+
+    user_info_snippet = f'''
+    <span style="font-size: 11px; color: #cbd5e1; font-weight: 600;">👤 {user["login"]}</span>
+    <a href="/logout" class="btn-hist" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; text-decoration: none;">🚪 Salir</a>
+    '''
     return """<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Poliverso Transit | Radar Integral con Trazados Históricos</title>
+    <title>Poliverso Transit | Radar Integral con Geocercas y Estado de Flota</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Inter', sans-serif; background-color: #0b1120; color: #f8fafc; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        header { background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px); padding: 10px 24px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+        header { background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px); padding: 8px 20px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
         .logo-group { display: flex; align-items: center; gap: 12px; }
         .badge { padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; display: inline-flex; align-items: center; gap: 5px; }
         .badge-ws { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
         .badge-poll { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
         .badge-info { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
-        .controls-bar { display: flex; align-items: center; gap: 14px; }
-        .date-picker-box { display: flex; align-items: center; gap: 8px; font-size: 12px; background: #1e293b; padding: 5px 12px; border-radius: 8px; border: 1px solid #334155; }
-        .date-picker-box input { background: #0f172a; border: 1px solid #475569; color: #f8fafc; padding: 3px 6px; border-radius: 4px; font-size: 12px; }
-        .btn-hist { background: #0284c7; color: white; border: none; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; }
+        .controls-bar { display: flex; align-items: center; gap: 12px; }
+        .date-picker-box { display: flex; align-items: center; gap: 8px; font-size: 11px; background: #1e293b; padding: 4px 10px; border-radius: 8px; border: 1px solid #334155; }
+        .date-picker-box input { background: #0f172a; border: 1px solid #475569; color: #f8fafc; padding: 3px 6px; border-radius: 4px; font-size: 11px; }
+        .btn-hist { background: #0284c7; color: white; border: none; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; }
         .btn-hist:hover { background: #0369a1; }
-        .metrics-bar { display: flex; gap: 12px; }
-        .metric-card { background: #1e293b; padding: 5px 12px; border-radius: 8px; border: 1px solid #334155; font-size: 12px; }
-        .metric-card strong { color: #38bdf8; font-size: 15px; margin-left: 4px; }
+        .metrics-bar { display: flex; gap: 8px; }
+        .metric-card { background: #1e293b; padding: 4px 10px; border-radius: 8px; border: 1px solid #334155; font-size: 11px; }
+        .metric-card strong { color: #38bdf8; font-size: 14px; margin-left: 4px; }
+        
+        /* Barra de Control de Geocercas Configurables */
+        .geofence-toolbar { background: #0f172a; padding: 6px 20px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 11px; z-index: 999; flex-wrap: wrap; }
+        .geofence-ctrl-group { display: flex; align-items: center; gap: 6px; background: #1e293b; padding: 3px 10px; border-radius: 6px; border: 1px solid #334155; }
+        .val-badge { font-weight: 800; padding: 1px 6px; border-radius: 4px; font-size: 11px; min-width: 42px; text-align: center; }
+        
+        .btn-realtime-toggle { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 800; cursor: pointer; border: 1px solid transparent; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-realtime-active { background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: #10b981; }
+        .btn-realtime-paused { background: rgba(239, 68, 68, 0.2); color: #f87171; border-color: #ef4444; }
+
+        /* Marcador Direccional con Rumbo y Velocidad */
+        .dir-bus-marker { display: flex; flex-direction: column; align-items: center; position: relative; cursor: pointer; user-select: none; }
+        .dir-bus-arrow { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #ffffff; display: flex; align-items: center; justify-content: center; transition: transform 0.4s ease, background-color 0.3s ease; box-shadow: 0 0 10px rgba(0,0,0,0.6); }
+        .dir-bus-badge { position: absolute; top: 27px; background: rgba(15, 23, 42, 0.95); border: 1px solid #38bdf8; border-radius: 4px; padding: 1px 4px; font-size: 9px; font-weight: 800; display: flex; align-items: center; gap: 3px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
+        .dir-bus-badge .bus-num { color: #f8fafc; }
+        .dir-bus-badge .bus-spd { font-size: 8px; }
+        .dir-bus-marker.is-fault .dir-bus-arrow { background: #475569 !important; border-color: #ef4444 !important; }
+        .bus-card.is-hidden { opacity: 0.35; }
+        
         #app-layout { display: flex; flex: 1; position: relative; overflow: hidden; }
         #map { flex: 1; height: 100%; z-index: 1; }
         #sidebar { width: 380px; background: #111827; border-left: 1px solid #1f2937; display: flex; flex-direction: column; z-index: 10; }
-        .sidebar-header { padding: 12px 16px; border-bottom: 1px solid #1f2937; font-weight: 700; font-size: 12px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items: center; }
-        .bus-list { flex: 1; overflow-y: auto; padding: 12px; }
-        .bus-card { background: #1f2937; border: 1px solid #374151; border-radius: 10px; padding: 14px; margin-bottom: 10px; transition: all 0.2s ease; }
+        .sidebar-header { padding: 10px 16px; border-bottom: 1px solid #1f2937; font-weight: 700; font-size: 11px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items: center; }
+        .bus-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .bus-card { background: #1f2937; border: 1px solid #374151; border-radius: 10px; padding: 12px; margin-bottom: 8px; transition: all 0.2s ease; cursor: pointer; }
         .bus-card:hover { border-color: #38bdf8; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.15); }
-        .bus-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-        .bus-title { font-weight: 700; font-size: 14px; color: #f9fafb; }
+        .bus-card.card-fault { border-color: rgba(239, 68, 68, 0.6); background: rgba(31, 41, 55, 0.9); }
+        .bus-card.card-fault:hover { border-color: #ef4444; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25); }
+        .bus-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .bus-title { font-weight: 700; font-size: 13px; color: #f9fafb; }
         .status-pill { font-size: 10px; padding: 2px 8px; border-radius: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
-        .status-transit { background: #059669; color: #fff; }
-        .status-origin { background: #2563eb; color: #fff; }
-        .status-dest { background: #9333ea; color: #fff; }
-        .status-offroute { background: #dc2626; color: #fff; }
+        .status-transit { background: #10b981; color: #fff; }
+        .status-origin { background: #f59e0b; color: #fff; }
+        .status-dest { background: #f59e0b; color: #fff; }
+        .status-offroute { background: #ef4444; color: #fff; }
         .status-depot { background: #4b5563; color: #fff; }
-        .progress-container { margin: 8px 0; }
-        .progress-labels { display: flex; justify-content: space-between; font-size: 11px; color: #9ca3af; margin-bottom: 3px; }
-        .progress-bar-bg { width: 100%; height: 6px; background: #374151; border-radius: 3px; overflow: hidden; }
-        .progress-bar-fill { height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8); border-radius: 3px; transition: width 0.4s ease; }
-        .bus-meta { font-size: 12px; color: #9ca3af; line-height: 1.5; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
-        .alert-box { background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; padding: 5px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; margin-top: 8px; }
-        .event-feed { height: 160px; background: #0b1120; border-top: 1px solid #1f2937; overflow-y: auto; padding: 12px; font-size: 11px; }
-        .event-item { margin-bottom: 6px; border-left: 3px solid #38bdf8; padding-left: 8px; }
+        .status-gpsfault { background: #475569; color: #fca5a5; border: 1px solid #ef4444; }
+        .progress-container { margin: 6px 0; }
+        .progress-labels { display: flex; justify-content: space-between; font-size: 11px; color: #9ca3af; margin-bottom: 2px; }
+        .progress-bar-bg { width: 100%; height: 5px; background: #374151; border-radius: 3px; overflow: hidden; }
+        .progress-bar-fill { height: 100%; background: linear-gradient(90deg, #10b981, #38bdf8); border-radius: 3px; transition: width 0.4s ease; }
+        .bus-meta { font-size: 11px; color: #9ca3af; line-height: 1.5; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 5px; }
+        .alert-box { background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; margin-top: 6px; }
+        .event-feed { height: 140px; background: #0b1120; border-top: 1px solid #1f2937; overflow-y: auto; padding: 10px; font-size: 11px; }
+        .event-item { margin-bottom: 5px; border-left: 3px solid #38bdf8; padding-left: 8px; }
         .event-time { color: #6b7280; font-size: 10px; }
-        .legend-box { position: absolute; bottom: 20px; left: 20px; background: rgba(17, 24, 39, 0.92); border: 1px solid #374151; padding: 12px 16px; border-radius: 8px; z-index: 1000; font-size: 11px; backdrop-filter: blur(8px); }
+        .legend-box { position: absolute; bottom: 20px; left: 20px; background: rgba(17, 24, 39, 0.94); border: 1px solid #374151; padding: 12px 14px; border-radius: 8px; z-index: 1000; font-size: 11px; backdrop-filter: blur(8px); }
         .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-        .legend-line { width: 22px; height: 4px; border-radius: 2px; }
+        .legend-line { width: 20px; height: 4px; border-radius: 2px; }
     </style>
 </head>
 <body>
@@ -1279,37 +1859,100 @@ async def live_map_view():
         <div class="logo-group">
             <h2 style="font-size: 16px; font-weight: 800; letter-spacing: -0.02em;">🚍 Poliverso Transit Radar</h2>
             <span id="conn-badge" class="badge badge-poll">Iniciando...</span>
-            <span class="badge badge-info">MQTT + Protobuf GVMT N°065</span>
+            " + tenant_badge + "
         </div>
         <div class="controls-bar">
             <div class="date-picker-box">
-                <span>📅 Vigencia Histórica:</span>
+                <span>📅 Vigencia:</span>
                 <input type="date" id="hist-date" value="2026-09-25">
                 <button class="btn-hist" onclick="loadHistoricalShape()">Consultar</button>
                 <button class="btn-hist" style="background:#475569;" onclick="resetToActiveShapes()">Hoy</button>
             </div>
             <div class="metrics-bar">
                 <div class="metric-card">Flota: <strong id="m-buses">0</strong></div>
-                <div class="metric-card">En Ruta: <strong id="m-transit">0</strong></div>
-                <div class="metric-card">Alertas: <strong id="m-alerts" style="color: #ef4444;">0</strong></div>
+                <div class="metric-card">En Ruta: <strong id="m-transit" style="color: #10b981;">0</strong></div>
+                <div class="metric-card">Cabeceras: <strong id="m-terminals" style="color: #f59e0b;">0</strong></div>
+                <div class="metric-card">Falla GPS: <strong id="m-faults" style="color: #ef4444;">0</strong></div>
+                <div class="metric-card" style="background: rgba(2, 132, 199, 0.15); border-color: rgba(56, 189, 248, 0.4);">
+                    <span>🚦 Waze: </span><strong id="m-waze" style="color: #38bdf8;">--</strong>
+                </div>
             </div>
             <a href="/headway" style="background: linear-gradient(135deg, #0284c7, #6366f1); color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);">📊 Tablero Lineal</a>
+            " + user_info_snippet + "
         </div>
     </header>
+
+    <!-- Barra de Configuración Dinámica de Geocercas y Filtro GPS -->
+    <div class="geofence-toolbar">
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <div class="geofence-ctrl-group">
+                <span style="color: #10b981; font-weight: 700;">🟢 Geocerca Itinerario:</span>
+                <input type="range" id="range-itin-geofence" min="30" max="250" step="10" value="70" oninput="updateGeofenceRadii()" style="width: 80px; accent-color: #10b981; cursor: pointer;">
+                <span id="lbl-itin-geofence" class="val-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4);">70m</span>
+            </div>
+            <div class="geofence-ctrl-group">
+                <span style="color: #f59e0b; font-weight: 700;">🟡 Geocerca Cabeceras:</span>
+                <input type="range" id="range-term-geofence" min="100" max="800" step="50" value="400" oninput="updateGeofenceRadii()" style="width: 80px; accent-color: #f59e0b; cursor: pointer;">
+                <span id="lbl-term-geofence" class="val-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4);">400m</span>
+            </div>
+            <div class="geofence-ctrl-group">
+                <span style="color: #94a3b8; font-weight: 600;">⏱️ Filtro Sin Señal GPS:</span>
+                <select id="sel-gps-timeout" onchange="updateGpsTimeout()" style="background: #0f172a; border: 1px solid #475569; color: #f8fafc; padding: 2px 6px; border-radius: 4px; font-size: 11px;">
+                    <option value="15">15 min</option>
+                    <option value="30" selected>30 min (Oficial GVMT)</option>
+                    <option value="60">60 min</option>
+                </select>
+            </div>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1; font-size: 11px;">
+                <input type="checkbox" id="chk-show-faults" checked onchange="updateUI()">
+                <span>⚠️ Mostrar coches con Falla GPS</span>
+            </label>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 11px;">
+            <button id="btn-toggle-realtime" onclick="toggleRealTimeMonitoring()" class="btn-realtime-toggle btn-realtime-active" title="Alternar actualización en vivo de la flota">
+                🟢 Monitoreo en Tiempo Real (Activo)
+            </button>
+            <span style="color: #94a3b8;">⚡ Velocidad: <b>Diferencial (2 últimos pings)</b></span>
+        </div>
+    </div>
 
     <div id="app-layout">
         <div id="map"></div>
         <div class="legend-box" id="legend">
-            <strong style="color: #e5e7eb; display:block; margin-bottom: 6px;">Trazados de Rutas (PostGIS)</strong>
+            <strong style="color: #e5e7eb; display:block; margin-bottom: 6px;">Trazados & Geocercas (PostGIS)</strong>
             <div class="legend-item"><div class="legend-line" style="background: #38bdf8;"></div><span>Ramal 020F (Asunción - San Lorenzo)</span></div>
             <div class="legend-item"><div class="legend-line" style="background: #a855f7;"></div><span>Ramal 020C (San Lorenzo - Asunción)</span></div>
             <div class="legend-item"><div class="legend-line" style="background: #f59e0b;"></div><span>Ramal 020D (Asunción - San Lorenzo)</span></div>
             <div class="legend-item"><div class="legend-line" style="background: #ef4444; border-top: 2px dashed #fff;"></div><span id="hist-label">Histórico Anterior</span></div>
+            <div style="border-top: 1px solid #374151; margin-top: 6px; padding-top: 6px;">
+                <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#10b981; box-shadow:0 0 6px #10b981;"></span><span>En Itinerario (Verde + Geocerca)</span></div>
+                <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#f59e0b; box-shadow:0 0 6px #f59e0b;"></span><span>En Cabecera (Amarillo + Geocerca)</span></div>
+                <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#ef4444; box-shadow:0 0 6px #ef4444;"></span><span>Fuera de Itinerario (Rojo)</span></div>
+                <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#475569; border:1px solid #ef4444;"></span><span>Falla GPS (&gt;30 min sin señal)</span></div>
+            </div>
+        </div>
+
+        <!-- Capas Waze for Cities (CCP) -->
+        <div class="legend-box" style="bottom: 230px; left: 20px; border-color: rgba(56, 189, 248, 0.4);">
+            <strong style="color: #38bdf8; display:flex; align-items:center; gap:6px; margin-bottom: 6px;">
+                <span>🚗 Waze for Cities (CCP)</span>
+            </strong>
+            <label style="display:flex; align-items:center; gap:6px; font-size:11px; margin-bottom:5px; cursor:pointer;">
+                <input type="checkbox" id="chk-waze-jams" checked onchange="toggleWazeLayers()">
+                <span>🚦 Tráfico / Jams (Colores)</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                <input type="checkbox" id="chk-waze-alerts" checked onchange="toggleWazeLayers()">
+                <span>⚠️ Incidentes & Obras</span>
+            </label>
         </div>
         <div id="sidebar">
             <div class="sidebar-header">
-                <span>Unidades en Operación</span>
-                <span id="route-count" style="font-size: 11px; color: #38bdf8;">Línea 20 (004B)</span>
+                <span>Flota Consorcio Arapotí</span>
+                <div style="display: flex; gap: 4px; align-items: center;">
+                    <button onclick="toggleAllBuses(true)" style="background:#1e293b; border:1px solid #475569; color:#94a3b8; font-size:10px; padding:2px 6px; border-radius:4px; cursor:pointer;" title="Seleccionar y ver todos en mapa">Todos</button>
+                    <button onclick="toggleAllBuses(false)" style="background:#1e293b; border:1px solid #475569; color:#94a3b8; font-size:10px; padding:2px 6px; border-radius:4px; cursor:pointer;" title="Ocultar todos">Ninguno</button>
+                </div>
             </div>
             <div class="bus-list" id="bus-list"></div>
             <div class="sidebar-header" style="border-top: 1px solid #1f2937;">Eventos y Geocercas en Vivo</div>
@@ -1328,20 +1971,121 @@ async def live_map_view():
         }).addTo(map);
 
         const markers = {};
+        const busCircles = {};
         const activeVehicles = {};
         let shapeLayers = [];
         let stopLayers = [];
+        let wazeJamLayers = [];
+        let wazeAlertLayers = [];
         let eventHistory = [];
         let ws = null;
         let pollingInterval = null;
+        let isRealTimeActive = true;
+        const busVisibility = {};
+        const activeAnimations = {};
+
+        function toggleRealTimeMonitoring() {
+            isRealTimeActive = !isRealTimeActive;
+            const btn = document.getElementById('btn-toggle-realtime');
+            if (btn) {
+                if (isRealTimeActive) {
+                    btn.className = 'btn-realtime-toggle btn-realtime-active';
+                    btn.innerHTML = '🟢 Monitoreo en Tiempo Real (Activo)';
+                    btn.title = 'Clic para pausar actualización en vivo';
+                    fetchHttpLive();
+                } else {
+                    btn.className = 'btn-realtime-toggle btn-realtime-paused';
+                    btn.innerHTML = '⏸️ Visualización en Pausa (Reanudar)';
+                    btn.title = 'Clic para reanudar actualización en vivo';
+                }
+            }
+        }
+
+        function toggleBusVisibility(busId, isVisible) {
+            busVisibility[busId] = isVisible;
+            if (!isVisible) {
+                if (markers[busId]) {
+                    map.removeLayer(markers[busId]);
+                    delete markers[busId];
+                }
+                if (busCircles[busId]) {
+                    map.removeLayer(busCircles[busId]);
+                    delete busCircles[busId];
+                }
+            }
+            updateUI();
+        }
+
+        function toggleAllBuses(visible) {
+            Object.keys(activeVehicles).forEach(bId => {
+                busVisibility[bId] = visible;
+                if (!visible) {
+                    if (markers[bId]) { map.removeLayer(markers[bId]); delete markers[bId]; }
+                    if (busCircles[bId]) { map.removeLayer(busCircles[bId]); delete busCircles[bId]; }
+                }
+            });
+            updateUI();
+        }
+
+        function animateMarkerSmooth(busId, marker, startLatLng, endLatLng, circle, durationMs = 2200) {
+            if (!marker) return;
+            const sLat = (startLatLng.lat !== undefined) ? startLatLng.lat : startLatLng[0];
+            const sLng = (startLatLng.lng !== undefined) ? startLatLng.lng : startLatLng[1];
+            const eLat = endLatLng[0];
+            const eLng = endLatLng[1];
+
+            if (Math.abs(eLat - sLat) < 0.000005 && Math.abs(eLng - sLng) < 0.000005) {
+                marker.setLatLng(endLatLng);
+                if (circle) circle.setLatLng(endLatLng);
+                return;
+            }
+
+            if (activeAnimations[busId]) {
+                cancelAnimationFrame(activeAnimations[busId]);
+                delete activeAnimations[busId];
+            }
+
+            const startTime = performance.now();
+            function step(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / durationMs, 1.0);
+                const ease = 1 - Math.pow(1 - progress, 3);
+                const curLat = sLat + (eLat - sLat) * ease;
+                const curLng = sLng + (eLng - sLng) * ease;
+                const curLatLng = [curLat, curLng];
+                
+                marker.setLatLng(curLatLng);
+                if (circle) circle.setLatLng(curLatLng);
+
+                if (progress < 1.0) {
+                    activeAnimations[busId] = requestAnimationFrame(step);
+                } else {
+                    delete activeAnimations[busId];
+                }
+            }
+            activeAnimations[busId] = requestAnimationFrame(step);
+        }
 
         const routeColors = {
             '020f': '#38bdf8',
             '020c': '#a855f7',
             '020d': '#f59e0b',
             '0210': '#10b981',
+            '0211': '#ec4899',
             'default': '#64748b'
         };
+
+        function updateGeofenceRadii() {
+            const itinR = parseInt(document.getElementById('range-itin-geofence').value, 10);
+            const termR = parseInt(document.getElementById('range-term-geofence').value, 10);
+            document.getElementById('lbl-itin-geofence').textContent = itinR + 'm';
+            document.getElementById('lbl-term-geofence').textContent = termR + 'm';
+            updateUI();
+        }
+
+        function updateGpsTimeout() {
+            updateUI();
+        }
 
         function renderShapesGeoJSON(geojson, isHistorical = false) {
             shapeLayers.forEach(l => map.removeLayer(l));
@@ -1379,25 +2123,27 @@ async def live_map_view():
 
             if (!geojson || !geojson.features) return;
 
+            const termR = parseInt(document.getElementById('range-term-geofence')?.value || 400, 10);
+
             const layer = L.geoJSON(geojson, {
                 pointToLayer: (feature, latlng) => {
                     const p = feature.properties;
                     const isTerminal = p.stop_type === 'origin' || p.stop_type === 'destination';
                     const marker = L.circleMarker(latlng, {
                         radius: isTerminal ? 7 : 5,
-                        fillColor: isTerminal ? '#f43f5e' : '#38bdf8',
+                        fillColor: isTerminal ? '#f59e0b' : '#38bdf8',
                         color: '#ffffff',
                         weight: 1.5,
                         opacity: 1,
                         fillOpacity: 0.8
                     });
 
-                    // Círculo de geocerca
+                    // Círculo de geocerca de parada / cabecera
                     const fence = L.circle(latlng, {
-                        radius: p.radius_meters || 70,
-                        color: isTerminal ? '#f43f5e' : '#38bdf8',
+                        radius: isTerminal ? termR : (p.radius_meters || 70),
+                        color: isTerminal ? '#f59e0b' : '#38bdf8',
                         weight: 1,
-                        fillOpacity: 0.08
+                        fillOpacity: isTerminal ? 0.08 : 0.05
                     });
                     stopLayers.push(fence.addTo(map));
 
@@ -1405,10 +2151,11 @@ async def live_map_view():
                 },
                 onEachFeature: (feature, layer) => {
                     const p = feature.properties;
+                    const isTerminal = p.stop_type === 'origin' || p.stop_type === 'destination';
                     layer.bindPopup(`
                         <b>🚏 ${p.name}</b><br>
                         Código: ${p.stop_code} (${p.stop_type})<br>
-                        Radio Geocerca: ${p.radius_meters}m<br>
+                        Radio Geocerca: ${isTerminal ? termR : (p.radius_meters || 70)}m<br>
                         ${p.address || ''}
                     `);
                 }
@@ -1442,19 +2189,52 @@ async def live_map_view():
 
         function updateUI() {
             const vehicles = Object.values(activeVehicles);
+            const itinR = parseInt(document.getElementById('range-itin-geofence')?.value || 70, 10);
+            const termR = parseInt(document.getElementById('range-term-geofence')?.value || 400, 10);
+            const gpsTimeoutMin = parseInt(document.getElementById('sel-gps-timeout')?.value || 30, 10);
+            const showFaults = document.getElementById('chk-show-faults')?.checked ?? true;
+
+            let inTransitCount = 0;
+            let inTerminalsCount = 0;
+            let faultsCount = 0;
+
+            vehicles.forEach(v => {
+                let minsAgo = v.minutes_since_ping;
+                if (minsAgo === undefined || minsAgo === null) {
+                    if (v.last_ping_time) {
+                        const pDate = new Date(v.last_ping_time);
+                        minsAgo = Math.max(0, (Date.now() - pDate.getTime()) / 60000);
+                    } else {
+                        minsAgo = 999;
+                    }
+                }
+                v._isFault = v.is_gps_fault || (minsAgo > gpsTimeoutMin);
+                v._minsAgo = minsAgo;
+
+                if (v._isFault) {
+                    faultsCount++;
+                } else if (v.state === 'AT_ORIGIN' || v.state === 'AT_DESTINATION') {
+                    inTerminalsCount++;
+                } else if (v.state === 'IN_TRANSIT' || v.current_state === 'IN_TRANSIT') {
+                    inTransitCount++;
+                }
+            });
+
             document.getElementById('m-buses').textContent = vehicles.length;
-            document.getElementById('m-transit').textContent = vehicles.filter(v => (v.state === 'IN_TRANSIT' || v.current_state === 'IN_TRANSIT')).length;
-            const alertsCount = vehicles.filter(v => v.speed_alert || v.deviation_alert).length;
-            document.getElementById('m-alerts').textContent = alertsCount;
+            document.getElementById('m-transit').textContent = inTransitCount;
+            document.getElementById('m-terminals').textContent = inTerminalsCount;
+            document.getElementById('m-faults').textContent = faultsCount;
 
             const stateLabels = {
                 'IN_TRANSIT': 'En Circulación',
                 'AT_ORIGIN': 'En Cabecera',
                 'AT_DESTINATION': 'En Destino',
                 'OFF_ROUTE': 'Desviado',
-                'DEPOT': 'En Depósito'
+                'DEPOT': 'En Depósito',
+                'GPS_FAULT': 'Falla de GPS'
             };
 
+            // Dibujar marcadores y geocercas
             vehicles.forEach(v => {
                 const lat = (v.latitude !== undefined && v.latitude !== null) ? v.latitude : v.last_latitude;
                 const lon = (v.longitude !== undefined && v.longitude !== null) ? v.longitude : v.last_longitude;
@@ -1462,47 +2242,188 @@ async def live_map_view():
                     return;
                 }
                 const latlng = [lat, lon];
-                const state = v.state || v.current_state || 'IN_TRANSIT';
-                const estadoEsp = v.status_display || (stateLabels[state] || state);
-                const speed = (v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0);
+                const isFault = v._isFault;
 
-                const popupText = `
-                    <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
-                    Ramal: <b>${v.route_id}</b> (${v.agency_id})<br>
-                    Estado: <b style="color: #38bdf8;">${estadoEsp}</b><br>
-                    Progreso: <b>${v.progress_percent || 0}%</b> (${v.distance_traveled_km || 0} / ${v.route_total_km || 0} km)<br>
-                    Desvío Traza: <b>${Math.round(v.deviation_meters || 0)}m</b><br>
-                    Velocidad: <b>${speed} km/h</b>
+                // Si no se deben mostrar fallas de GPS, removerlos del mapa
+                if (isFault && !showFaults) {
+                    if (markers[v.bus_id]) {
+                        map.removeLayer(markers[v.bus_id]);
+                        delete markers[v.bus_id];
+                    }
+                    if (busCircles[v.bus_id]) {
+                        map.removeLayer(busCircles[v.bus_id]);
+                        delete busCircles[v.bus_id];
+                    }
+                    return;
+                }
+
+                const state = isFault ? 'GPS_FAULT' : (v.state || v.current_state || 'IN_TRANSIT');
+                let markerColor = '#10b981'; // Verde por defecto en itinerario
+                let circleColor = '#10b981';
+                let circleRadius = itinR;
+                let circleDash = null;
+
+                if (isFault) {
+                    markerColor = '#475569'; // Gris falla GPS
+                    circleColor = '#ef4444'; // Borde rojo tenue
+                    circleRadius = 50;
+                    circleDash = '4, 4';
+                } else if (state === 'OFF_ROUTE' || v.deviation_alert) {
+                    markerColor = '#ef4444'; // Rojo fuera de itinerario
+                    circleColor = '#ef4444';
+                    circleRadius = itinR;
+                } else if (state === 'AT_ORIGIN' || state === 'AT_DESTINATION') {
+                    markerColor = '#f59e0b'; // Amarillo en cabecera
+                    circleColor = '#f59e0b';
+                    circleRadius = termR;
+                } else if (state === 'DEPOT') {
+                    markerColor = '#64748b';
+                    circleColor = '#64748b';
+                    circleRadius = 60;
+                } else {
+                    // IN_TRANSIT (Verde dentro de itinerario)
+                    markerColor = '#10b981';
+                    circleColor = '#10b981';
+                    circleRadius = itinR;
+                }
+
+                const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
+                const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
+
+                let popupContent = '';
+                if (isFault) {
+                    popupContent = `
+                        <div style="min-width: 220px;">
+                            <div style="background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #fca5a5; padding: 6px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; margin-bottom: 6px; display:flex; align-items:center; gap:6px;">
+                                <span>📡⚠️</span>
+                                <span>COMUNICAR FALLA DE GPS</span>
+                            </div>
+                            <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
+                            Ramal: <b>${v.route_id || '--'}</b> (${v.agency_id || '004B'})<br>
+                            Estado: <b style="color: #ef4444;">Sin señal GPS hace ${Math.round(v._minsAgo)} min</b><br>
+                            Velocidad: <b>0.0 km/h (Detenido / Sin transmisión)</b><br>
+                            Última posición: <b>${lat.toFixed(5)}, ${lon.toFixed(5)}</b><br>
+                            Último ping registrado: <b style="color:#cbd5e1;">${v.last_ping_time ? v.last_ping_time.replace('T', ' ').slice(0, 19) : '--'}</b>
+                        </div>
+                    `;
+                } else {
+                    const geofenceLabel = state === 'IN_TRANSIT' ? `Itinerario (${itinR}m)` : (state.includes('AT_') ? `Cabecera (${termR}m)` : `Fuera de Ruta`);
+                    popupContent = `
+                        <div style="min-width: 210px;">
+                            <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
+                            Ramal: <b>${v.route_id}</b> (${v.agency_id})<br>
+                            Estado: <b style="color: ${markerColor};">${estadoEsp}</b><br>
+                            Progreso: <b>${v.progress_percent || 0}%</b> (${v.distance_traveled_km || 0} / ${v.route_total_km || 0} km)<br>
+                            Desvío Traza: <b>${Math.round(v.deviation_meters || 0)}m</b><br>
+                            Velocidad: <b>${speed} km/h</b> <span style="font-size:10px; color:#94a3b8;">(2 últimos pings)</span><br>
+                            Geocerca Activa: <b style="color: ${circleColor};">${geofenceLabel}</b>
+                        </div>
+                    `;
+                }
+
+                // Si el bus está desmarcado en el panel lateral, ocultar del mapa
+                if (busVisibility[v.bus_id] === false) {
+                    if (markers[v.bus_id]) {
+                        map.removeLayer(markers[v.bus_id]);
+                        delete markers[v.bus_id];
+                    }
+                    if (busCircles[v.bus_id]) {
+                        map.removeLayer(busCircles[v.bus_id]);
+                        delete busCircles[v.bus_id];
+                    }
+                    return;
+                }
+
+                // 1. Icono Direccional con Flecha de Rumbo y Velocidad
+                const heading = Math.round(v.heading_deg || 0);
+                const iconHtml = `
+                    <div class="dir-bus-marker ${isFault ? 'is-fault' : ''}">
+                        <div class="dir-bus-arrow" style="transform: rotate(${heading}deg); background: ${markerColor}; box-shadow: 0 0 10px ${markerColor};">
+                            ${isFault ? '<span style="font-size:12px;">📡</span>' : `
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="#ffffff" style="display:block;">
+                                <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>
+                            </svg>
+                            `}
+                        </div>
+                        <div class="dir-bus-badge" style="border-color: ${markerColor};">
+                            <span class="bus-num">#${v.bus_id}</span>
+                            <span class="bus-spd" style="color: ${speed > 60 ? '#f87171' : '#38bdf8'}">${Math.round(speed)}k</span>
+                        </div>
+                    </div>
                 `;
+                const icon = L.divIcon({
+                    className: 'custom-bus-icon-wrap',
+                    html: iconHtml,
+                    iconSize: [36, 44],
+                    iconAnchor: [18, 14]
+                });
 
                 if (!markers[v.bus_id]) {
-                    const icon = L.divIcon({
-                        className: 'custom-bus-icon',
-                        html: `<div style="background: #38bdf8; border: 2px solid white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 13px; box-shadow: 0 0 12px #38bdf8;">🚌</div>`,
-                        iconSize: [28, 28]
-                    });
-                    markers[v.bus_id] = L.marker(latlng, { icon: icon }).addTo(map).bindPopup(popupText);
+                    markers[v.bus_id] = L.marker(latlng, { icon: icon }).addTo(map).bindPopup(popupContent);
                 } else {
-                    markers[v.bus_id].setLatLng(latlng).setPopupContent(popupText);
+                    const prevLatLng = markers[v.bus_id].getLatLng();
+                    markers[v.bus_id].setIcon(icon).setPopupContent(popupContent);
+                    animateMarkerSmooth(v.bus_id, markers[v.bus_id], prevLatLng, latlng, busCircles[v.bus_id]);
+                }
+
+                // 2. Geocerca Alrededor del Bus
+                if (!busCircles[v.bus_id]) {
+                    busCircles[v.bus_id] = L.circle(latlng, {
+                        radius: circleRadius,
+                        color: circleColor,
+                        fillColor: circleColor,
+                        fillOpacity: isFault ? 0.05 : 0.12,
+                        weight: 1.5,
+                        dashArray: circleDash
+                    }).addTo(map);
+                } else {
+                    busCircles[v.bus_id].setRadius(circleRadius);
+                    busCircles[v.bus_id].setStyle({
+                        color: circleColor,
+                        fillColor: circleColor,
+                        fillOpacity: isFault ? 0.05 : 0.12,
+                        dashArray: circleDash
+                    });
                 }
             });
 
+            // Auto-enfocar en bus si viene en query ?bus=...
+            const urlParams = new URLSearchParams(window.location.search);
+            const targetBus = urlParams.get('bus');
+            if (targetBus && markers[targetBus] && !window._hasAutoFocusedBus) {
+                window._hasAutoFocusedBus = true;
+                const m = markers[targetBus];
+                map.setView(m.getLatLng(), 16, { animate: true });
+                setTimeout(() => m.openPopup(), 400);
+            }
+
+            // Lista lateral en el Sidebar con Checkboxes
             const listEl = document.getElementById('bus-list');
-            listEl.innerHTML = vehicles.map(v => {
-                const state = v.state || v.current_state || 'IN_TRANSIT';
-                const estadoEsp = v.status_display || (stateLabels[state] || state);
-                const pillClass = state === 'IN_TRANSIT' ? 'status-transit' : (state === 'AT_ORIGIN' ? 'status-origin' : (state === 'OFF_ROUTE' ? 'status-offroute' : (state === 'DEPOT' ? 'status-depot' : 'status-dest')));
-                const speed = (v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0);
+            const filteredVehicles = showFaults ? vehicles : vehicles.filter(v => !v._isFault);
+
+            listEl.innerHTML = filteredVehicles.map(v => {
+                const isFault = v._isFault;
+                const state = isFault ? 'GPS_FAULT' : (v.state || v.current_state || 'IN_TRANSIT');
+                const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
+                const pillClass = isFault ? 'status-gpsfault' : (state === 'IN_TRANSIT' ? 'status-transit' : (state === 'OFF_ROUTE' ? 'status-offroute' : (state === 'DEPOT' ? 'status-depot' : 'status-origin')));
+                const pillLabel = isFault ? 'Falla GPS' : (stateLabels[state] || state);
+                const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
+                const isChecked = busVisibility[v.bus_id] !== false;
+
                 return `
-                <div class="bus-card">
+                <div class="bus-card ${isFault ? 'card-fault' : ''} ${!isChecked ? 'is-hidden' : ''}" onclick="focusBus('${v.bus_id}')" title="Clic para centrar en radar">
                     <div class="bus-header">
-                        <span class="bus-title">🚍 Coche #${v.bus_id} (${v.license_plate})</span>
-                        <span class="status-pill ${pillClass}">${stateLabels[state] || state}</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="chk-bus-${v.bus_id}" ${isChecked ? 'checked' : ''} onchange="toggleBusVisibility('${v.bus_id}', this.checked)" onclick="event.stopPropagation()" style="accent-color: #38bdf8; cursor: pointer; width: 14px; height: 14px;">
+                            <span class="bus-title">🚍 Coche #${v.bus_id} (${v.license_plate})</span>
+                        </div>
+                        <span class="status-pill ${pillClass}">${pillLabel}</span>
                     </div>
-                    <div style="font-size: 11px; color: #38bdf8; margin: 4px 0 6px 0; font-weight: 500; display: flex; align-items: center; gap: 4px;">
-                        <span>📍</span>
+                    <div style="font-size: 11px; color: ${isFault ? '#ef4444' : '#38bdf8'}; margin: 4px 0 6px 0; font-weight: 500; display: flex; align-items: center; gap: 4px;">
+                        <span>${isFault ? '⚠️' : '📍'}</span>
                         <span>${estadoEsp}</span>
                     </div>
+                    ${!isFault ? `
                     <div class="progress-container">
                         <div class="progress-labels">
                             <span>Progreso Itinerario</span>
@@ -1512,14 +2433,16 @@ async def live_map_view():
                             <div class="progress-bar-fill" style="width: ${Math.min(v.progress_percent || 0, 100)}%;"></div>
                         </div>
                     </div>
+                    ` : ''}
                     <div class="bus-meta">
                         <div>Ramal: <strong style="color:#f8fafc;">${v.route_id || '--'}</strong></div>
-                        <div>Velocidad: <strong style="color:#f8fafc;">${speed} km/h</strong></div>
+                        <div>Velocidad: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};">${speed} km/h</strong></div>
                         <div>Desvío Traza: <strong style="color:${v.deviation_alert ? '#ef4444':'#34d399'};">${Math.round(v.deviation_meters || 0)}m</strong></div>
-                        <div>Último Ping: <strong style="color:#f8fafc;">${v.last_ping_time ? v.last_ping_time.slice(11, 19) : '--'}</strong></div>
+                        <div>Último Ping: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};">${v.last_ping_time ? v.last_ping_time.slice(11, 19) : '--'}</strong></div>
                     </div>
-                    ${v.speed_alert ? '<div class="alert-box">⚠️ ¡EXCESO DE VELOCIDAD (&gt;70 km/h)!</div>' : ''}
-                    ${v.deviation_alert ? '<div class="alert-box">⚠️ ¡DESVÍO DE TRAZADO OFICIAL (&gt;400m)!</div>' : ''}
+                    ${isFault ? `<div class="alert-box">📡 Alerta: Sin reporte GPS hace ${Math.round(v._minsAgo)} min (&gt;${gpsTimeoutMin}m)</div>` : ''}
+                    ${v.speed_alert && !isFault ? '<div class="alert-box">⚠️ ¡EXCESO DE VELOCIDAD (>70 km/h)!</div>' : ''}
+                    ${v.deviation_alert && !isFault ? '<div class="alert-box">⚠️ ¡DESVÍO DE TRAZADO OFICIAL (>400m)!</div>' : ''}
                 </div>
             `;
             }).join('');
@@ -1530,6 +2453,14 @@ async def live_map_view():
                     <span class="event-time">${e.time ? e.time.slice(11, 19) : ''}</span> [Bus #${e.bus}] <strong>${e.desc}</strong>
                 </div>
             `).reverse().join('');
+        }
+
+        function focusBus(busId) {
+            if (markers[busId]) {
+                const m = markers[busId];
+                map.setView(m.getLatLng(), 16, { animate: true });
+                m.openPopup();
+            }
         }
 
         function initWebSocket() {
@@ -1560,7 +2491,9 @@ async def live_map_view():
                             updateUI();
                         } else if (msg.type === 'vehicle_update' && msg.vehicle) {
                             activeVehicles[msg.vehicle.bus_id] = msg.vehicle;
-                            updateUI();
+                            if (isRealTimeActive) {
+                                updateUI();
+                            }
                         }
                     } catch (e) {
                         console.error("Error parseando WebSocket:", e);
@@ -1588,7 +2521,9 @@ async def live_map_view():
                 if (data.stops && stopLayers.length === 0) renderStopsGeoJSON(data.stops);
                 (data.vehicles || []).forEach(v => activeVehicles[v.bus_id] = v);
                 eventHistory = data.events || [];
-                updateUI();
+                if (isRealTimeActive) {
+                    updateUI();
+                }
             } catch (err) {
                 console.debug("HTTP fallback error:", err);
             }
@@ -1600,6 +2535,115 @@ async def live_map_view():
                 fetchHttpLive();
             }
         }
+
+        // --- GESTIÓN DE CAPAS WAZE FOR CITIES (CCP) ---
+        async function fetchAndRenderWaze() {
+            try {
+                const res = await fetch('/api/v1/waze/traffic');
+                const data = await res.json();
+                renderWazeLayers(data);
+                const badge = document.getElementById('m-waze');
+                if (badge) {
+                    badge.textContent = `${data.total_alerts || 0} Inc · ${data.total_jams || 0} Atascos`;
+                }
+            } catch (err) {
+                console.error("Error al obtener Waze CCP:", err);
+            }
+        }
+
+        function renderWazeLayers(data) {
+            wazeJamLayers.forEach(l => map.removeLayer(l));
+            wazeAlertLayers.forEach(l => map.removeLayer(l));
+            wazeJamLayers = [];
+            wazeAlertLayers = [];
+
+            const showJams = document.getElementById('chk-waze-jams')?.checked ?? true;
+            const showAlerts = document.getElementById('chk-waze-alerts')?.checked ?? true;
+
+            if (data.jams && Array.isArray(data.jams)) {
+                data.jams.forEach(j => {
+                    if (!j.line || j.line.length < 2) return;
+                    const latlngs = j.line.map(pt => [pt.y, pt.x]);
+                    const color = j.color || (j.level >= 4 ? '#ef4444' : (j.level === 3 ? '#f97316' : '#eab308'));
+                    
+                    const poly = L.polyline(latlngs, {
+                        color: color,
+                        weight: 7,
+                        opacity: 0.90,
+                        lineCap: 'round',
+                        lineJoin: 'round'
+                    });
+
+                    const popupContent = `
+                        <div style="min-width: 180px;">
+                            <strong style="color: ${color}; font-size: 13px;">🚦 Atasco Waze (${j.level_label || 'Nivel ' + j.level})</strong><br>
+                            <b>${j.street}</b> (${j.city || 'Asunción'})<br>
+                            Demora Estimada: <b style="color: #ef4444;">+${j.delay_minutes || Math.round(j.delay_seconds/60)} min</b><br>
+                            Velocidad en Atasco: <b>${j.speedKMH} km/h</b><br>
+                            Longitud Congestión: <b>${j.length_meters}m</b><br>
+                            <div style="margin-top: 8px;">
+                                <a href="${j.waze_url || 'https://www.waze.com'}" target="_blank" style="background: #0284c7; color: white; padding: 4px 10px; border-radius: 4px; font-size: 11px; text-decoration: none; font-weight: 700; display: inline-block;">
+                                    🚗 Abrir en App Waze
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                    poly.bindPopup(popupContent);
+
+                    if (showJams) poly.addTo(map);
+                    wazeJamLayers.push(poly);
+                });
+            }
+
+            if (data.alerts && Array.isArray(data.alerts)) {
+                data.alerts.forEach(a => {
+                    if (!a.location) return;
+                    const lat = a.location.y;
+                    const lon = a.location.x;
+                    const iconEmoji = a.icon || '⚠️';
+
+                    const alertIcon = L.divIcon({
+                        className: 'waze-alert-marker',
+                        html: `<div style="background: #0f172a; border: 2px solid #f59e0b; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 14px; box-shadow: 0 0 10px rgba(245, 158, 11, 0.6);">${iconEmoji}</div>`,
+                        iconSize: [28, 28]
+                    });
+
+                    const marker = L.marker([lat, lon], { icon: alertIcon });
+                    const popupContent = `
+                        <div style="min-width: 200px;">
+                            <strong style="color: #fbbf24; font-size: 13px;">${iconEmoji} ${a.type_label || a.type}</strong><br>
+                            <b>${a.street}</b> (${a.city || 'Gran Asunción'})<br>
+                            <div style="font-size: 11px; margin: 4px 0; color: #cbd5e1;">${a.reportDescription || 'Reportado por comunidad Waze'}</div>
+                            <span style="font-size: 10px; color: #94a3b8;">Confianza Waze: ${a.confidence}/5 · Fiabilidad: ${a.reliability}/10</span><br>
+                            <div style="margin-top: 8px;">
+                                <a href="${a.waze_url || 'https://www.waze.com'}" target="_blank" style="background: #0284c7; color: white; padding: 4px 10px; border-radius: 4px; font-size: 11px; text-decoration: none; font-weight: 700; display: inline-block;">
+                                    🚗 Navegar con Waze
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                    marker.bindPopup(popupContent);
+
+                    if (showAlerts) marker.addTo(map);
+                    wazeAlertLayers.push(marker);
+                });
+            }
+        }
+
+        function toggleWazeLayers() {
+            const showJams = document.getElementById('chk-waze-jams')?.checked ?? true;
+            const showAlerts = document.getElementById('chk-waze-alerts')?.checked ?? true;
+
+            wazeJamLayers.forEach(l => {
+                if (showJams) l.addTo(map); else map.removeLayer(l);
+            });
+            wazeAlertLayers.forEach(l => {
+                if (showAlerts) l.addTo(map); else map.removeLayer(l);
+            });
+        }
+
+        fetchAndRenderWaze();
+        setInterval(fetchAndRenderWaze, 30000);
 
         initWebSocket();
     </script>
