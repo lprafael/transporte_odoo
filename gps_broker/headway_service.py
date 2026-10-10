@@ -138,59 +138,94 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
     total_active_buses = 0
     total_bunching_alerts = 0
 
-    # 3. Asignar buses a sus ramales
+    # 3. Asignar buses a sus ramales (SOLO UNIDADES EN CIRCULACIÓN)
     for b in active_buses:
         r_code = (b.get("route_id") or "").lower()
-        if r_code in routes_dict:
-            total_active_buses += 1
-            total_km = routes_dict[r_code]["distance_km"]
-            dist_km = float(b.get("distance_traveled_km") or 0.0)
-            
-            # Priorizar el porcentaje de avance exacto calculado por PostGIS sobre el shape
-            postgis_pct = float(b.get("progress_percent") or 0.0)
-            if postgis_pct > 0:
-                pct = min(100.0, max(0.0, round(postgis_pct, 1)))
-            elif total_km > 0:
-                pct = min(100.0, max(0.0, round((dist_km / total_km) * 100.0, 1)))
-            else:
-                pct = 0.0
+        if r_code not in routes_dict:
+            continue
 
-            state = b.get("state") or b.get("current_state") or "IN_TRANSIT"
-            state_label = b.get("status_display") or ("En Circulación" if state == "IN_TRANSIT" else ("En Cabecera" if state == "AT_ORIGIN" else ("En Destino" if state == "AT_DESTINATION" else ("Desviado" if state == "OFF_ROUTE" else "En Depósito"))))
+        state = b.get("state") or b.get("current_state") or "IN_TRANSIT"
+        is_gps_fault = b.get("is_gps_fault", False)
 
-            lat = b.get("last_latitude") if b.get("last_latitude") is not None else b.get("latitude")
-            lon = b.get("last_longitude") if b.get("last_longitude") is not None else b.get("longitude")
-            speed = float(b.get("last_speed_kmh") if b.get("last_speed_kmh") is not None else (b.get("speed_kmh") or 0.0))
+        # Comprobar antigüedad del último ping (si lleva >30 min sin reportar, no está circulando)
+        last_ping = b.get("last_ping_time", "")
+        if last_ping:
+            try:
+                clean_ts = str(last_ping).replace("Z", "+00:00")
+                dt = datetime.fromisoformat(clean_ts)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                mins_ago = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
+                if mins_ago > 30.0:
+                    is_gps_fault = True
+            except Exception:
+                pass
+        else:
+            is_gps_fault = True
 
-            bus_entry = {
-                "bus_id": b.get("bus_id"),
-                "license_plate": b.get("license_plate") or f"COCHE-{b.get('bus_id')}",
-                "agency_id": b.get("agency_id", "004B"),
-                "route_id": r_code,
-                "route_name": routes_dict[r_code]["name"],
-                "route_total_km": total_km,
-                "direction_label": routes_dict[r_code]["direction_label"],
-                "origin": routes_dict[r_code]["origin"],
-                "destination": routes_dict[r_code]["destination"],
-                "state": state,
-                "state_label": state_label,
-                "street_name": b.get("street_name") or "",
-                "approaching": b.get("approaching") or "",
-                "driver_id": b.get("driver_id") or "--",
-                "odometer_km": round(float(b.get("odometer_km") or 0.0), 1),
-                "latitude": float(lat) if lat is not None else None,
-                "longitude": float(lon) if lon is not None else None,
-                "speed_kmh": round(speed, 1),
-                "distance_traveled_km": round(dist_km, 2),
-                "progress_percent": pct,
-                "deviation_meters": round(float(b.get("deviation_meters") or 0.0), 1),
-                "last_ping_time": b.get("last_ping_time"),
-                "is_bunching": False,
-                "bunching_with": None,
-                "bunching_gap_m": None,
-                "bunching_gap_min": None,
-            }
-            routes_dict[r_code]["buses"].append(bus_entry)
+        total_km = routes_dict[r_code]["distance_km"]
+        dist_km = float(b.get("distance_traveled_km") or 0.0)
+        speed = float(b.get("last_speed_kmh") if b.get("last_speed_kmh") is not None else (b.get("speed_kmh") or 0.0))
+
+        # Priorizar el porcentaje de avance exacto calculado por PostGIS sobre el shape
+        postgis_pct = float(b.get("progress_percent") or 0.0)
+        if postgis_pct > 0:
+            pct = min(100.0, max(0.0, round(postgis_pct, 1)))
+        elif total_km > 0:
+            pct = min(100.0, max(0.0, round((dist_km / total_km) * 100.0, 1)))
+        else:
+            pct = 0.0
+
+        # 🛑 Detección estricta de Cabecera / Terminal / Depósito / No Circulando:
+        is_at_terminal = (
+            state in ("AT_ORIGIN", "AT_DESTINATION", "DEPOT", "GPS_FAULT") or
+            is_gps_fault or
+            (pct <= 2.0 and speed < 5.0) or
+            (pct >= 98.0 and speed < 5.0) or
+            (total_km > 0 and (total_km - dist_km) <= 0.4 and speed < 5.0) or
+            (dist_km <= 0.4 and speed < 5.0)
+        )
+
+        # Excluir del tablero lineal los buses que están en cabecera o sin circulación activa
+        if is_at_terminal:
+            continue
+
+        total_active_buses += 1
+        state_label = b.get("status_display") or ("En Circulación" if state == "IN_TRANSIT" else ("En Cabecera" if state == "AT_ORIGIN" else ("En Destino" if state == "AT_DESTINATION" else ("Desviado" if state == "OFF_ROUTE" else "En Depósito"))))
+
+        lat = b.get("last_latitude") if b.get("last_latitude") is not None else b.get("latitude")
+        lon = b.get("last_longitude") if b.get("last_longitude") is not None else b.get("longitude")
+        speed = float(b.get("last_speed_kmh") if b.get("last_speed_kmh") is not None else (b.get("speed_kmh") or 0.0))
+
+        bus_entry = {
+            "bus_id": b.get("bus_id"),
+            "license_plate": b.get("license_plate") or f"COCHE-{b.get('bus_id')}",
+            "agency_id": b.get("agency_id", "004B"),
+            "route_id": r_code,
+            "route_name": routes_dict[r_code]["name"],
+            "route_total_km": total_km,
+            "direction_label": routes_dict[r_code]["direction_label"],
+            "origin": routes_dict[r_code]["origin"],
+            "destination": routes_dict[r_code]["destination"],
+            "state": state,
+            "state_label": state_label,
+            "street_name": b.get("street_name") or "",
+            "approaching": b.get("approaching") or "",
+            "driver_id": b.get("driver_id") or "--",
+            "odometer_km": round(float(b.get("odometer_km") or 0.0), 1),
+            "latitude": float(lat) if lat is not None else None,
+            "longitude": float(lon) if lon is not None else None,
+            "speed_kmh": round(speed, 1),
+            "distance_traveled_km": round(dist_km, 2),
+            "progress_percent": pct,
+            "deviation_meters": round(float(b.get("deviation_meters") or 0.0), 1),
+            "last_ping_time": b.get("last_ping_time"),
+            "is_bunching": False,
+            "bunching_with": None,
+            "bunching_gap_m": None,
+            "bunching_gap_min": None,
+        }
+        routes_dict[r_code]["buses"].append(bus_entry)
 
     # 4. Ordenar buses a lo largo de cada carril y calcular Pegonamiento (Bunching)
     for r_code, r_data in routes_dict.items():
