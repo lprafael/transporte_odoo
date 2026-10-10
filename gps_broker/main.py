@@ -130,8 +130,8 @@ def save_vehicle_state(bus_id: str, state: Dict[str, Any]):
             logger.debug(f"Redis set error: {e}")
 
 def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
-    lat = v.get("latitude") if v.get("latitude") is not None else v.get("last_latitude")
-    lon = v.get("longitude") if v.get("longitude") is not None else v.get("last_longitude")
+    lat = v.get("last_latitude") if v.get("last_latitude") is not None else v.get("latitude")
+    lon = v.get("last_longitude") if v.get("last_longitude") is not None else v.get("longitude")
     raw_speed = v.get("speed_kmh") if v.get("speed_kmh") is not None else v.get("last_speed_kmh", 0.0)
 
     last_ping = v.get("last_ping_time", "")
@@ -859,6 +859,8 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
             "current_state": "AT_ORIGIN",
             "state": "AT_ORIGIN",
             "crossed_checkpoints": set(),
+            "latitude": ping.latitude,
+            "longitude": ping.longitude,
             "last_latitude": ping.latitude,
             "last_longitude": ping.longitude,
             "last_speed_kmh": speed,
@@ -941,6 +943,8 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     v_state["prev_longitude"] = prev_lon
     v_state["prev_ping_time"] = prev_time
     v_state["calculated_speed_kmh"] = calculated_speed
+    v_state["latitude"] = ping.latitude
+    v_state["longitude"] = ping.longitude
     v_state["last_latitude"] = ping.latitude
     v_state["last_longitude"] = ping.longitude
     v_state["last_speed_kmh"] = speed
@@ -987,18 +991,41 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
         else:
             v_state["deviation_alert"] = False
 
+        # Detección de proximidad física a Cabecera Origen y Terminal Destino
+        is_at_origin_geofence = False
+        is_at_dest_geofence = False
+        for r_meta in routes_cache:
+            if str(r_meta.get("code", "")).lower() == route_code:
+                orig = r_meta.get("origin")
+                if orig and orig.get("latitude") is not None and orig.get("longitude") is not None:
+                    dist_to_orig = haversine_meters(ping.latitude, ping.longitude, float(orig["latitude"]), float(orig["longitude"]))
+                    if dist_to_orig <= float(orig.get("radius_meters", 400.0)):
+                        is_at_origin_geofence = True
+                dest = r_meta.get("destination")
+                if dest and dest.get("latitude") is not None and dest.get("longitude") is not None:
+                    dist_to_dest = haversine_meters(ping.latitude, ping.longitude, float(dest["latitude"]), float(dest["longitude"]))
+                    if dist_to_dest <= float(dest.get("radius_meters", 400.0)):
+                        is_at_dest_geofence = True
+                break
+
         if route_code in ("0000", "", "depot", "taller"):
             v_state["current_state"] = "DEPOT"
             v_state["current_geofence_name"] = "En Depósito / Patio"
-        elif dev_m > MAX_DEVIATION_METERS:
+        elif dev_m > MAX_DEVIATION_METERS and not is_at_origin_geofence and not is_at_dest_geofence:
             v_state["current_state"] = "OFF_ROUTE"
             v_state["current_geofence_name"] = f"Desviado ({round(dev_m)}m)"
-        elif ping.type == 1 or pct >= 97.5 or (total_km > 0 and (total_km - dist_km) <= 0.35):
+        elif ping.type == 1 or pct >= 97.5 or (total_km > 0 and (total_km - dist_km) <= 0.35) or (is_at_dest_geofence and speed < 5.0):
             v_state["current_state"] = "AT_DESTINATION"
             v_state["current_geofence_name"] = "Terminal Llegada"
-        elif (pct < 2.5 or dist_km < 0.35) and speed < 5.0 and ping.type != 0:
+            if is_at_dest_geofence and speed < 5.0:
+                v_state["progress_percent"] = 100.0
+                v_state["distance_traveled_km"] = total_km
+        elif ((pct < 2.5 or dist_km < 0.35) and speed < 5.0 and ping.type != 0) or (is_at_origin_geofence and speed < 5.0):
             v_state["current_state"] = "AT_ORIGIN"
             v_state["current_geofence_name"] = "En Cabecera (Origen)"
+            if is_at_origin_geofence and speed < 5.0:
+                v_state["progress_percent"] = 0.0
+                v_state["distance_traveled_km"] = 0.0
         else:
             v_state["current_state"] = "IN_TRANSIT"
             v_state["current_geofence_name"] = "En Itinerario"
@@ -2168,8 +2195,8 @@ async def live_map_view():
         ------------------------------------------------------------- */
         function renderOrUpdateVehicleMarker(v, animate = true) {
             const busId = v.bus_id;
-            const lat = (v.latitude !== undefined && v.latitude !== null) ? v.latitude : v.last_latitude;
-            const lon = (v.longitude !== undefined && v.longitude !== null) ? v.longitude : v.last_longitude;
+            const lat = (v.last_latitude !== undefined && v.last_latitude !== null) ? v.last_latitude : v.latitude;
+            const lon = (v.last_longitude !== undefined && v.last_longitude !== null) ? v.last_longitude : v.longitude;
             if (lat === undefined || lon === undefined || lat === null || lon === null || isNaN(lat) || isNaN(lon)) {
                 return;
             }

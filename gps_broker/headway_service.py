@@ -158,8 +158,8 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
             state = b.get("state") or b.get("current_state") or "IN_TRANSIT"
             state_label = b.get("status_display") or ("En Circulación" if state == "IN_TRANSIT" else ("En Cabecera" if state == "AT_ORIGIN" else ("En Destino" if state == "AT_DESTINATION" else ("Desviado" if state == "OFF_ROUTE" else "En Depósito"))))
 
-            lat = b.get("latitude") if b.get("latitude") is not None else b.get("last_latitude")
-            lon = b.get("longitude") if b.get("longitude") is not None else b.get("last_longitude")
+            lat = b.get("last_latitude") if b.get("last_latitude") is not None else b.get("latitude")
+            lon = b.get("last_longitude") if b.get("last_longitude") is not None else b.get("longitude")
             speed = float(b.get("last_speed_kmh") if b.get("last_speed_kmh") is not None else (b.get("speed_kmh") or 0.0))
 
             bus_entry = {
