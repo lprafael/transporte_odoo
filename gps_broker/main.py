@@ -31,7 +31,7 @@ import asyncio
 import logging
 import threading
 from datetime import datetime, date, timezone
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Tuple
 
 import requests
 import psycopg2
@@ -346,6 +346,16 @@ def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
     c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     return R * c
 
+def calculate_bearing_degrees(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calcula el rumbo geodésico inicial (azimut en grados 0.0 - 359.9) entre dos coordenadas geográficas."""
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_lambda = math.radians(lon2 - lon1)
+    y = math.sin(delta_lambda) * math.cos(phi2)
+    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(delta_lambda)
+    bearing = math.degrees(math.atan2(y, x))
+    return round((bearing + 360.0) % 360.0, 1)
+
 def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id: str = "004B") -> Optional[Dict[str, Any]]:
     """Calcula con PostGIS el porcentaje del recorrido completado y la distancia al trazado oficial."""
     if not route_code:
@@ -384,7 +394,7 @@ def insert_telemetry_to_pg(ping: TelemetryPing):
         op_type = ping.type if ping.type is not None else 2
         acc = ping.precision
         alt = ping.altitud or 0.0
-        heading = ping.effective_heading
+        heading = ping.heading_deg if (ping.heading_deg is not None and ping.heading_deg > 0) else ping.effective_heading
         cur.execute(
             """
             INSERT INTO telemetry_ping 
@@ -818,7 +828,7 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     if agency not in (VMT_AGENCY_ID, "004B"):
         return {"status": "ignored", "reason": "agency_mismatch", "bus_id": bus_key}
 
-    # Validación de desfase de reloj del GPS (>2 horas de diferencia => alinear a tiempo real actual)
+    # Validación de desfase de reloj del GPS (desfase severo >24 horas => alinear a tiempo real actual)
     now_dt = datetime.now(timezone.utc)
     try:
         clean_ts = str(now_iso).replace("Z", "+00:00")
@@ -826,10 +836,10 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
         if dt_ping.tzinfo is None:
             dt_ping = dt_ping.replace(tzinfo=timezone.utc)
         diff_hours = abs((now_dt - dt_ping).total_seconds()) / 3600.0
-        if diff_hours > 2.0:
+        if diff_hours > 24.0:
             now_iso = now_dt.isoformat()
     except Exception:
-        now_iso = now_dt.isoformat()
+        pass
 
     # Validación de Coordenadas Geográficas (Res. GVMT 065/2024 Sección 5.1)
     if (abs(ping.latitude) < 1e-6 and abs(ping.longitude) < 1e-6) or not (-90.0 <= ping.latitude <= 90.0) or not (-180.0 <= ping.longitude <= 180.0):
@@ -838,6 +848,8 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
 
     # 2. Recuperar o Inicializar Estado
     v_state = get_vehicle_state(bus_key)
+    raw_ping_time = str(ping.fecha_hora_procesamiento or ping.fecha_hora or ping.timestamp or now_iso).strip()
+
     if not v_state:
         v_state = {
             "bus_id": bus_key,
@@ -854,6 +866,7 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
             "heading_deg": heading,
             "odometer_km": ping.odometer_km or 0.0,
             "last_ping_time": now_iso,
+            "raw_ping_time": raw_ping_time,
             "speed_alert": False,
             "deviation_alert": False,
             "current_geofence_name": "Terminal Origen",
@@ -863,19 +876,41 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
             "deviation_meters": 0.0,
         }
 
-    # 2.1 Cálculo Diferencial de Velocidad con los dos últimos puntos GPS
     prev_lat = v_state.get("last_latitude")
     prev_lon = v_state.get("last_longitude")
     prev_time = v_state.get("last_ping_time")
+    prev_raw_time = v_state.get("raw_ping_time")
+    prev_heading = v_state.get("heading_deg")
+
+    # 2.0 Deduplicación (Punto 1): Si coordenadas y timestamp son idénticos al último ping procesado, omitir inserción en BD
+    if prev_lat is not None and prev_lon is not None:
+        is_same_coords = (
+            abs(float(prev_lat) - float(ping.latitude)) < 1e-7 and
+            abs(float(prev_lon) - float(ping.longitude)) < 1e-7
+        )
+        is_same_time = (
+            (prev_raw_time is not None and str(prev_raw_time) == raw_ping_time) or
+            (prev_time is not None and str(prev_time) == str(now_iso))
+        )
+        if is_same_coords and is_same_time:
+            return {
+                "status": "ignored",
+                "reason": "duplicate_ping",
+                "bus_id": bus_key,
+                "timestamp": now_iso
+            }
+
+    # 2.1 Cálculo Diferencial de Velocidad con los dos últimos puntos GPS
     calculated_speed = None
+    dist_m = 0.0
 
     if prev_lat is not None and prev_lon is not None and prev_time:
         try:
             dt_prev = datetime.fromisoformat(str(prev_time).replace("Z", "+00:00"))
             dt_curr = datetime.fromisoformat(str(now_iso).replace("Z", "+00:00"))
             delta_sec = (dt_curr - dt_prev).total_seconds()
+            dist_m = haversine_meters(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
             if 0.5 <= delta_sec <= 600:
-                dist_m = haversine_meters(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
                 if dist_m < 3.0:
                     calculated_speed = 0.0
                 else:
@@ -887,6 +922,20 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
 
     if calculated_speed is not None:
         speed = calculated_speed
+
+    # 2.2 Punto 2: Rumbo cinemático por gran círculo de respaldo
+    # Si dist_m < 3.0 m (vehículo detenido o jitter GPS): Preservar último rumbo conocido para evitar giros falsos
+    # Si dist_m >= 3.0 m (en movimiento): Si módem envía 0 o nulo, calcular azimut geodésico
+    if prev_lat is not None and prev_lon is not None:
+        if dist_m < 3.0:
+            if prev_heading is not None and float(prev_heading) > 0:
+                heading = float(prev_heading)
+        elif dist_m >= 3.0:
+            if heading is None or heading == 0.0 or heading == 0:
+                heading = calculate_bearing_degrees(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
+
+    # Asignar rumbo final corregido al objeto ping para guardado en DB
+    ping.heading_deg = heading
 
     v_state["prev_latitude"] = prev_lat
     v_state["prev_longitude"] = prev_lon
@@ -906,8 +955,9 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     if ping.odometer_km:
         v_state["odometer_km"] = ping.odometer_km
     v_state["last_ping_time"] = now_iso
+    v_state["raw_ping_time"] = raw_ping_time
 
-    # 3. Guardado Asíncrono en PostgreSQL
+    # 3. Guardado Asíncrono en PostgreSQL (solo pings nuevos y válidos)
     if background_tasks:
         background_tasks.add_task(insert_telemetry_to_pg, ping)
     else:
@@ -1005,6 +1055,8 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
         "timestamp": now_iso
     }
 
+_last_seen_vmt_pings: Dict[str, Tuple[Any, float, float, str]] = {}
+
 def vmt_continuous_sync_worker():
     """Hilo continuo que consulta la BD del Viceministerio de Transporte (VMT) según .env"""
     logger.info(f"🔄 Iniciando sincronización continua con VMT ({VMT_DB_HOST}:{VMT_DB_PORT}/{VMT_DB_NAME}) para Agencia {VMT_AGENCY_ID}...")
@@ -1068,6 +1120,15 @@ def vmt_continuous_sync_worker():
                 # Hora real de llegada al servidor VMT en Asunción
                 rec_dt = r.get("fecha_hora_procesamiento") or r.get("fecha_hora")
                 rec_iso = rec_dt.isoformat() if hasattr(rec_dt, "isoformat") else str(rec_dt)
+                lat = float(r["latitude"])
+                lon = float(r["longitude"])
+                row_id = r.get("id")
+
+                # Punto 1: Deduplicación incremental en memoria para evitar re-procesar registros VMT idénticos
+                cache_sig = (row_id, round(lat, 6), round(lon, 6), rec_iso)
+                if _last_seen_vmt_pings.get(bus_key) == cache_sig:
+                    continue
+                _last_seen_vmt_pings[bus_key] = cache_sig
 
                 ping_obj = TelemetryPing(
                     bus_id=bus_key,
@@ -1075,8 +1136,8 @@ def vmt_continuous_sync_worker():
                     agency_id=r.get("agency_id") or VMT_AGENCY_ID,
                     route_id=r.get("route_id") or "020f",
                     driver_id=r.get("driver_id") or "",
-                    latitude=float(r["latitude"]),
-                    longitude=float(r["longitude"]),
+                    latitude=lat,
+                    longitude=lon,
                     velocidad=float(r["velocidad"] or 0.0),
                     rumbo=float(r["rumbo"] or 0.0),
                     fecha_hora=rec_iso,
@@ -1649,6 +1710,12 @@ async def live_map_view():
         #map { flex: 1; height: 100%; z-index: 1; }
         #sidebar { width: 380px; background: #111827; border-left: 1px solid #1f2937; display: flex; flex-direction: column; z-index: 10; }
         .sidebar-header { padding: 10px 16px; border-bottom: 1px solid #1f2937; font-weight: 700; font-size: 11px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items: center; }
+        
+        /* Controles de Filtros en Sidebar */
+        .sidebar-filters { padding: 10px 14px; background: #0f172a; border-bottom: 1px solid #1f2937; display: flex; flex-direction: column; gap: 8px; }
+        .btn-quick-filter { background: #0284c7; color: white; border: none; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; transition: background 0.15s; }
+        .btn-quick-filter:hover { background: #0369a1; }
+        
         .bus-list { flex: 1; overflow-y: auto; padding: 10px; }
         .bus-card { background: #1f2937; border: 1px solid #374151; border-radius: 10px; padding: 12px; margin-bottom: 8px; transition: all 0.2s ease; cursor: pointer; }
         .bus-card:hover { border-color: #38bdf8; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.15); }
@@ -1675,6 +1742,58 @@ async def live_map_view():
         .legend-box { position: absolute; bottom: 20px; left: 20px; background: rgba(17, 24, 39, 0.94); border: 1px solid #374151; padding: 12px 14px; border-radius: 8px; z-index: 1000; font-size: 11px; backdrop-filter: blur(8px); }
         .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
         .legend-line { width: 20px; height: 4px; border-radius: 2px; }
+
+        /* Estilos de Marcadores Direccionales SVG con Badge de Velocidad */
+        .bus-marker-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            user-select: none;
+            pointer-events: auto;
+        }
+        .bus-speed-badge {
+            background: rgba(15, 23, 42, 0.95);
+            color: #38bdf8;
+            border: 1px solid #38bdf8;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 1px 6px;
+            white-space: nowrap;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+            margin-bottom: 2px;
+            transition: all 0.2s ease;
+        }
+        .bus-speed-badge.stopped {
+            color: #94a3b8;
+            border-color: #475569;
+        }
+        .bus-speed-badge.overspeed {
+            color: #f87171;
+            border-color: #ef4444;
+        }
+        .bus-arrow-circle {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 2px solid #ffffff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .bus-number-badge {
+            background: #0f172a;
+            color: #ffffff;
+            border: 1px solid #475569;
+            border-radius: 5px;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 1px 4px;
+            margin-top: 2px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+        }
     </style>
 </head>
 <body>
@@ -1726,7 +1845,7 @@ async def live_map_view():
                 </select>
             </div>
             <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1; font-size: 11px;">
-                <input type="checkbox" id="chk-show-faults" checked onchange="updateUI()">
+                <input type="checkbox" id="chk-show-faults" checked onchange="applyRouteAndVisibilityFilters()">
                 <span>⚠️ Mostrar coches con Falla GPS</span>
             </label>
         </div>
@@ -1744,8 +1863,8 @@ async def live_map_view():
             <div class="legend-item"><div class="legend-line" style="background: #f59e0b;"></div><span>Ramal 020D (Asunción - San Lorenzo)</span></div>
             <div class="legend-item"><div class="legend-line" style="background: #ef4444; border-top: 2px dashed #fff;"></div><span id="hist-label">Histórico Anterior</span></div>
             <div style="border-top: 1px solid #374151; margin-top: 6px; padding-top: 6px;">
-                <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#10b981; box-shadow:0 0 6px #10b981;"></span><span>En Itinerario (Verde + Geocerca)</span></div>
-                <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#f59e0b; box-shadow:0 0 6px #f59e0b;"></span><span>En Cabecera (Amarillo + Geocerca)</span></div>
+                <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#10b981; box-shadow:0 0 6px #10b981;"></span><span>En Itinerario (Verde + Flecha SVG)</span></div>
+                <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#f59e0b; box-shadow:0 0 6px #f59e0b;"></span><span>En Cabecera (Amarillo + Flecha SVG)</span></div>
                 <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#ef4444; box-shadow:0 0 6px #ef4444;"></span><span>Fuera de Itinerario (Rojo)</span></div>
                 <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#475569; border:1px solid #ef4444;"></span><span>Falla GPS (&gt;30 min sin señal)</span></div>
             </div>
@@ -1765,11 +1884,36 @@ async def live_map_view():
                 <span>⚠️ Incidentes & Obras</span>
             </label>
         </div>
+
         <div id="sidebar">
             <div class="sidebar-header">
                 <span>Flota Consorcio Arapotí</span>
                 <span id="route-count" style="font-size: 11px; color: #38bdf8;">Línea 20 (004B)</span>
             </div>
+
+            <!-- Punto 4: Controles de Filtro de Ramal y Visibilidad Rápida -->
+            <div class="sidebar-filters">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                    <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Ramal:</span>
+                    <select id="sel-route-filter" onchange="onRouteFilterChange()" style="background: #1e293b; color: #f8fafc; border: 1px solid #334155; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; outline: none; cursor: pointer; flex: 1; max-width: 240px;">
+                        <option value="ALL">Todos los Ramales</option>
+                        <option value="020C">020C (San Lorenzo - Asunción)</option>
+                        <option value="020D">020D (Asunción - San Lorenzo)</option>
+                        <option value="020E">020E</option>
+                        <option value="020F">020F (Asunción - San Lorenzo)</option>
+                        <option value="0210">0210</option>
+                        <option value="0211">0211</option>
+                    </select>
+                </div>
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <span style="font-size: 11px; color: #cbd5e1;">Buses Visibles: <strong id="lbl-visible-count" style="color: #38bdf8;">0</strong> / <span id="lbl-total-count">0</span></span>
+                    <div style="display: flex; gap: 6px;">
+                        <button type="button" class="btn-quick-filter" onclick="setAllBusesVisibility(true)">Todos</button>
+                        <button type="button" class="btn-quick-filter" style="background: #334155;" onclick="setAllBusesVisibility(false)">Ninguno</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="bus-list" id="bus-list"></div>
             <div class="sidebar-header" style="border-top: 1px solid #1f2937;">Eventos y Geocercas en Vivo</div>
             <div class="event-feed" id="event-feed"></div>
@@ -1789,6 +1933,8 @@ async def live_map_view():
         const markers = {};
         const busCircles = {};
         const activeVehicles = {};
+        const busVisibility = {};
+        const markerAnimations = {};
         let shapeLayers = [];
         let stopLayers = [];
         let wazeJamLayers = [];
@@ -1801,6 +1947,7 @@ async def live_map_view():
             '020f': '#38bdf8',
             '020c': '#a855f7',
             '020d': '#f59e0b',
+            '020e': '#14b8a6',
             '0210': '#10b981',
             '0211': '#ec4899',
             'default': '#64748b'
@@ -1811,11 +1958,11 @@ async def live_map_view():
             const termR = parseInt(document.getElementById('range-term-geofence').value, 10);
             document.getElementById('lbl-itin-geofence').textContent = itinR + 'm';
             document.getElementById('lbl-term-geofence').textContent = termR + 'm';
-            updateUI();
+            applyRouteAndVisibilityFilters();
         }
 
         function updateGpsTimeout() {
-            updateUI();
+            applyRouteAndVisibilityFilters();
         }
 
         function renderShapesGeoJSON(geojson, isHistorical = false) {
@@ -1869,7 +2016,6 @@ async def live_map_view():
                         fillOpacity: 0.8
                     });
 
-                    // Círculo de geocerca de parada / cabecera
                     const fence = L.circle(latlng, {
                         radius: isTerminal ? termR : (p.radius_meters || 70),
                         color: isTerminal ? '#f59e0b' : '#38bdf8',
@@ -1918,16 +2064,405 @@ async def live_map_view():
             }
         }
 
-        function updateUI() {
-            const vehicles = Object.values(activeVehicles);
+        /* -------------------------------------------------------------
+           Punto 3: Icono SVG Direccional Rotativo + Badge de Velocidad
+        ------------------------------------------------------------- */
+        function createBusDivIcon(v, markerColor, heading, speed) {
+            const isFault = v._isFault;
+            const isStopped = speed < 1.0;
+            const isOverSpeed = speed > 70.0;
+            const headingDeg = Math.round(heading || 0);
+
+            const iconHtml = `
+                <div class="bus-marker-wrap">
+                    <div class="bus-speed-badge ${isStopped ? 'stopped' : (isOverSpeed ? 'overspeed' : '')}">
+                        ${isFault ? 'SIN SEÑAL' : Math.round(speed) + ' km/h'}
+                    </div>
+                    <div class="bus-arrow-circle" style="background: ${markerColor}; box-shadow: 0 0 10px ${markerColor};">
+                        ${isFault ? '<span style="font-size:14px;">📡</span>' : `
+                        <svg viewBox="0 0 24 24" width="18" height="18" style="transform: rotate(${headingDeg}deg); transform-origin: 50% 50%; display:block;">
+                            <path fill="#ffffff" d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>
+                        </svg>
+                        `}
+                    </div>
+                    <div class="bus-number-badge">#${v.bus_id}</div>
+                </div>
+            `;
+            return L.divIcon({
+                className: 'custom-bus-icon',
+                html: iconHtml,
+                iconSize: [46, 58],
+                iconAnchor: [23, 29]
+            });
+        }
+
+        /* -------------------------------------------------------------
+           Punto 3: Interpolación Cinemática Suave a 60 FPS (animateMarker)
+        ------------------------------------------------------------- */
+        function animateMarker(busId, marker, startLatLng, endLatLng, durationMs = 1800) {
+            if (markerAnimations[busId]) {
+                cancelAnimationFrame(markerAnimations[busId]);
+                delete markerAnimations[busId];
+            }
+
+            const startLat = startLatLng.lat !== undefined ? startLatLng.lat : startLatLng[0];
+            const startLng = startLatLng.lng !== undefined ? startLatLng.lng : startLatLng[1];
+            const endLat = endLatLng.lat !== undefined ? endLatLng.lat : endLatLng[0];
+            const endLng = endLatLng.lng !== undefined ? endLatLng.lng : endLatLng[1];
+
+            const dLat = endLat - startLat;
+            const dLng = endLng - startLng;
+            if (Math.abs(dLat) < 0.000005 && Math.abs(dLng) < 0.000005) {
+                marker.setLatLng([endLat, endLng]);
+                if (busCircles[busId]) busCircles[busId].setLatLng([endLat, endLng]);
+                return;
+            }
+
+            const startTime = performance.now();
+            const easeOutQuad = t => t * (2 - t);
+
+            function step(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / durationMs, 1.0);
+                const ease = easeOutQuad(progress);
+
+                const curLat = startLat + dLat * ease;
+                const curLng = startLng + dLng * ease;
+                const curPos = [curLat, curLng];
+
+                marker.setLatLng(curPos);
+                if (busCircles[busId]) busCircles[busId].setLatLng(curPos);
+
+                if (progress < 1.0) {
+                    markerAnimations[busId] = requestAnimationFrame(step);
+                } else {
+                    marker.setLatLng([endLat, endLng]);
+                    if (busCircles[busId]) busCircles[busId].setLatLng([endLat, endLng]);
+                    delete markerAnimations[busId];
+                }
+            }
+
+            markerAnimations[busId] = requestAnimationFrame(step);
+        }
+
+        /* -------------------------------------------------------------
+           Punto 4: Verificación de Visibilidad por Filtro de Ramal y Checkbox
+        ------------------------------------------------------------- */
+        function isBusVisibleByFilter(v) {
+            const selectedRoute = document.getElementById('sel-route-filter')?.value || 'ALL';
+            const showFaults = document.getElementById('chk-show-faults')?.checked ?? true;
+            if (v._isFault && !showFaults) return false;
+
+            if (selectedRoute !== 'ALL') {
+                const busRoute = (v.route_id || '').toUpperCase();
+                if (!busRoute.includes(selectedRoute.toUpperCase())) return false;
+            }
+
+            if (busVisibility[v.bus_id] === false) return false;
+
+            return true;
+        }
+
+        /* -------------------------------------------------------------
+           Punto 3: Actualización Reactiva de Marcador en Mapa
+        ------------------------------------------------------------- */
+        function renderOrUpdateVehicleMarker(v, animate = true) {
+            const busId = v.bus_id;
+            const lat = (v.latitude !== undefined && v.latitude !== null) ? v.latitude : v.last_latitude;
+            const lon = (v.longitude !== undefined && v.longitude !== null) ? v.longitude : v.last_longitude;
+            if (lat === undefined || lon === undefined || lat === null || lon === null || isNaN(lat) || isNaN(lon)) {
+                return;
+            }
+            const newLatLng = [lat, lon];
+            const isVisible = isBusVisibleByFilter(v);
+
+            if (!isVisible) {
+                if (markers[busId]) map.removeLayer(markers[busId]);
+                if (busCircles[busId]) map.removeLayer(busCircles[busId]);
+                return;
+            }
+
             const itinR = parseInt(document.getElementById('range-itin-geofence')?.value || 70, 10);
             const termR = parseInt(document.getElementById('range-term-geofence')?.value || 400, 10);
+            const isFault = v._isFault;
+            const state = isFault ? 'GPS_FAULT' : (v.state || v.current_state || 'IN_TRANSIT');
+            let markerColor = '#10b981';
+            let circleColor = '#10b981';
+            let circleRadius = itinR;
+            let circleDash = null;
+
+            if (isFault) {
+                markerColor = '#475569';
+                circleColor = '#ef4444';
+                circleRadius = 50;
+                circleDash = '4, 4';
+            } else if (state === 'OFF_ROUTE' || v.deviation_alert) {
+                markerColor = '#ef4444';
+                circleColor = '#ef4444';
+                circleRadius = itinR;
+            } else if (state === 'AT_ORIGIN' || state === 'AT_DESTINATION') {
+                markerColor = '#f59e0b';
+                circleColor = '#f59e0b';
+                circleRadius = termR;
+            } else if (state === 'DEPOT') {
+                markerColor = '#64748b';
+                circleColor = '#64748b';
+                circleRadius = 60;
+            } else {
+                markerColor = '#10b981';
+                circleColor = '#10b981';
+                circleRadius = itinR;
+            }
+
+            const stateLabels = {
+                'IN_TRANSIT': 'En Circulación',
+                'AT_ORIGIN': 'En Cabecera',
+                'AT_DESTINATION': 'En Destino',
+                'OFF_ROUTE': 'Desviado',
+                'DEPOT': 'En Depósito',
+                'GPS_FAULT': 'Falla de GPS'
+            };
+
+            const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
+            const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
+            const heading = isFault ? 0.0 : (v.heading_deg || v.heading_degrees || v.rumbo || 0.0);
+
+            let popupContent = '';
+            if (isFault) {
+                popupContent = `
+                    <div style="min-width: 220px;">
+                        <div style="background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #fca5a5; padding: 6px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; margin-bottom: 6px; display:flex; align-items:center; gap:6px;">
+                            <span>📡⚠️</span>
+                            <span>COMUNICAR FALLA DE GPS</span>
+                        </div>
+                        <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
+                        Ramal: <b>${v.route_id || '--'}</b> (${v.agency_id || '004B'})<br>
+                        Estado: <b style="color: #ef4444;">Sin señal GPS hace ${Math.round(v._minsAgo)} min</b><br>
+                        Velocidad: <b>0.0 km/h (Detenido / Sin transmisión)</b><br>
+                        Última posición: <b>${lat.toFixed(5)}, ${lon.toFixed(5)}</b><br>
+                        Último ping registrado: <b style="color:#cbd5e1;">${v.last_ping_time ? v.last_ping_time.replace('T', ' ').slice(0, 19) : '--'}</b>
+                    </div>
+                `;
+            } else {
+                const geofenceLabel = state === 'IN_TRANSIT' ? `Itinerario (${itinR}m)` : (state.includes('AT_') ? `Cabecera (${termR}m)` : `Fuera de Ruta`);
+                popupContent = `
+                    <div style="min-width: 210px;">
+                        <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
+                        Ramal: <b>${v.route_id}</b> (${v.agency_id})<br>
+                        Estado: <b style="color: ${markerColor};">${estadoEsp}</b><br>
+                        Rumbo: <b>${Math.round(heading)}°</b> | Velocidad: <b>${speed} km/h</b><br>
+                        Progreso: <b>${v.progress_percent || 0}%</b> (${v.distance_traveled_km || 0} / ${v.route_total_km || 0} km)<br>
+                        Desvío Traza: <b>${Math.round(v.deviation_meters || 0)}m</b><br>
+                        Geocerca Activa: <b style="color: ${circleColor};">${geofenceLabel}</b>
+                    </div>
+                `;
+            }
+
+            const icon = createBusDivIcon(v, markerColor, heading, speed);
+
+            if (!markers[busId]) {
+                markers[busId] = L.marker(newLatLng, { icon: icon }).addTo(map).bindPopup(popupContent);
+                busCircles[busId] = L.circle(newLatLng, {
+                    radius: circleRadius,
+                    color: circleColor,
+                    fillColor: circleColor,
+                    fillOpacity: isFault ? 0.05 : 0.12,
+                    weight: 1.5,
+                    dashArray: circleDash
+                }).addTo(map);
+            } else {
+                const marker = markers[busId];
+                if (!map.hasLayer(marker)) marker.addTo(map);
+                if (busCircles[busId] && !map.hasLayer(busCircles[busId])) busCircles[busId].addTo(map);
+
+                marker.setIcon(icon).setPopupContent(popupContent);
+
+                if (animate) {
+                    const oldLatLng = marker.getLatLng();
+                    animateMarker(busId, marker, oldLatLng, newLatLng, 1800);
+                } else {
+                    marker.setLatLng(newLatLng);
+                    if (busCircles[busId]) busCircles[busId].setLatLng(newLatLng);
+                }
+
+                if (busCircles[busId]) {
+                    busCircles[busId].setRadius(circleRadius);
+                    busCircles[busId].setStyle({
+                        color: circleColor,
+                        fillColor: circleColor,
+                        fillOpacity: isFault ? 0.05 : 0.12,
+                        dashArray: circleDash
+                    });
+                }
+            }
+        }
+
+        /* -------------------------------------------------------------
+           Punto 4: Actualización Reactiva de Tarjetas en Sidebar
+        ------------------------------------------------------------- */
+        function updateVehicleCardInSidebar(v) {
+            const card = document.getElementById(`card-bus-${v.bus_id}`);
+            if (!card) {
+                renderFullSidebarList();
+                return;
+            }
+
+            const isVisible = isBusVisibleByFilter(v);
+            card.style.display = isVisible ? 'block' : 'none';
+
+            const isChecked = busVisibility[v.bus_id] !== false;
+            const chk = document.getElementById(`chk-bus-${v.bus_id}`);
+            if (chk) chk.checked = isChecked;
+            card.style.opacity = isChecked ? '1' : '0.5';
+
+            const isFault = v._isFault;
+            const state = isFault ? 'GPS_FAULT' : (v.state || v.current_state || 'IN_TRANSIT');
+            const stateLabels = {
+                'IN_TRANSIT': 'En Circulación',
+                'AT_ORIGIN': 'En Cabecera',
+                'AT_DESTINATION': 'En Destino',
+                'OFF_ROUTE': 'Desviado',
+                'DEPOT': 'En Depósito',
+                'GPS_FAULT': 'Falla de GPS'
+            };
+            const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
+            const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
+
+            const statusEl = document.getElementById(`card-status-text-${v.bus_id}`);
+            if (statusEl) statusEl.textContent = estadoEsp;
+
+            const speedEl = document.getElementById(`card-speed-${v.bus_id}`);
+            if (speedEl) speedEl.textContent = `${speed} km/h`;
+
+            const devEl = document.getElementById(`card-dev-${v.bus_id}`);
+            if (devEl) {
+                devEl.textContent = `${Math.round(v.deviation_meters || 0)}m`;
+                devEl.style.color = v.deviation_alert ? '#ef4444' : '#34d399';
+            }
+
+            const pingEl = document.getElementById(`card-ping-${v.bus_id}`);
+            if (pingEl) pingEl.textContent = v.last_ping_time ? v.last_ping_time.slice(11, 19) : '--';
+
+            const progPctEl = document.getElementById(`card-prog-pct-${v.bus_id}`);
+            if (progPctEl) progPctEl.textContent = `${v.progress_percent || 0}%`;
+
+            const progKmEl = document.getElementById(`card-prog-km-${v.bus_id}`);
+            if (progKmEl) progKmEl.textContent = `${v.distance_traveled_km || 0}`;
+
+            const progBarEl = document.getElementById(`card-prog-bar-${v.bus_id}`);
+            if (progBarEl) progBarEl.style.width = `${Math.min(v.progress_percent || 0, 100)}%`;
+        }
+
+        function renderFullSidebarList() {
+            const listEl = document.getElementById('bus-list');
+            const vehicles = Object.values(activeVehicles).sort((a, b) => {
+                const numA = parseInt(a.bus_id, 10) || 0;
+                const numB = parseInt(b.bus_id, 10) || 0;
+                return numA - numB;
+            });
+
+            const stateLabels = {
+                'IN_TRANSIT': 'En Circulación',
+                'AT_ORIGIN': 'En Cabecera',
+                'AT_DESTINATION': 'En Destino',
+                'OFF_ROUTE': 'Desviado',
+                'DEPOT': 'En Depósito',
+                'GPS_FAULT': 'Falla de GPS'
+            };
             const gpsTimeoutMin = parseInt(document.getElementById('sel-gps-timeout')?.value || 30, 10);
-            const showFaults = document.getElementById('chk-show-faults')?.checked ?? true;
+
+            listEl.innerHTML = vehicles.map(v => {
+                const isFault = v._isFault;
+                const state = isFault ? 'GPS_FAULT' : (v.state || v.current_state || 'IN_TRANSIT');
+                const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
+                const pillClass = isFault ? 'status-gpsfault' : (state === 'IN_TRANSIT' ? 'status-transit' : (state === 'OFF_ROUTE' ? 'status-offroute' : (state === 'DEPOT' ? 'status-depot' : 'status-origin')));
+                const pillLabel = isFault ? 'Falla GPS' : (stateLabels[state] || state);
+                const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
+                const isVisible = isBusVisibleByFilter(v);
+                const isChecked = busVisibility[v.bus_id] !== false;
+
+                return `
+                    <div class="bus-card ${isFault ? 'card-fault' : ''}" id="card-bus-${v.bus_id}" style="display: ${isVisible ? 'block' : 'none'}; opacity: ${isChecked ? '1' : '0.5'};" onclick="focusBus('${v.bus_id}')" title="Clic para centrar en radar">
+                        <div class="bus-header">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" id="chk-bus-${v.bus_id}" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleBusVisibility('${v.bus_id}')" style="cursor: pointer; accent-color: #38bdf8; width: 14px; height: 14px;">
+                                <span class="bus-title">🚍 Coche #${v.bus_id} (${v.license_plate})</span>
+                            </div>
+                            <span class="status-pill ${pillClass}">${pillLabel}</span>
+                        </div>
+                        <div style="font-size: 11px; color: ${isFault ? '#ef4444' : '#38bdf8'}; margin: 4px 0 6px 0; font-weight: 500; display: flex; align-items: center; gap: 4px;">
+                            <span>${isFault ? '⚠️' : '📍'}</span>
+                            <span id="card-status-text-${v.bus_id}">${estadoEsp}</span>
+                        </div>
+                        ${!isFault ? `
+                        <div class="progress-container">
+                            <div class="progress-labels">
+                                <span>Progreso Itinerario</span>
+                                <span><strong id="card-prog-pct-${v.bus_id}">${v.progress_percent || 0}%</strong> (<span id="card-prog-km-${v.bus_id}">${v.distance_traveled_km || 0}</span> km)</span>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" id="card-prog-bar-${v.bus_id}" style="width: ${Math.min(v.progress_percent || 0, 100)}%;"></div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        <div class="bus-meta">
+                            <div>Ramal: <strong style="color:#f8fafc;" id="card-route-${v.bus_id}">${v.route_id || '--'}</strong></div>
+                            <div>Velocidad: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};" id="card-speed-${v.bus_id}">${speed} km/h</strong></div>
+                            <div>Desvío Traza: <strong style="color:${v.deviation_alert ? '#ef4444':'#34d399'};" id="card-dev-${v.bus_id}">${Math.round(v.deviation_meters || 0)}m</strong></div>
+                            <div>Último Ping: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};" id="card-ping-${v.bus_id}">${v.last_ping_time ? v.last_ping_time.slice(11, 19) : '--'}</strong></div>
+                        </div>
+                        ${isFault ? `<div class="alert-box">📡 Alerta: Sin reporte GPS hace ${Math.round(v._minsAgo)} min (> ${gpsTimeoutMin}m)</div>` : ''}
+                        ${v.speed_alert && !isFault ? '<div class="alert-box">⚠️ ¡EXCESO DE VELOCIDAD (>70 km/h)!</div>' : ''}
+                        ${v.deviation_alert && !isFault ? '<div class="alert-box">⚠️ ¡DESVÍO DE TRAZADO OFICIAL (>400m)!</div>' : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        /* -------------------------------------------------------------
+           Punto 4: Manejo de Visibilidad, Checkboxes y Botones Rápidos
+        ------------------------------------------------------------- */
+        function toggleBusVisibility(busId) {
+            busVisibility[busId] = busVisibility[busId] === false ? true : false;
+            const v = activeVehicles[busId];
+            if (v) renderOrUpdateVehicleMarker(v, false);
+            const card = document.getElementById(`card-bus-${busId}`);
+            if (card) {
+                card.style.opacity = busVisibility[busId] !== false ? '1' : '0.5';
+            }
+            updateHeaderMetrics();
+        }
+
+        function setAllBusesVisibility(val) {
+            const selectedRoute = document.getElementById('sel-route-filter')?.value || 'ALL';
+            Object.values(activeVehicles).forEach(v => {
+                if (selectedRoute === 'ALL' || (v.route_id || '').toUpperCase().includes(selectedRoute.toUpperCase())) {
+                    busVisibility[v.bus_id] = val;
+                }
+            });
+            applyRouteAndVisibilityFilters();
+        }
+
+        function onRouteFilterChange() {
+            applyRouteAndVisibilityFilters();
+        }
+
+        function applyRouteAndVisibilityFilters() {
+            Object.values(activeVehicles).forEach(v => {
+                renderOrUpdateVehicleMarker(v, false);
+                updateVehicleCardInSidebar(v);
+            });
+            updateHeaderMetrics();
+        }
+
+        function updateHeaderMetrics() {
+            const vehicles = Object.values(activeVehicles);
+            const gpsTimeoutMin = parseInt(document.getElementById('sel-gps-timeout')?.value || 30, 10);
 
             let inTransitCount = 0;
             let inTerminalsCount = 0;
             let faultsCount = 0;
+            let visibleCount = 0;
 
             vehicles.forEach(v => {
                 let minsAgo = v.minutes_since_ping;
@@ -1949,151 +2484,30 @@ async def live_map_view():
                 } else if (v.state === 'IN_TRANSIT' || v.current_state === 'IN_TRANSIT') {
                     inTransitCount++;
                 }
+
+                if (isBusVisibleByFilter(v)) {
+                    visibleCount++;
+                }
             });
 
             document.getElementById('m-buses').textContent = vehicles.length;
             document.getElementById('m-transit').textContent = inTransitCount;
             document.getElementById('m-terminals').textContent = inTerminalsCount;
             document.getElementById('m-faults').textContent = faultsCount;
+            const visCountEl = document.getElementById('lbl-visible-count');
+            if (visCountEl) visCountEl.textContent = visibleCount;
+            const totCountEl = document.getElementById('lbl-total-count');
+            if (totCountEl) totCountEl.textContent = vehicles.length;
+        }
 
-            const stateLabels = {
-                'IN_TRANSIT': 'En Circulación',
-                'AT_ORIGIN': 'En Cabecera',
-                'AT_DESTINATION': 'En Destino',
-                'OFF_ROUTE': 'Desviado',
-                'DEPOT': 'En Depósito',
-                'GPS_FAULT': 'Falla de GPS'
-            };
-
-            // Dibujar marcadores y geocercas
-            vehicles.forEach(v => {
-                const lat = (v.latitude !== undefined && v.latitude !== null) ? v.latitude : v.last_latitude;
-                const lon = (v.longitude !== undefined && v.longitude !== null) ? v.longitude : v.last_longitude;
-                if (lat === undefined || lon === undefined || lat === null || lon === null || isNaN(lat) || isNaN(lon)) {
-                    return;
-                }
-                const latlng = [lat, lon];
-                const isFault = v._isFault;
-
-                // Si no se deben mostrar fallas de GPS, removerlos del mapa
-                if (isFault && !showFaults) {
-                    if (markers[v.bus_id]) {
-                        map.removeLayer(markers[v.bus_id]);
-                        delete markers[v.bus_id];
-                    }
-                    if (busCircles[v.bus_id]) {
-                        map.removeLayer(busCircles[v.bus_id]);
-                        delete busCircles[v.bus_id];
-                    }
-                    return;
-                }
-
-                const state = isFault ? 'GPS_FAULT' : (v.state || v.current_state || 'IN_TRANSIT');
-                let markerColor = '#10b981'; // Verde por defecto en itinerario
-                let circleColor = '#10b981';
-                let circleRadius = itinR;
-                let circleDash = null;
-
-                if (isFault) {
-                    markerColor = '#475569'; // Gris falla GPS
-                    circleColor = '#ef4444'; // Borde rojo tenue
-                    circleRadius = 50;
-                    circleDash = '4, 4';
-                } else if (state === 'OFF_ROUTE' || v.deviation_alert) {
-                    markerColor = '#ef4444'; // Rojo fuera de itinerario
-                    circleColor = '#ef4444';
-                    circleRadius = itinR;
-                } else if (state === 'AT_ORIGIN' || state === 'AT_DESTINATION') {
-                    markerColor = '#f59e0b'; // Amarillo en cabecera
-                    circleColor = '#f59e0b';
-                    circleRadius = termR;
-                } else if (state === 'DEPOT') {
-                    markerColor = '#64748b';
-                    circleColor = '#64748b';
-                    circleRadius = 60;
-                } else {
-                    // IN_TRANSIT (Verde dentro de itinerario)
-                    markerColor = '#10b981';
-                    circleColor = '#10b981';
-                    circleRadius = itinR;
-                }
-
-                const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
-                const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
-
-                let popupContent = '';
-                if (isFault) {
-                    popupContent = `
-                        <div style="min-width: 220px;">
-                            <div style="background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #fca5a5; padding: 6px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; margin-bottom: 6px; display:flex; align-items:center; gap:6px;">
-                                <span>📡⚠️</span>
-                                <span>COMUNICAR FALLA DE GPS</span>
-                            </div>
-                            <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
-                            Ramal: <b>${v.route_id || '--'}</b> (${v.agency_id || '004B'})<br>
-                            Estado: <b style="color: #ef4444;">Sin señal GPS hace ${Math.round(v._minsAgo)} min</b><br>
-                            Velocidad: <b>0.0 km/h (Detenido / Sin transmisión)</b><br>
-                            Última posición: <b>${lat.toFixed(5)}, ${lon.toFixed(5)}</b><br>
-                            Último ping registrado: <b style="color:#cbd5e1;">${v.last_ping_time ? v.last_ping_time.replace('T', ' ').slice(0, 19) : '--'}</b>
-                        </div>
-                    `;
-                } else {
-                    const geofenceLabel = state === 'IN_TRANSIT' ? `Itinerario (${itinR}m)` : (state.includes('AT_') ? `Cabecera (${termR}m)` : `Fuera de Ruta`);
-                    popupContent = `
-                        <div style="min-width: 210px;">
-                            <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
-                            Ramal: <b>${v.route_id}</b> (${v.agency_id})<br>
-                            Estado: <b style="color: ${markerColor};">${estadoEsp}</b><br>
-                            Progreso: <b>${v.progress_percent || 0}%</b> (${v.distance_traveled_km || 0} / ${v.route_total_km || 0} km)<br>
-                            Desvío Traza: <b>${Math.round(v.deviation_meters || 0)}m</b><br>
-                            Velocidad: <b>${speed} km/h</b> <span style="font-size:10px; color:#94a3b8;">(2 últimos pings)</span><br>
-                            Geocerca Activa: <b style="color: ${circleColor};">${geofenceLabel}</b>
-                        </div>
-                    `;
-                }
-
-                // 1. Icono del Marcador
-                const iconHtml = `
-                    <div style="background: ${markerColor}; border: 2px solid white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 13px; box-shadow: 0 0 12px ${markerColor}; position: relative;">
-                        ${isFault ? '📡' : '🚌'}
-                        ${isFault ? '<span style="position:absolute; bottom:-2px; right:-2px; background:#ef4444; border-radius:50%; width:10px; height:10px; border:1px solid white; font-size:8px; display:flex; align-items:center; justify-content:center; font-weight:bold; color:white;">!</span>' : ''}
-                    </div>
-                `;
-                const icon = L.divIcon({
-                    className: 'custom-bus-icon',
-                    html: iconHtml,
-                    iconSize: [28, 28]
-                });
-
-                if (!markers[v.bus_id]) {
-                    markers[v.bus_id] = L.marker(latlng, { icon: icon }).addTo(map).bindPopup(popupContent);
-                } else {
-                    markers[v.bus_id].setLatLng(latlng).setIcon(icon).setPopupContent(popupContent);
-                }
-
-                // 2. Geocerca Alrededor del Bus
-                if (!busCircles[v.bus_id]) {
-                    busCircles[v.bus_id] = L.circle(latlng, {
-                        radius: circleRadius,
-                        color: circleColor,
-                        fillColor: circleColor,
-                        fillOpacity: isFault ? 0.05 : 0.12,
-                        weight: 1.5,
-                        dashArray: circleDash
-                    }).addTo(map);
-                } else {
-                    busCircles[v.bus_id].setLatLng(latlng);
-                    busCircles[v.bus_id].setRadius(circleRadius);
-                    busCircles[v.bus_id].setStyle({
-                        color: circleColor,
-                        fillColor: circleColor,
-                        fillOpacity: isFault ? 0.05 : 0.12,
-                        dashArray: circleDash
-                    });
-                }
+        function updateUI(animate = false) {
+            updateHeaderMetrics();
+            Object.values(activeVehicles).forEach(v => {
+                renderOrUpdateVehicleMarker(v, animate);
             });
+            renderFullSidebarList();
 
-            // Auto-enfocar en bus si viene en query ?bus=...
+            // Auto-enfocar si viene en query ?bus=...
             const urlParams = new URLSearchParams(window.location.search);
             const targetBus = urlParams.get('bus');
             if (targetBus && markers[targetBus] && !window._hasAutoFocusedBus) {
@@ -2103,58 +2517,14 @@ async def live_map_view():
                 setTimeout(() => m.openPopup(), 400);
             }
 
-            // Lista lateral en el Sidebar
-            const listEl = document.getElementById('bus-list');
-            const filteredVehicles = showFaults ? vehicles : vehicles.filter(v => !v._isFault);
-
-            listEl.innerHTML = filteredVehicles.map(v => {
-                const isFault = v._isFault;
-                const state = isFault ? 'GPS_FAULT' : (v.state || v.current_state || 'IN_TRANSIT');
-                const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
-                const pillClass = isFault ? 'status-gpsfault' : (state === 'IN_TRANSIT' ? 'status-transit' : (state === 'OFF_ROUTE' ? 'status-offroute' : (state === 'DEPOT' ? 'status-depot' : 'status-origin')));
-                const pillLabel = isFault ? 'Falla GPS' : (stateLabels[state] || state);
-                const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
-
-                return `
-                <div class="bus-card ${isFault ? 'card-fault' : ''}" onclick="focusBus('${v.bus_id}')" title="Clic para centrar en radar">
-                    <div class="bus-header">
-                        <span class="bus-title">🚍 Coche #${v.bus_id} (${v.license_plate})</span>
-                        <span class="status-pill ${pillClass}">${pillLabel}</span>
-                    </div>
-                    <div style="font-size: 11px; color: ${isFault ? '#ef4444' : '#38bdf8'}; margin: 4px 0 6px 0; font-weight: 500; display: flex; align-items: center; gap: 4px;">
-                        <span>${isFault ? '⚠️' : '📍'}</span>
-                        <span>${estadoEsp}</span>
-                    </div>
-                    ${!isFault ? `
-                    <div class="progress-container">
-                        <div class="progress-labels">
-                            <span>Progreso Itinerario</span>
-                            <span><strong>${v.progress_percent || 0}%</strong> (${v.distance_traveled_km || 0} km)</span>
-                        </div>
-                        <div class="progress-bar-bg">
-                            <div class="progress-bar-fill" style="width: ${Math.min(v.progress_percent || 0, 100)}%;"></div>
-                        </div>
-                    </div>
-                    ` : ''}
-                    <div class="bus-meta">
-                        <div>Ramal: <strong style="color:#f8fafc;">${v.route_id || '--'}</strong></div>
-                        <div>Velocidad: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};">${speed} km/h</strong></div>
-                        <div>Desvío Traza: <strong style="color:${v.deviation_alert ? '#ef4444':'#34d399'};">${Math.round(v.deviation_meters || 0)}m</strong></div>
-                        <div>Último Ping: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};">${v.last_ping_time ? v.last_ping_time.slice(11, 19) : '--'}</strong></div>
-                    </div>
-                    ${isFault ? `<div class="alert-box">📡 Alerta: Sin reporte GPS hace ${Math.round(v._minsAgo)} min (&gt;${gpsTimeoutMin}m)</div>` : ''}
-                    ${v.speed_alert && !isFault ? '<div class="alert-box">⚠️ ¡EXCESO DE VELOCIDAD (>70 km/h)!</div>' : ''}
-                    ${v.deviation_alert && !isFault ? '<div class="alert-box">⚠️ ¡DESVÍO DE TRAZADO OFICIAL (>400m)!</div>' : ''}
-                </div>
-            `;
-            }).join('');
-
             const feedEl = document.getElementById('event-feed');
-            feedEl.innerHTML = eventHistory.slice(-15).map(e => `
-                <div class="event-item">
-                    <span class="event-time">${e.time ? e.time.slice(11, 19) : ''}</span> [Bus #${e.bus}] <strong>${e.desc}</strong>
-                </div>
-            `).reverse().join('');
+            if (feedEl) {
+                feedEl.innerHTML = eventHistory.slice(-15).map(e => `
+                    <div class="event-item">
+                        <span class="event-time">${e.time ? e.time.slice(11, 19) : ''}</span> [Bus #${e.bus}] <strong>${e.desc}</strong>
+                    </div>
+                `).reverse().join('');
+            }
         }
 
         function focusBus(busId) {
@@ -2165,6 +2535,9 @@ async def live_map_view():
             }
         }
 
+        /* -------------------------------------------------------------
+           Conexión WebSocket Reactiva con Actualización por Bus
+        ------------------------------------------------------------- */
         function initWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws/live`;
@@ -2188,12 +2561,21 @@ async def live_map_view():
                         if (msg.type === 'init') {
                             if (msg.shapes) renderShapesGeoJSON(msg.shapes);
                             if (msg.stops) renderStopsGeoJSON(msg.stops);
-                            (msg.vehicles || []).forEach(v => activeVehicles[v.bus_id] = v);
+                            (msg.vehicles || []).forEach(v => {
+                                activeVehicles[v.bus_id] = v;
+                                if (busVisibility[v.bus_id] === undefined) busVisibility[v.bus_id] = true;
+                            });
                             eventHistory = msg.events || [];
-                            updateUI();
+                            updateUI(false);
                         } else if (msg.type === 'vehicle_update' && msg.vehicle) {
-                            activeVehicles[msg.vehicle.bus_id] = msg.vehicle;
-                            updateUI();
+                            const v = msg.vehicle;
+                            activeVehicles[v.bus_id] = v;
+                            if (busVisibility[v.bus_id] === undefined) busVisibility[v.bus_id] = true;
+
+                            // Actualización reactiva por bus con animación sin redibujar todo
+                            renderOrUpdateVehicleMarker(v, true);
+                            updateVehicleCardInSidebar(v);
+                            updateHeaderMetrics();
                         }
                     } catch (e) {
                         console.error("Error parseando WebSocket:", e);
@@ -2219,9 +2601,12 @@ async def live_map_view():
                 const data = await res.json();
                 if (data.shapes && shapeLayers.length === 0) renderShapesGeoJSON(data.shapes);
                 if (data.stops && stopLayers.length === 0) renderStopsGeoJSON(data.stops);
-                (data.vehicles || []).forEach(v => activeVehicles[v.bus_id] = v);
+                (data.vehicles || []).forEach(v => {
+                    activeVehicles[v.bus_id] = v;
+                    if (busVisibility[v.bus_id] === undefined) busVisibility[v.bus_id] = true;
+                });
                 eventHistory = data.events || [];
-                updateUI();
+                updateUI(false);
             } catch (err) {
                 console.debug("HTTP fallback error:", err);
             }
