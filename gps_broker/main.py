@@ -37,16 +37,8 @@ import requests
 import psycopg2
 from psycopg2.extras import execute_values, RealDictCursor
 from fastapi import FastAPI, BackgroundTasks, Header, HTTPException, WebSocket, WebSocketDisconnect, Request, Query
-from fastapi.responses import HTMLResponse, JSONResponse, Response, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
-from auth import (
-    get_current_user, get_current_user_optional, require_admin,
-    authenticate_user_db, create_session_token, verify_session_token, COOKIE_NAME
-)
-from admin_service import (
-    get_login_html, get_admin_users_html, list_system_users, list_concessionaires,
-    create_system_user, update_user_status, update_user_concessionaire, create_concessionaire
-)
 from pydantic import BaseModel, Field
 
 # Configuración de Logging
@@ -222,7 +214,7 @@ def get_all_active_vehicles() -> List[Dict[str, Any]]:
             bus_ids = redis_client.smembers("active_buses_set")
             for b_id in bus_ids:
                 v = get_vehicle_state(b_id)
-                if v:
+                if v and (v.get("agency_id") in (VMT_AGENCY_ID, "004B")):
                     vehicles.append(format_vehicle_for_client(v))
             if vehicles:
                 return vehicles
@@ -230,7 +222,8 @@ def get_all_active_vehicles() -> List[Dict[str, Any]]:
             logger.debug(f"Redis smembers error: {e}")
     out = []
     for v in active_vehicles_memory.values():
-        out.append(format_vehicle_for_client(v))
+        if v and (v.get("agency_id") in (VMT_AGENCY_ID, "004B")):
+            out.append(format_vehicle_for_client(v))
     return out
 
 def record_event_history(event: Dict[str, Any]):
@@ -250,39 +243,27 @@ def record_event_history(event: Dict[str, Any]):
 class WebSocketManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
-        self.connection_agency: Dict[WebSocket, Optional[str]] = {}
 
-    async def connect(self, websocket: WebSocket, agency_id: Optional[str] = None):
+    async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.add(websocket)
-        self.connection_agency[websocket] = agency_id.upper() if agency_id else None
-        logger.info(f"Nuevo cliente WebSocket conectado (Agency: {agency_id or 'GLOBAL'}). Total activos: {len(self.active_connections)}")
+        logger.info(f"Nuevo cliente WebSocket conectado. Total activos: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.discard(websocket)
-        self.connection_agency.pop(websocket, None)
         logger.info(f"Cliente WebSocket desconectado. Total activos: {len(self.active_connections)}")
 
     async def broadcast(self, message: Dict[str, Any]):
         if not self.active_connections:
             return
-        msg_agency = None
-        if message.get("type") == "vehicle_update":
-            veh = message.get("vehicle") or {}
-            msg_agency = (veh.get("agency_id") or "").upper()
-
         dead_connections = set()
-        for conn in list(self.active_connections):
+        for conn in self.active_connections:
             try:
-                client_agency = self.connection_agency.get(conn)
-                # Aislamiento Multi-Tenant: si el cliente es de una empresa, solo recibe pings de su flota
-                if client_agency and msg_agency and client_agency != msg_agency:
-                    continue
                 await conn.send_json(message)
             except Exception:
                 dead_connections.add(conn)
         for dead in dead_connections:
-            self.disconnect(dead)
+            self.active_connections.discard(dead)
 
     def broadcast_sync(self, message: Dict[str, Any]):
         if not self.active_connections:
@@ -364,15 +345,6 @@ def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
     a = math.sin(delta_phi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0)**2
     c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     return R * c
-
-def calculate_bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calcula el rumbo o azimut geodésico en grados (0 a 360) entre dos coordenadas."""
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    delta_lambda = math.radians(lon2 - lon1)
-    y = math.sin(delta_lambda) * math.cos(phi2)
-    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(delta_lambda)
-    bearing_deg = (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
-    return round(bearing_deg, 1)
 
 def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id: str = "004B") -> Optional[Dict[str, Any]]:
     """Calcula con PostGIS el porcentaje del recorrido completado y la distancia al trazado oficial."""
@@ -677,6 +649,17 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
             host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=3
         )
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        if redis_client:
+            try:
+                old_ids = list(redis_client.smembers("active_buses_set"))
+                for old_id in old_ids:
+                    st = get_vehicle_state(old_id)
+                    if st and st.get("agency_id") not in (VMT_AGENCY_ID, "004B"):
+                        redis_client.delete(f"vehicle:{old_id}")
+                        redis_client.srem("active_buses_set", old_id)
+            except Exception as e:
+                logger.debug(f"Redis cleanup error: {e}")
+
         cur.execute("""
             SELECT DISTINCT ON (bus_internal_code)
                 bus_internal_code as mean_id,
@@ -690,9 +673,10 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
                 odometer_km,
                 recorded_at as fecha_hora
             FROM telemetry_ping
-            WHERE route_id IN ('020c', '020d', '020e', '020f', '0210', '0211')
+            WHERE (agency_id = %s OR agency_id = '004B')
+              AND route_id IN ('020c', '020d', '020e', '020f', '0210', '0211')
             ORDER BY bus_internal_code, recorded_at DESC;
-        """)
+        """, (VMT_AGENCY_ID,))
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -829,6 +813,11 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     heading = ping.effective_heading
     plate = ping.effective_license_plate
 
+    # Filtrar estrictamente por empresa Consorcio Arapotí (004B)
+    agency = (ping.agency_id or VMT_AGENCY_ID).strip()
+    if agency not in (VMT_AGENCY_ID, "004B"):
+        return {"status": "ignored", "reason": "agency_mismatch", "bus_id": bus_key}
+
     # Validación de desfase de reloj del GPS (>2 horas de diferencia => alinear a tiempo real actual)
     now_dt = datetime.now(timezone.utc)
     try:
@@ -887,18 +876,14 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
             delta_sec = (dt_curr - dt_prev).total_seconds()
             if 0.5 <= delta_sec <= 600:
                 dist_m = haversine_meters(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
-                if dist_m < 1.0: # Umbral cinemático exacto: si desplazamiento < 1m, bus detenido
+                if dist_m < 3.0:
                     calculated_speed = 0.0
                 else:
                     calc_kmh = round((dist_m / delta_sec) * 3.6, 1)
                     if calc_kmh <= 120.0:
                         calculated_speed = calc_kmh
-                    # Cálculo cinemático de rumbo real entre los 2 últimos puntos
-                    calc_heading = calculate_bearing_deg(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
-                    if calc_heading is not None:
-                        heading = calc_heading
         except Exception as e:
-            logger.debug(f"Error cálculo velocidad/rumbo 2 últimos puntos: {e}")
+            logger.debug(f"Error cálculo velocidad 2 últimos puntos: {e}")
 
     if calculated_speed is not None:
         speed = calculated_speed
@@ -1039,38 +1024,40 @@ def vmt_continuous_sync_worker():
                 logger.info(f"✅ Conexión establecida con VMT Monitoreo Central ({VMT_DB_HOST}). Flota en sincronía.")
 
             cur = conn.cursor(cursor_factory=RealDictCursor)
-            # Resolver dinámicamente todas las empresas concesionarias activas en la BD local
-            target_agencies = [VMT_AGENCY_ID]
-            try:
-                pg_c = psycopg2.connect(host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2)
-                cur_c = pg_c.cursor()
-                cur_c.execute("SELECT code FROM transit_concessionaire WHERE active = true")
-                db_codes = [row[0].strip().upper() for row in cur_c.fetchall() if row[0]]
-                cur_c.close()
-                pg_c.close()
-                if db_codes:
-                    target_agencies = db_codes
-            except Exception:
-                pass
-
             query = """
-                SELECT mean_id, agency_id, route_id, driver_id, latitude, longitude, rumbo, velocidad,
-                       fecha_hora, fecha_hora_procesamiento, rn
+                SELECT DISTINCT ON (mean_id) 
+                    id,
+                    agency_id,
+                    mean_id,
+                    route_id,
+                    driver_id,
+                    latitude,
+                    longitude,
+                    rumbo,
+                    velocidad,
+                    fecha_hora,
+                    fecha_hora_procesamiento
                 FROM (
-                    SELECT id, agency_id, mean_id, route_id, driver_id, latitude, longitude, rumbo, velocidad,
-                           fecha_hora, fecha_hora_procesamiento,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY mean_id 
-                               ORDER BY COALESCE(fecha_hora_procesamiento, fecha_hora) DESC
-                           ) as rn
+                    SELECT 
+                        id,
+                        agency_id,
+                        mean_id,
+                        route_id,
+                        driver_id,
+                        latitude,
+                        longitude,
+                        rumbo,
+                        velocidad,
+                        fecha_hora,
+                        fecha_hora_procesamiento
                     FROM app_monitoreo_mensajeoperativo
-                    WHERE agency_id = ANY(%s)
-                      AND (fecha_hora_procesamiento >= NOW() - INTERVAL '4 hour' OR fecha_hora >= NOW() - INTERVAL '4 hour')
-                ) t
-                WHERE rn <= 2
-                ORDER BY mean_id, rn DESC;
+                    WHERE agency_id = %s
+                    ORDER BY id DESC
+                    LIMIT 2000
+                ) sub
+                ORDER BY mean_id, id DESC;
             """
-            cur.execute(query, (target_agencies,))
+            cur.execute(query, (VMT_AGENCY_ID,))
             rows = cur.fetchall()
             cur.close()
 
@@ -1251,115 +1238,13 @@ async def test_mqtt_ping(
 # ------------------------------------------------------------------------------
 # WebSocket y Radar Dashboard
 # ------------------------------------------------------------------------------
-PG_CONFIG = {
-    "host": PG_HOST,
-    "port": PG_PORT,
-    "dbname": PG_DB,
-    "user": PG_USER,
-    "password": PG_PASS
-}
-
-# ------------------------------------------------------------------------------
-# Rutas de Autenticación & Control de Sesiones Multi-Tenant
-# ------------------------------------------------------------------------------
-@app.get("/", include_in_schema=False)
-async def root_redirect(request: Request):
-    user = get_current_user_optional(request)
-    if user:
-        return RedirectResponse("/map", status_code=303)
-    return RedirectResponse("/login", status_code=303)
-
-@app.get("/login", response_class=HTMLResponse, include_in_schema=False)
-async def login_page(request: Request):
-    user = get_current_user_optional(request)
-    if user:
-        return RedirectResponse("/map", status_code=303)
-    return get_login_html()
-
-@app.post("/login", include_in_schema=False)
-async def login_action(request: Request):
-    form = await request.form()
-    login_str = form.get("login", "").strip()
-    password_str = form.get("password", "")
-
-    user_data = authenticate_user_db(login_str, password_str, PG_CONFIG)
-    if not user_data:
-        return HTMLResponse(get_login_html("Credenciales incorrectas o usuario no habilitado."), status_code=401)
-
-    token = create_session_token(user_data)
-    response = RedirectResponse("/map", status_code=303)
-    response.set_cookie(key=COOKIE_NAME, value=token, httponly=True, max_age=86400 * 7, samesite="lax")
-    return response
-
-@app.get("/logout", include_in_schema=False)
-async def logout_action():
-    response = RedirectResponse("/login", status_code=303)
-    response.delete_cookie(COOKIE_NAME)
-    return response
-
-# ------------------------------------------------------------------------------
-# Panel y APIs de Administración Multi-Tenant
-# ------------------------------------------------------------------------------
-@app.get("/admin/users", response_class=HTMLResponse)
-async def admin_users_view(request: Request):
-    user = get_current_user(request)
-    if not user.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Acceso denegado: Se requieren permisos de Administrador Global.")
-    return get_admin_users_html(user)
-
-@app.post("/api/v1/admin/users/create")
-async def api_admin_create_user(request: Request):
-    user = require_admin(request)
-    data = await request.json()
-    res = create_system_user(
-        login=data.get("login", ""),
-        password=data.get("password", ""),
-        concessionaire_id=data.get("concessionaire_id"),
-        is_admin=data.get("is_admin", False)
-    )
-    return res
-
-@app.post("/api/v1/admin/users/toggle")
-async def api_admin_toggle_user(request: Request):
-    user = require_admin(request)
-    data = await request.json()
-    return update_user_status(user_id=int(data["user_id"]), active=bool(data["active"]))
-
-@app.post("/api/v1/admin/users/update")
-async def api_admin_update_user(request: Request):
-    user = require_admin(request)
-    data = await request.json()
-    return update_user_concessionaire(
-        user_id=int(data["user_id"]),
-        concessionaire_id=data.get("concessionaire_id"),
-        new_password=data.get("new_password")
-    )
-
-@app.post("/api/v1/admin/concessionaires/create")
-async def api_admin_create_concessionaire(request: Request):
-    user = require_admin(request)
-    data = await request.json()
-    return create_concessionaire(name=data.get("name", ""), code=data.get("code", ""))
-
-# ------------------------------------------------------------------------------
-# WebSocket y API Telemetría con Aislamiento de Flota por Tenant
-# ------------------------------------------------------------------------------
 @app.websocket("/ws/live")
 async def websocket_live_radar(websocket: WebSocket):
-    # Identificar tenant mediante cookie de sesión en WebSocket
-    token = websocket.cookies.get(COOKIE_NAME)
-    user = verify_session_token(token) if token else None
-    client_agency = user.get("agency_id") if (user and not user.get("is_admin")) else None
-
-    await ws_manager.connect(websocket, agency_id=client_agency)
+    await ws_manager.connect(websocket)
     try:
-        vehicles = get_all_active_vehicles()
-        if client_agency:
-            vehicles = [v for v in vehicles if (v.get("agency_id") or "").upper() == client_agency.upper()]
-
         initial_data = {
             "type": "init",
-            "vehicles": vehicles,
+            "vehicles": get_all_active_vehicles(),
             "events": event_history_memory[-10:],
             "shapes": get_active_shapes_geojson(),
             "stops": get_active_stops_geojson()
@@ -1377,22 +1262,11 @@ async def websocket_live_radar(websocket: WebSocket):
         ws_manager.disconnect(websocket)
 
 @app.get("/api/v1/live")
-async def get_live_fleet(request: Request, agency_id: Optional[str] = Query(None)):
-    user = get_current_user_optional(request)
+async def get_live_fleet():
     vehicles = get_all_active_vehicles()
     if not vehicles:
         hydrate_active_fleet_from_postgis(force=True)
         vehicles = get_all_active_vehicles()
-
-    # Filtrar estrictamente según el usuario logueado
-    if user:
-        if not user.get("is_admin") and user.get("agency_id"):
-            # Operador de concesionaria: SOLO ve su flota
-            vehicles = [v for v in vehicles if (v.get("agency_id") or "").upper() == user["agency_id"].upper()]
-        elif user.get("is_admin") and agency_id:
-            # Administrador Global con filtro opcional de empresa
-            vehicles = [v for v in vehicles if (v.get("agency_id") or "").upper() == agency_id.upper()]
-
     return {
         "status": "success",
         "count": len(vehicles),
@@ -1459,27 +1333,16 @@ async def api_hydrate_fleet(force: bool = Query(True, description="Forzar recarg
     return {"status": "success", "hydrated_buses": count}
 
 @app.get("/api/v1/headway/data")
-async def api_headway_data(request: Request, agency_id: Optional[str] = Query(None)):
-    user = get_current_user_optional(request)
-    target_agency = None
-    if user:
-        if not user.get("is_admin") and user.get("agency_id"):
-            target_agency = user["agency_id"]
-        elif user.get("is_admin") and agency_id:
-            target_agency = agency_id
-
-    hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory, agency_id=target_agency)
+async def api_headway_data():
+    hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory)
     if hw_data.get("total_active_buses", 0) == 0:
         logger.info("Headway solicitó datos pero encontró 0 buses. Ejecutando auto-hidratación desde PostgreSQL...")
         hydrate_active_fleet_from_postgis(force=True)
-        hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory, agency_id=target_agency)
+        hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory)
     return hw_data
 
 @app.get("/headway", response_class=HTMLResponse)
-async def headway_dashboard_view(request: Request):
-    user = get_current_user_optional(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
+async def headway_dashboard_view():
     return get_headway_html()
 
 @app.get("/api/v1/bunching/alerts")
@@ -1749,34 +1612,7 @@ async def api_waze_corridor_impacts():
 # Dashboard Radar Web en Vivo con PostGIS Shapes y Visor Histórico
 # ------------------------------------------------------------------------------
 @app.get("/map", response_class=HTMLResponse)
-async def live_map_view(request: Request):
-    user = get_current_user_optional(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    
-    concessionaires = list_concessionaires()
-    conc_select_options = "".join([
-        f'<option value="{c["code"]}">[{c["code"]}] {c["name"]}</option>'
-        for c in concessionaires
-    ])
-
-    if user.get("is_admin"):
-        tenant_badge = f'''
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <select id="admin-tenant-select" onchange="switchAdminTenant(this.value)" style="background: #1e293b; color: #38bdf8; border: 1px solid #334155; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; outline: none; cursor: pointer;">
-                <option value="">🏢 Todas las Flotas (Vista Regulador)</option>
-                {conc_select_options}
-            </select>
-            <a href="/admin/users" class="btn-hist" style="background: rgba(56, 189, 248, 0.2); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; text-decoration: none;">👥 Usuarios & Concesionarias</a>
-        </div>
-        '''
-    else:
-        tenant_badge = f'<span class="badge badge-info">🏢 {user.get("concessionaire_name", "Mi Empresa")} ({user.get("agency_id", "--")})</span>'
-
-    user_info_snippet = f'''
-    <span style="font-size: 11px; color: #cbd5e1; font-weight: 600;">👤 {user["login"]}</span>
-    <a href="/logout" class="btn-hist" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; text-decoration: none;">🚪 Salir</a>
-    '''
+async def live_map_view():
     return """<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1808,19 +1644,6 @@ async def live_map_view(request: Request):
         .geofence-toolbar { background: #0f172a; padding: 6px 20px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 11px; z-index: 999; flex-wrap: wrap; }
         .geofence-ctrl-group { display: flex; align-items: center; gap: 6px; background: #1e293b; padding: 3px 10px; border-radius: 6px; border: 1px solid #334155; }
         .val-badge { font-weight: 800; padding: 1px 6px; border-radius: 4px; font-size: 11px; min-width: 42px; text-align: center; }
-        
-        .btn-realtime-toggle { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 800; cursor: pointer; border: 1px solid transparent; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 6px; }
-        .btn-realtime-active { background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: #10b981; }
-        .btn-realtime-paused { background: rgba(239, 68, 68, 0.2); color: #f87171; border-color: #ef4444; }
-
-        /* Marcador Direccional con Rumbo y Velocidad */
-        .dir-bus-marker { display: flex; flex-direction: column; align-items: center; position: relative; cursor: pointer; user-select: none; }
-        .dir-bus-arrow { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #ffffff; display: flex; align-items: center; justify-content: center; transition: transform 0.4s ease, background-color 0.3s ease; box-shadow: 0 0 10px rgba(0,0,0,0.6); }
-        .dir-bus-badge { position: absolute; top: 27px; background: rgba(15, 23, 42, 0.95); border: 1px solid #38bdf8; border-radius: 4px; padding: 1px 4px; font-size: 9px; font-weight: 800; display: flex; align-items: center; gap: 3px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
-        .dir-bus-badge .bus-num { color: #f8fafc; }
-        .dir-bus-badge .bus-spd { font-size: 8px; }
-        .dir-bus-marker.is-fault .dir-bus-arrow { background: #475569 !important; border-color: #ef4444 !important; }
-        .bus-card.is-hidden { opacity: 0.35; }
         
         #app-layout { display: flex; flex: 1; position: relative; overflow: hidden; }
         #map { flex: 1; height: 100%; z-index: 1; }
@@ -1859,7 +1682,7 @@ async def live_map_view(request: Request):
         <div class="logo-group">
             <h2 style="font-size: 16px; font-weight: 800; letter-spacing: -0.02em;">🚍 Poliverso Transit Radar</h2>
             <span id="conn-badge" class="badge badge-poll">Iniciando...</span>
-            " + tenant_badge + "
+            <span class="badge badge-info">Consorcio Arapotí (004B)</span>
         </div>
         <div class="controls-bar">
             <div class="date-picker-box">
@@ -1878,7 +1701,6 @@ async def live_map_view(request: Request):
                 </div>
             </div>
             <a href="/headway" style="background: linear-gradient(135deg, #0284c7, #6366f1); color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);">📊 Tablero Lineal</a>
-            " + user_info_snippet + "
         </div>
     </header>
 
@@ -1908,11 +1730,8 @@ async def live_map_view(request: Request):
                 <span>⚠️ Mostrar coches con Falla GPS</span>
             </label>
         </div>
-        <div style="display: flex; align-items: center; gap: 10px; font-size: 11px;">
-            <button id="btn-toggle-realtime" onclick="toggleRealTimeMonitoring()" class="btn-realtime-toggle btn-realtime-active" title="Alternar actualización en vivo de la flota">
-                🟢 Monitoreo en Tiempo Real (Activo)
-            </button>
-            <span style="color: #94a3b8;">⚡ Velocidad: <b>Diferencial (2 últimos pings)</b></span>
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: #94a3b8;">
+            <span>⚡ Velocidad: <b>Diferencial (2 últimos pings)</b></span>
         </div>
     </div>
 
@@ -1949,10 +1768,7 @@ async def live_map_view(request: Request):
         <div id="sidebar">
             <div class="sidebar-header">
                 <span>Flota Consorcio Arapotí</span>
-                <div style="display: flex; gap: 4px; align-items: center;">
-                    <button onclick="toggleAllBuses(true)" style="background:#1e293b; border:1px solid #475569; color:#94a3b8; font-size:10px; padding:2px 6px; border-radius:4px; cursor:pointer;" title="Seleccionar y ver todos en mapa">Todos</button>
-                    <button onclick="toggleAllBuses(false)" style="background:#1e293b; border:1px solid #475569; color:#94a3b8; font-size:10px; padding:2px 6px; border-radius:4px; cursor:pointer;" title="Ocultar todos">Ninguno</button>
-                </div>
+                <span id="route-count" style="font-size: 11px; color: #38bdf8;">Línea 20 (004B)</span>
             </div>
             <div class="bus-list" id="bus-list"></div>
             <div class="sidebar-header" style="border-top: 1px solid #1f2937;">Eventos y Geocercas en Vivo</div>
@@ -1980,91 +1796,6 @@ async def live_map_view(request: Request):
         let eventHistory = [];
         let ws = null;
         let pollingInterval = null;
-        let isRealTimeActive = true;
-        const busVisibility = {};
-        const activeAnimations = {};
-
-        function toggleRealTimeMonitoring() {
-            isRealTimeActive = !isRealTimeActive;
-            const btn = document.getElementById('btn-toggle-realtime');
-            if (btn) {
-                if (isRealTimeActive) {
-                    btn.className = 'btn-realtime-toggle btn-realtime-active';
-                    btn.innerHTML = '🟢 Monitoreo en Tiempo Real (Activo)';
-                    btn.title = 'Clic para pausar actualización en vivo';
-                    fetchHttpLive();
-                } else {
-                    btn.className = 'btn-realtime-toggle btn-realtime-paused';
-                    btn.innerHTML = '⏸️ Visualización en Pausa (Reanudar)';
-                    btn.title = 'Clic para reanudar actualización en vivo';
-                }
-            }
-        }
-
-        function toggleBusVisibility(busId, isVisible) {
-            busVisibility[busId] = isVisible;
-            if (!isVisible) {
-                if (markers[busId]) {
-                    map.removeLayer(markers[busId]);
-                    delete markers[busId];
-                }
-                if (busCircles[busId]) {
-                    map.removeLayer(busCircles[busId]);
-                    delete busCircles[busId];
-                }
-            }
-            updateUI();
-        }
-
-        function toggleAllBuses(visible) {
-            Object.keys(activeVehicles).forEach(bId => {
-                busVisibility[bId] = visible;
-                if (!visible) {
-                    if (markers[bId]) { map.removeLayer(markers[bId]); delete markers[bId]; }
-                    if (busCircles[bId]) { map.removeLayer(busCircles[bId]); delete busCircles[bId]; }
-                }
-            });
-            updateUI();
-        }
-
-        function animateMarkerSmooth(busId, marker, startLatLng, endLatLng, circle, durationMs = 2200) {
-            if (!marker) return;
-            const sLat = (startLatLng.lat !== undefined) ? startLatLng.lat : startLatLng[0];
-            const sLng = (startLatLng.lng !== undefined) ? startLatLng.lng : startLatLng[1];
-            const eLat = endLatLng[0];
-            const eLng = endLatLng[1];
-
-            if (Math.abs(eLat - sLat) < 0.000005 && Math.abs(eLng - sLng) < 0.000005) {
-                marker.setLatLng(endLatLng);
-                if (circle) circle.setLatLng(endLatLng);
-                return;
-            }
-
-            if (activeAnimations[busId]) {
-                cancelAnimationFrame(activeAnimations[busId]);
-                delete activeAnimations[busId];
-            }
-
-            const startTime = performance.now();
-            function step(currentTime) {
-                const elapsed = currentTime - startTime;
-                const progress = Math.min(elapsed / durationMs, 1.0);
-                const ease = 1 - Math.pow(1 - progress, 3);
-                const curLat = sLat + (eLat - sLat) * ease;
-                const curLng = sLng + (eLng - sLng) * ease;
-                const curLatLng = [curLat, curLng];
-                
-                marker.setLatLng(curLatLng);
-                if (circle) circle.setLatLng(curLatLng);
-
-                if (progress < 1.0) {
-                    activeAnimations[busId] = requestAnimationFrame(step);
-                } else {
-                    delete activeAnimations[busId];
-                }
-            }
-            activeAnimations[busId] = requestAnimationFrame(step);
-        }
 
         const routeColors = {
             '020f': '#38bdf8',
@@ -2321,49 +2052,23 @@ async def live_map_view(request: Request):
                     `;
                 }
 
-                // Si el bus está desmarcado en el panel lateral, ocultar del mapa
-                if (busVisibility[v.bus_id] === false) {
-                    if (markers[v.bus_id]) {
-                        map.removeLayer(markers[v.bus_id]);
-                        delete markers[v.bus_id];
-                    }
-                    if (busCircles[v.bus_id]) {
-                        map.removeLayer(busCircles[v.bus_id]);
-                        delete busCircles[v.bus_id];
-                    }
-                    return;
-                }
-
-                // 1. Icono Direccional con Flecha de Rumbo y Velocidad
-                const heading = Math.round(v.heading_deg || 0);
+                // 1. Icono del Marcador
                 const iconHtml = `
-                    <div class="dir-bus-marker ${isFault ? 'is-fault' : ''}">
-                        <div class="dir-bus-arrow" style="transform: rotate(${heading}deg); background: ${markerColor}; box-shadow: 0 0 10px ${markerColor};">
-                            ${isFault ? '<span style="font-size:12px;">📡</span>' : `
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="#ffffff" style="display:block;">
-                                <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>
-                            </svg>
-                            `}
-                        </div>
-                        <div class="dir-bus-badge" style="border-color: ${markerColor};">
-                            <span class="bus-num">#${v.bus_id}</span>
-                            <span class="bus-spd" style="color: ${speed > 60 ? '#f87171' : '#38bdf8'}">${Math.round(speed)}k</span>
-                        </div>
+                    <div style="background: ${markerColor}; border: 2px solid white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 13px; box-shadow: 0 0 12px ${markerColor}; position: relative;">
+                        ${isFault ? '📡' : '🚌'}
+                        ${isFault ? '<span style="position:absolute; bottom:-2px; right:-2px; background:#ef4444; border-radius:50%; width:10px; height:10px; border:1px solid white; font-size:8px; display:flex; align-items:center; justify-content:center; font-weight:bold; color:white;">!</span>' : ''}
                     </div>
                 `;
                 const icon = L.divIcon({
-                    className: 'custom-bus-icon-wrap',
+                    className: 'custom-bus-icon',
                     html: iconHtml,
-                    iconSize: [36, 44],
-                    iconAnchor: [18, 14]
+                    iconSize: [28, 28]
                 });
 
                 if (!markers[v.bus_id]) {
                     markers[v.bus_id] = L.marker(latlng, { icon: icon }).addTo(map).bindPopup(popupContent);
                 } else {
-                    const prevLatLng = markers[v.bus_id].getLatLng();
-                    markers[v.bus_id].setIcon(icon).setPopupContent(popupContent);
-                    animateMarkerSmooth(v.bus_id, markers[v.bus_id], prevLatLng, latlng, busCircles[v.bus_id]);
+                    markers[v.bus_id].setLatLng(latlng).setIcon(icon).setPopupContent(popupContent);
                 }
 
                 // 2. Geocerca Alrededor del Bus
@@ -2377,6 +2082,7 @@ async def live_map_view(request: Request):
                         dashArray: circleDash
                     }).addTo(map);
                 } else {
+                    busCircles[v.bus_id].setLatLng(latlng);
                     busCircles[v.bus_id].setRadius(circleRadius);
                     busCircles[v.bus_id].setStyle({
                         color: circleColor,
@@ -2397,7 +2103,7 @@ async def live_map_view(request: Request):
                 setTimeout(() => m.openPopup(), 400);
             }
 
-            // Lista lateral en el Sidebar con Checkboxes
+            // Lista lateral en el Sidebar
             const listEl = document.getElementById('bus-list');
             const filteredVehicles = showFaults ? vehicles : vehicles.filter(v => !v._isFault);
 
@@ -2408,15 +2114,11 @@ async def live_map_view(request: Request):
                 const pillClass = isFault ? 'status-gpsfault' : (state === 'IN_TRANSIT' ? 'status-transit' : (state === 'OFF_ROUTE' ? 'status-offroute' : (state === 'DEPOT' ? 'status-depot' : 'status-origin')));
                 const pillLabel = isFault ? 'Falla GPS' : (stateLabels[state] || state);
                 const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
-                const isChecked = busVisibility[v.bus_id] !== false;
 
                 return `
-                <div class="bus-card ${isFault ? 'card-fault' : ''} ${!isChecked ? 'is-hidden' : ''}" onclick="focusBus('${v.bus_id}')" title="Clic para centrar en radar">
+                <div class="bus-card ${isFault ? 'card-fault' : ''}" onclick="focusBus('${v.bus_id}')" title="Clic para centrar en radar">
                     <div class="bus-header">
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <input type="checkbox" id="chk-bus-${v.bus_id}" ${isChecked ? 'checked' : ''} onchange="toggleBusVisibility('${v.bus_id}', this.checked)" onclick="event.stopPropagation()" style="accent-color: #38bdf8; cursor: pointer; width: 14px; height: 14px;">
-                            <span class="bus-title">🚍 Coche #${v.bus_id} (${v.license_plate})</span>
-                        </div>
+                        <span class="bus-title">🚍 Coche #${v.bus_id} (${v.license_plate})</span>
                         <span class="status-pill ${pillClass}">${pillLabel}</span>
                     </div>
                     <div style="font-size: 11px; color: ${isFault ? '#ef4444' : '#38bdf8'}; margin: 4px 0 6px 0; font-weight: 500; display: flex; align-items: center; gap: 4px;">
@@ -2491,9 +2193,7 @@ async def live_map_view(request: Request):
                             updateUI();
                         } else if (msg.type === 'vehicle_update' && msg.vehicle) {
                             activeVehicles[msg.vehicle.bus_id] = msg.vehicle;
-                            if (isRealTimeActive) {
-                                updateUI();
-                            }
+                            updateUI();
                         }
                     } catch (e) {
                         console.error("Error parseando WebSocket:", e);
@@ -2521,9 +2221,7 @@ async def live_map_view(request: Request):
                 if (data.stops && stopLayers.length === 0) renderStopsGeoJSON(data.stops);
                 (data.vehicles || []).forEach(v => activeVehicles[v.bus_id] = v);
                 eventHistory = data.events || [];
-                if (isRealTimeActive) {
-                    updateUI();
-                }
+                updateUI();
             } catch (err) {
                 console.debug("HTTP fallback error:", err);
             }

@@ -98,12 +98,13 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
                 val = redis_client.get(k)
                 if val:
                     data = json.loads(val)
-                    active_buses.append(data)
+                    if (data.get("agency_id") or "004B") == "004B":
+                        active_buses.append(data)
         except Exception as e:
             logger.debug(f"Error Redis headway: {e}")
 
     if not active_buses and active_vehicles_memory:
-        active_buses = list(active_vehicles_memory.values())
+        active_buses = [b for b in active_vehicles_memory.values() if (b.get("agency_id") or "004B") == "004B"]
 
     if not active_buses:
         try:
@@ -123,7 +124,8 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
                     odometer_km,
                     recorded_at as last_ping_time
                 FROM telemetry_ping
-                WHERE route_id IN ('020c', '020d', '020e', '020f', '0210', '0211')
+                WHERE agency_id = '004B'
+                  AND route_id IN ('020c', '020d', '020e', '020f', '0210', '0211')
                 ORDER BY bus_internal_code, recorded_at DESC;
             """)
             for row in cur.fetchall():
@@ -153,9 +155,6 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
             else:
                 pct = 0.0
 
-            if dist_km == 0.0 and pct > 0 and total_km > 0:
-                dist_km = round((pct / 100.0) * total_km, 2)
-
             state = b.get("state") or b.get("current_state") or "IN_TRANSIT"
             state_label = b.get("status_display") or ("En Circulación" if state == "IN_TRANSIT" else ("En Cabecera" if state == "AT_ORIGIN" else ("En Destino" if state == "AT_DESTINATION" else ("Desviado" if state == "OFF_ROUTE" else "En Depósito"))))
 
@@ -174,9 +173,7 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
                 "origin": routes_dict[r_code]["origin"],
                 "destination": routes_dict[r_code]["destination"],
                 "state": state,
-                "status": state,
                 "state_label": state_label,
-                "status_display": state_label,
                 "street_name": b.get("street_name") or "",
                 "approaching": b.get("approaching") or "",
                 "driver_id": b.get("driver_id") or "--",
@@ -184,9 +181,6 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
                 "latitude": float(lat) if lat is not None else None,
                 "longitude": float(lon) if lon is not None else None,
                 "speed_kmh": round(speed, 1),
-                "speed": round(speed, 1),
-                "heading_deg": b.get("heading_deg"),
-                "dist_km": round(dist_km, 2),
                 "distance_traveled_km": round(dist_km, 2),
                 "progress_percent": pct,
                 "deviation_meters": round(float(b.get("deviation_meters") or 0.0), 1),
@@ -818,7 +812,7 @@ def get_headway_html() -> str:
             align-items: center;
             cursor: pointer;
             z-index: 25;
-            transition: left 2.0s cubic-bezier(0.25, 1, 0.5, 1), transform 0.2s ease;
+            transition: left 0.6s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s ease;
         }
 
         .bus-marker:hover {
@@ -1223,9 +1217,6 @@ def get_headway_html() -> str:
                 <span id="sound-text">Alarma: ACTIVA</span>
             </button>
 
-            <button id="btn-toggle-headway-rt" onclick="toggleHeadwayRealtime()" class="nav-btn" style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; font-weight: 700; cursor: pointer;" title="Alternar actualización automática de frecuencias">
-                <span>🟢 Tiempo Real (Activo)</span>
-            </button>
             <a href="/map" class="nav-btn">
                 <span>🗺️ Radar Satelital</span>
             </a>
@@ -1525,38 +1516,12 @@ def get_headway_html() -> str:
             }
         }
 
-        let isHeadwayRealtimeActive = true;
-        const hiddenHeadwayBuses = {};
-
-        function toggleHeadwayRealtime() {
-            isHeadwayRealtimeActive = !isHeadwayRealtimeActive;
-            const btn = document.getElementById('btn-toggle-headway-rt');
-            if (btn) {
-                if (isHeadwayRealtimeActive) {
-                    btn.style.background = 'rgba(16, 185, 129, 0.2)';
-                    btn.style.borderColor = '#10b981';
-                    btn.style.color = '#34d399';
-                    btn.innerHTML = '<span>🟢 Tiempo Real (Activo)</span>';
-                    fetchHeadwayData();
-                } else {
-                    btn.style.background = 'rgba(239, 68, 68, 0.2)';
-                    btn.style.borderColor = '#ef4444';
-                    btn.style.color = '#f87171';
-                    btn.innerHTML = '<span>⏸️ Visualización en Pausa (Reanudar)</span>';
-                }
-            }
-        }
-
-        function toggleHeadwayBusVisibility(busId, isVisible) {
-            hiddenHeadwayBuses[busId] = !isVisible;
-            if (latestDashboardData) {
-                renderDashboard(latestDashboardData);
-            }
+        function filterByBunchingOnly() {
+            filterRoute('bunching');
         }
 
         // --- FETCH Y RENDERIZADO DEL DASHBOARD ---
         async function fetchHeadwayData() {
-            if (!isHeadwayRealtimeActive) return;
             try {
                 const res = await fetch('/api/v1/headway/data');
                 const data = await res.json();
@@ -1683,7 +1648,7 @@ def get_headway_html() -> str:
                             }).join('')}
 
                             <!-- Bus Markers on Track (Clickable) -->
-                            ${buses.filter(b => !hiddenHeadwayBuses[b.bus_id]).map(b => {
+                            ${buses.map(b => {
                                 const isBunch = b.is_bunching;
                                 return `
                                     <div class="bus-marker ${isBunch ? 'bunching' : ''}" 
@@ -1693,7 +1658,7 @@ def get_headway_html() -> str:
                                         <div class="bus-marker-bubble">
                                             <span>🚌</span>
                                             <span>${b.bus_id}</span>
-                                            <span style="font-size: 8px; opacity: 0.9;">➔ ${b.speed_kmh}k</span>
+                                            <span style="font-size: 9px; opacity: 0.85;">(${b.speed_kmh}k)</span>
                                         </div>
                                         <div class="bus-marker-pointer"></div>
                                     </div>
@@ -1717,7 +1682,6 @@ def get_headway_html() -> str:
                         <table class="bus-mini-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 36px; text-align: center;">Ver</th>
                                     <th>Coche (Clic para inspeccionar)</th>
                                     <th>Estado</th>
                                     <th>Velocidad</th>
@@ -1729,13 +1693,8 @@ def get_headway_html() -> str:
                                 </tr>
                             </thead>
                             <tbody>
-                                ${buses.map(b => {
-                                    const isVisible = !hiddenHeadwayBuses[b.bus_id];
-                                    return `
-                                    <tr class="clickable-row ${b.is_bunching ? 'bunching-row' : ''}" style="${!isVisible ? 'opacity: 0.35;' : ''}" onclick="openBusModal('${b.bus_id}')" title="Clic para ver ficha completa y ubicar en mapa">
-                                        <td style="text-align: center;" onclick="event.stopPropagation()">
-                                            <input type="checkbox" ${isVisible ? 'checked' : ''} onchange="toggleHeadwayBusVisibility('${b.bus_id}', this.checked)" style="accent-color: #38bdf8; cursor: pointer; width: 14px; height: 14px;">
-                                        </td>
+                                ${buses.map(b => `
+                                    <tr class="clickable-row ${b.is_bunching ? 'bunching-row' : ''}" onclick="openBusModal('${b.bus_id}')" title="Clic para ver ficha completa y ubicar en mapa">
                                         <td><strong>🚌 ${b.bus_id}</strong> (${b.license_plate})</td>
                                         <td><span style="background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">${b.state_label || 'En Circulación'}</span></td>
                                         <td>${b.speed_kmh} km/h</td>
