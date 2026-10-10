@@ -750,7 +750,7 @@ def get_headway_html() -> str:
             font-size: 11px;
             color: #64748b;
             font-weight: 700;
-            margin-bottom: 12px;
+            margin-bottom: 58px;
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
@@ -805,7 +805,7 @@ def get_headway_html() -> str:
         /* Bus Marker on Track */
         .bus-marker {
             position: absolute;
-            top: -20px;
+            bottom: 10px;
             transform: translateX(-50%);
             display: flex;
             flex-direction: column;
@@ -816,24 +816,47 @@ def get_headway_html() -> str:
         }
 
         .bus-marker:hover {
-            transform: translateX(-50%) translateY(-3px) scale(1.12);
+            transform: translateX(-50%) translateY(-3px) scale(1.08);
             z-index: 50;
         }
 
         .bus-marker-bubble {
             background: #0284c7;
             color: white;
-            padding: 4px 8px;
+            padding: 4px 8px 3px 8px;
             border-radius: 8px;
-            font-size: 11px;
-            font-weight: 800;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
             border: 2px solid #38bdf8;
             white-space: nowrap;
             transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            gap: 1px;
+            min-width: 62px;
+        }
+
+        .bus-bubble-id {
+            font-size: 11px;
+            font-weight: 800;
+            line-height: 1.15;
+            letter-spacing: -0.01em;
+            color: #ffffff;
+        }
+
+        .bus-bubble-time {
+            font-size: 9.5px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.9);
+            line-height: 1.1;
+        }
+
+        .bus-bubble-icon {
+            font-size: 14px;
+            line-height: 1.1;
+            margin-top: 1px;
         }
 
         .bus-marker:hover .bus-marker-bubble {
@@ -1650,15 +1673,18 @@ def get_headway_html() -> str:
                             <!-- Bus Markers on Track (Clickable) -->
                             ${buses.map(b => {
                                 const isBunch = b.is_bunching;
+                                const hexId = String(b.bus_id || '');
+                                const decNum = parseInt(hexId, 16);
+                                const busDisplay = !isNaN(decNum) ? `${hexId} (${decNum})` : hexId;
                                 return `
                                     <div class="bus-marker ${isBunch ? 'bunching' : ''}" 
                                          style="left: ${b.progress_percent}%;" 
                                          onclick="openBusModal('${b.bus_id}')"
-                                         title="Coche ${b.bus_id} | ${b.speed_kmh} km/h | Clic para ver detalles y ubicar en GPS">
+                                         title="Coche #${hexId} (${!isNaN(decNum) ? decNum : hexId}) | ${b.speed_kmh} km/h | Clic para ver detalles y ubicar en GPS">
                                         <div class="bus-marker-bubble">
-                                            <span>🚌</span>
-                                            <span>${b.bus_id}</span>
-                                            <span style="font-size: 9px; opacity: 0.85;">(${b.speed_kmh}k)</span>
+                                            <span class="bus-bubble-id">${busDisplay}</span>
+                                            <span class="bus-bubble-time">(${b.speed_kmh}k)</span>
+                                            <span class="bus-bubble-icon">🚌</span>
                                         </div>
                                         <div class="bus-marker-pointer"></div>
                                     </div>
