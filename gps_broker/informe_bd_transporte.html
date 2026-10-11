@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Informe y Diagrama de Base de Datos | Poliverso Transit & Odoo 18</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Mermaid.js para renderizado dinámico del ERD -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --bg-base: #060b13;
+            --bg-surface: #0f172a;
+            --bg-card: rgba(30, 41, 59, 0.7);
+            --bg-card-hover: rgba(51, 65, 85, 0.8);
+            --border: rgba(255, 255, 255, 0.08);
+            --border-highlight: rgba(56, 189, 248, 0.3);
+            
+            --primary: #38bdf8;
+            --primary-glow: rgba(56, 189, 248, 0.25);
+            --secondary: #818cf8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --purple: #c084fc;
+            
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-faint: #64748b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Top Bar de Navegación */
+        .topbar {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+            padding: 14px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand-group {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-icon {
+            font-size: 24px;
+            background: linear-gradient(135deg, #0284c7, #6366f1);
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            box-shadow: 0 4px 14px var(--primary-glow);
+        }
+
+        .brand-title {
+            font-size: 17px;
+            font-weight: 800;
+            letter-spacing: -0.3px;
+        }
+
+        .brand-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .topbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-action {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-action:hover {
+            border-color: var(--primary);
+            box-shadow: 0 0 15px var(--primary-glow);
+            transform: translateY(-1px);
+        }
+
+        .btn-action.primary {
+            background: linear-gradient(135deg, #0284c7, #4f46e5);
+            border: none;
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4);
+        }
+
+        /* Container Principal */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+
+        /* Header Hero */
+        .hero {
+            margin-bottom: 32px;
+            text-align: center;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid var(--border-highlight);
+            color: var(--primary);
+            padding: 6px 16px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 14px;
+        }
+
+        .hero-title {
+            font-size: 34px;
+            font-weight: 900;
+            letter-spacing: -1px;
+            background: linear-gradient(135deg, #ffffff 30%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .hero-desc {
+            max-width: 760px;
+            margin: 0 auto;
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        /* Grid de KPIs */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            backdrop-filter: blur(12px);
+            border-radius: 16px;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.25s ease;
+        }
+
+        .kpi-card:hover {
+            border-color: var(--border-highlight);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .kpi-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+        }
+
+        .kpi-value {
+            font-size: 26px;
+            font-weight: 800;
+            line-height: 1.1;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .kpi-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        /* Tabs de Navegación */
+        .tabs-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 12px;
+            margin-bottom: 24px;
+            overflow-x: auto;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 10px 18px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            color: #fff;
+            background: linear-gradient(135deg, #0284c7, #6366f1);
+            box-shadow: 0 4px 15px var(--primary-glow);
+        }
+
+        /* Buscador en Vivo */
+        .search-box {
+            position: relative;
+            margin-bottom: 24px;
+        }
+
+        .search-input {
+            width: 100%;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 14px 20px 14px 48px;
+            font-size: 14px;
+            color: #fff;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .search-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+            background: rgba(15, 23, 42, 0.95);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 18px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-faint);
+            font-size: 18px;
+        }
+
+        /* Sección de Diagrama */
+        .diagram-container {
+            background: #090e17;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 24px;
+            margin-bottom: 32px;
+            overflow: auto;
+            position: relative;
+        }
+
+        .diagram-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .diagram-title {
+            font-size: 16px;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .diagram-badge {
+            font-size: 11px;
+            padding: 4px 10px;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            border-radius: 6px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Tablas y Diccionario de Datos */
+        .table-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 22px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(12px);
+            transition: all 0.2s ease;
+        }
+
+        .table-card:hover {
+            border-color: rgba(255, 255, 255, 0.18);
+        }
+
+        .table-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .table-name-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .table-name {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .table-tag {
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            padding: 3px 8px;
+            border-radius: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .table-desc {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+        }
+
+        /* Tabla HTML */
+        .schema-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .schema-table th {
+            text-align: left;
+            padding: 10px 14px;
+            background: rgba(15, 23, 42, 0.8);
+            color: var(--text-faint);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .schema-table td {
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            color: var(--text-main);
+        }
+
+        .schema-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .col-name {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        .col-type {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--secondary);
+            font-size: 11px;
+        }
+
+        .badge-pk {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 800;
+            font-size: 9px;
+            margin-left: 6px;
+        }
+
+        .badge-fk {
+            background: rgba(56, 189, 248, 0.2);
+            color: #7dd3fc;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 800;
+            font-size: 9px;
+            margin-left: 6px;
+        }
+
+        .badge-geo {
+            background: rgba(16, 185, 129, 0.2);
+            color: #6ee7b7;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 800;
+            font-size: 9px;
+            margin-left: 6px;
+        }
+
+        /* Footer */
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 30px 24px;
+            text-align: center;
+            color: var(--text-faint);
+            font-size: 12px;
+            margin-top: 40px;
+        }
+
+        @media (max-width: 768px) {
+            .hero-title { font-size: 26px; }
+            .kpi-grid { grid-template-columns: 1fr 1fr; }
+            .schema-table { font-size: 11px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Topbar -->
+    <header class="topbar">
+        <div class="brand-group">
+            <div class="brand-icon">🚌</div>
+            <div>
+                <div class="brand-title">Poliverso Transit & Odoo 18</div>
+                <div class="brand-subtitle">DICCIONARIO DE DATOS & ERD • DB: flota_db (PostgreSQL 15 / PostGIS)</div>
+            </div>
+        </div>
+        <div class="topbar-actions">
+            <a href="/headway" class="btn-action">📊 Tablero Lineal</a>
+            <a href="/map" class="btn-action">🗺️ Radar Satelital</a>
+            <a href="http://187.77.247.23:8069" target="_blank" class="btn-action primary">⚡ Odoo ERP (:8069)</a>
+        </div>
+    </header>
+
+    <div class="container">
+
+        <!-- Hero -->
+        <section class="hero">
+            <div class="hero-badge">
+                <span>🛡️</span> Res. GVMT N° 065/2024 & Decreto N° 710/2023
+            </div>
+            <h1 class="hero-title">Arquitectura de Base de Datos y Modelo Entidad-Relación</h1>
+            <p class="hero-desc">
+                Estructura relacional de <strong>flota_db</strong> que orquesta el microservicio geoespacial de alta frecuencia (FastAPI/PostGIS/Redis), la matriz de despachos, rotación de flota y el ERP financiero.
+            </p>
+        </section>
+
+        <!-- KPI Grid -->
+        <div class="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-icon" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">🗄️</div>
+                <div>
+                    <div class="kpi-value" style="color: #38bdf8;">38</div>
+                    <div class="kpi-label">Tablas de Negocio</div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon" style="background: rgba(129, 140, 248, 0.15); color: #818cf8;">🔗</div>
+                <div>
+                    <div class="kpi-value" style="color: #818cf8;">126</div>
+                    <div class="kpi-label">Foreign Keys (Integridad)</div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">🌍</div>
+                <div>
+                    <div class="kpi-value" style="color: #10b981;">SRID 4326</div>
+                    <div class="kpi-label">Motor PostGIS WGS84</div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">🏢</div>
+                <div>
+                    <div class="kpi-value" style="color: #f59e0b;">Multi-Tenant</div>
+                    <div class="kpi-label">Aislamiento Concesionarias</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Buscador -->
+        <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="schema-search" class="search-input" placeholder="Buscar tabla, campo, clave foránea o descripción (ej: dispatch, concessionaire, shape, icf, odometer)..." oninput="filterSchema()">
+        </div>
+
+        <!-- Tabs de Filtro de Módulos -->
+        <div class="tabs-bar">
+            <button class="tab-btn active" onclick="switchCategory('all', this)">📋 Todo el Esquema</button>
+            <button class="tab-btn" onclick="switchCategory('erd', this)">🌐 Diagrama ERD Visual</button>
+            <button class="tab-btn" onclick="switchCategory('transporte', this)">🚌 Rutas y Operaciones</button>
+            <button class="tab-btn" onclick="switchCategory('despachos', this)">⏱️ Despachos y VMT</button>
+            <button class="tab-btn" onclick="switchCategory('flota', this)">🚐 Flota y Vehículos</button>
+            <button class="tab-btn" onclick="switchCategory('clearing', this)">💰 Clearing y Subsidios</button>
+            <button class="tab-btn" onclick="switchCategory('electro', this)">⚡ Carga Eléctrica</button>
+        </div>
+
+        <!-- SECCIÓN: DIAGRAMA ERD MERMAID -->
+        <div id="section-erd" class="diagram-container">
+            <div class="diagram-header">
+                <div class="diagram-title">
+                    <span>📊 Diagrama Entidad-Relación Visual (flota_db)</span>
+                    <span class="diagram-badge">MERMAID INTERACTIVO</span>
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted);">
+                    Rutas oficiales • Trazas PostGIS • Control de Despachos • Billetaje y Flota
+                </div>
+            </div>
+
+            <div class="mermaid" style="text-align: center;">
+erDiagram
+    res_users ||--o{ transit_concessionaire : "asigna_empresa"
+    transit_concessionaire ||--|{ transit_service : "opera"
+    transit_concessionaire ||--|{ fleet_vehicle : "es_propietaria"
+    transit_concessionaire ||--|{ hr_employee : "emplea"
+
+    transit_service ||--|{ transit_route : "comprende"
+    transit_route ||--|{ transit_route_shape : "posee_trazas"
+    transit_route ||--|{ transit_route_checkpoint : "define_paradas"
+
+    transit_route ||--|{ transit_timetable : "planifica"
+    transit_timetable ||--|{ transit_dispatch : "genera"
+
+    fleet_vehicle ||--o{ transit_dispatch : "asigna_bus"
+    hr_employee ||--o{ transit_dispatch : "conduce"
+
+    transit_dispatch ||--|{ transit_dispatch_checkpoint : "puntos_control"
+    transit_dispatch ||--o{ transit_clearing_settlement : "liquida"
+
+    transit_concessionaire {
+        int id PK
+        string name "Nombre Empresa"
+        string code "CONC-L20 / 004B"
+        string vat_ruc "RUC"
+        boolean active
+    }
+
+    transit_service {
+        int id PK
+        int concessionaire_id FK
+        string name "Línea 20 (Troncal)"
+        string code "L20"
+        string service_type "electric / diesel"
+    }
+
+    transit_route {
+        int id PK
+        int service_id FK
+        string name "E1 - Asunción a J.A.S."
+        string direction "outbound / inbound"
+        float length_km "42.5"
+    }
+
+    transit_route_shape {
+        int id PK
+        int route_id FK
+        geometry geom "LineString SRID 4326"
+        datetime valid_from "Vigencia Inicio"
+        datetime valid_until "Vigencia Fin"
+        int version
+    }
+
+    transit_route_checkpoint {
+        int id PK
+        int route_id FK
+        string name "Parada Terminal / Centro"
+        geometry geom "Point SRID 4326"
+        float radius_meters "70.0"
+        boolean is_terminal "Cabecera"
+        int sequence
+    }
+
+    transit_dispatch {
+        int id PK
+        int service_id FK
+        int route_id FK
+        int vehicle_id FK
+        int driver_id FK
+        datetime scheduled_departure
+        datetime actual_departure
+        datetime actual_arrival
+        string state "draft/scheduled/in_transit/completed"
+        string semaphore_color "green/yellow/red/purple/black"
+        float provisorio_icf "Índice Cumplimiento Frecuencia"
+        string franja_horaria "Punta Mañana / Valle / Punta Tarde"
+    }
+
+    fleet_vehicle {
+        int id PK
+        int concessionaire_id FK
+        string name "BUS-104"
+        string license_plate "AA 123 BB"
+        float odometer "Km acumulados"
+        string mean_id "Decimal VMT"
+    }
+
+    hr_employee {
+        int id PK
+        int concessionaire_id FK
+        string name "Nombre Conductor"
+        string driver_license "Categoría A"
+    }
+            </div>
+        </div>
+
+        <!-- DICCIONARIO DE DATOS POR TABLAS -->
+        <div id="tables-container">
+
+            <!-- TABLA 1: transit_concessionaire -->
+            <div class="table-card" data-category="transporte" data-search="transit_concessionaire empresa operadora consorcio arapoti multi-tenant code vat_ruc">
+                <div class="table-card-header">
+                    <div class="table-name-group">
+                        <span class="table-name">transit_concessionaire</span>
+                        <span class="table-tag" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">MULTI-TENANT ROOT</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-faint); font-family: monospace;">PK: id | FKs: partner_id</div>
+                </div>
+                <div class="table-desc">
+                    Entidad matriz del modelo Multi-Tenant. Representa a las empresas de transporte público autorizadas (ej. Consorcio Arapotí, Transportes San Lorenzo). Todos los vehículos, líneas, despachos y usuarios quedan aislados por esta clave.
+                </div>
+                <table class="schema-table">
+                    <thead>
+                        <tr>
+                            <th>Columna</th>
+                            <th>Tipo de Dato</th>
+                            <th>Restricciones</th>
+                            <th>Descripción Funcional</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="col-name">id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-pk">PRIMARY KEY</span></td>
+                            <td>Identificador numérico autoincremental de la concesionaria.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">name</td>
+                            <td class="col-type">VARCHAR(255)</td>
+                            <td>NOT NULL</td>
+                            <td>Razón social o denominación comercial (ej: Consorcio Arapotí Línea 20).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">code</td>
+                            <td class="col-type">VARCHAR(64)</td>
+                            <td>UNIQUE</td>
+                            <td>Código de operador asignado por el VMT (ej: <code>004B</code>, <code>CONC-L20</code>).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">vat_ruc</td>
+                            <td class="col-type">VARCHAR(32)</td>
+                            <td>OPTIONAL</td>
+                            <td>Registro Único de Contribuyentes para liquidación y clearing SIFEN.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">partner_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: res_partner.id</span></td>
+                            <td>Contacto y ficha fiscal en el libro maestro de Odoo.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">active</td>
+                            <td class="col-type">BOOLEAN</td>
+                            <td>DEFAULT true</td>
+                            <td>Estado de habilitación operativa para prestar servicio.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- TABLA 2: transit_service -->
+            <div class="table-card" data-category="transporte" data-search="transit_service linea troncal servicio electrico diesel ramales">
+                <div class="table-card-header">
+                    <div class="table-name-group">
+                        <span class="table-name">transit_service</span>
+                        <span class="table-tag" style="background: rgba(129, 140, 248, 0.15); color: #818cf8;">LÍNEA / CORREDOR</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-faint); font-family: monospace;">PK: id | FKs: concessionaire_id</div>
+                </div>
+                <div class="table-desc">
+                    Líneas o servicios troncales de transporte (ej. Línea 20, Servicio Troncal Búho). Agrupa los diferentes ramales de ida y vuelta.
+                </div>
+                <table class="schema-table">
+                    <thead>
+                        <tr>
+                            <th>Columna</th>
+                            <th>Tipo de Dato</th>
+                            <th>Restricciones</th>
+                            <th>Descripción Funcional</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="col-name">id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-pk">PRIMARY KEY</span></td>
+                            <td>ID único del servicio.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">name</td>
+                            <td class="col-type">VARCHAR(255)</td>
+                            <td>NOT NULL</td>
+                            <td>Nombre del servicio (ej: Línea 20 - Eléctrico Troncal).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">code</td>
+                            <td class="col-type">VARCHAR(32)</td>
+                            <td>NOT NULL</td>
+                            <td>Código corto de visualización (ej: <code>L20</code>, <code>BUHO</code>).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">concessionaire_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: transit_concessionaire.id</span></td>
+                            <td>Empresa concesionaria responsable de la operación.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">service_type</td>
+                            <td class="col-type">VARCHAR(32)</td>
+                            <td>SELECTION</td>
+                            <td>Tipo de flota requerida (<code>electric</code> / <code>standard</code>).</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- TABLA 3: transit_route -->
+            <div class="table-card" data-category="transporte" data-search="transit_route ramal ida vuelta sentido length_km kilometros recorrido">
+                <div class="table-card-header">
+                    <div class="table-name-group">
+                        <span class="table-name">transit_route</span>
+                        <span class="table-tag" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">RAMAL OPERATIVO</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-faint); font-family: monospace;">PK: id | FKs: service_id, concessionaire_id</div>
+                </div>
+                <div class="table-desc">
+                    Ramal específico con sentido de circulación (Ida o Vuelta). Es el eje donde se miden las frecuencias, avances e intervalos entre unidades.
+                </div>
+                <table class="schema-table">
+                    <thead>
+                        <tr>
+                            <th>Columna</th>
+                            <th>Tipo de Dato</th>
+                            <th>Restricciones</th>
+                            <th>Descripción Funcional</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="col-name">id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-pk">PRIMARY KEY</span></td>
+                            <td>ID único del ramal.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">service_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: transit_service.id</span></td>
+                            <td>Servicio o línea a la que pertenece el ramal.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">name</td>
+                            <td class="col-type">VARCHAR(255)</td>
+                            <td>NOT NULL</td>
+                            <td>Nombre del ramal (ej: <code>L20-E1 IDA: Asunción a J.A.S.</code>).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">direction</td>
+                            <td class="col-type">VARCHAR(16)</td>
+                            <td>SELECTION</td>
+                            <td>Sentido del trayecto (<code>outbound</code> / <code>inbound</code>).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">length_km</td>
+                            <td class="col-type">FLOAT</td>
+                            <td>NOT NULL</td>
+                            <td>Longitud total oficial del trayecto en kilómetros.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- TABLA 4: transit_route_shape -->
+            <div class="table-card" data-category="transporte" data-search="transit_route_shape postgis linestring geom traza vigencia bitemporal srid 4326">
+                <div class="table-card-header">
+                    <div class="table-name-group">
+                        <span class="table-name">transit_route_shape</span>
+                        <span class="table-tag" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">POSTGIS TRAZA (LINESTRING)</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-faint); font-family: monospace;">PK: id | FKs: route_id | PostGIS SRID 4326</div>
+                </div>
+                <div class="table-desc">
+                    Geometría vectorial de alta precisión del recorrido. Soporta versionado bi-temporal (vigencia histórica) para auditar desvíos y obras viales.
+                </div>
+                <table class="schema-table">
+                    <thead>
+                        <tr>
+                            <th>Columna</th>
+                            <th>Tipo de Dato</th>
+                            <th>Restricciones</th>
+                            <th>Descripción Funcional</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="col-name">id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-pk">PRIMARY KEY</span></td>
+                            <td>Identificador de versión de la traza.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">route_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: transit_route.id</span></td>
+                            <td>Ramal al que corresponde esta geometría.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">geom</td>
+                            <td class="col-type">GEOMETRY(LineString, 4326)</td>
+                            <td><span class="badge-geo">POSTGIS GIST INDEX</span></td>
+                            <td>Coordenadas continuas oficiales de la traza de circulación.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">valid_from</td>
+                            <td class="col-type">TIMESTAMP</td>
+                            <td>NOT NULL</td>
+                            <td>Inicio de vigencia de esta versión de trazado.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">valid_until</td>
+                            <td class="col-type">TIMESTAMP</td>
+                            <td>NULLABLE</td>
+                            <td>Fin de vigencia (NULL indica que es la traza activa actualmente).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">version</td>
+                            <td class="col-type">INTEGER</td>
+                            <td>DEFAULT 1</td>
+                            <td>Número correlativo de versión oficial aprobada por el VMT.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- TABLA 5: transit_route_checkpoint -->
+            <div class="table-card" data-category="transporte" data-search="transit_route_checkpoint parada cabecera terminal geocerca point radio metros">
+                <div class="table-card-header">
+                    <div class="table-name-group">
+                        <span class="table-name">transit_route_checkpoint</span>
+                        <span class="table-tag" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">GEOCERCA PARADA / CABECERA</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-faint); font-family: monospace;">PK: id | FKs: route_id | PostGIS Point 4326</div>
+                </div>
+                <div class="table-desc">
+                    Puntos de control y geocercas circulares. Discrimina terminales/cabeceras de inicio y fin de vuelta para excluir buses estacionados del tablero lineal.
+                </div>
+                <table class="schema-table">
+                    <thead>
+                        <tr>
+                            <th>Columna</th>
+                            <th>Tipo de Dato</th>
+                            <th>Restricciones</th>
+                            <th>Descripción Funcional</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="col-name">id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-pk">PRIMARY KEY</span></td>
+                            <td>ID del checkpoint.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">route_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: transit_route.id</span></td>
+                            <td>Ramal al que pertenece la parada de control.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">name</td>
+                            <td class="col-type">VARCHAR(255)</td>
+                            <td>NOT NULL</td>
+                            <td>Nombre descriptivo (ej: <code>Cabecera Asunción</code>, <code>Control Km 14</code>).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">geom</td>
+                            <td class="col-type">GEOMETRY(Point, 4326)</td>
+                            <td><span class="badge-geo">POSTGIS POINT</span></td>
+                            <td>Coordenada geográfica central de la geocerca.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">radius_meters</td>
+                            <td class="col-type">FLOAT</td>
+                            <td>DEFAULT 70.0</td>
+                            <td>Radio circular de detección en metros (cabeceras usan hasta 400m).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">is_terminal</td>
+                            <td class="col-type">BOOLEAN</td>
+                            <td>DEFAULT false</td>
+                            <td>Indica si es terminal/cabecera (excluye al bus del tablero lineal si está dentro).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">sequence</td>
+                            <td class="col-type">INTEGER</td>
+                            <td>DEFAULT 10</td>
+                            <td>Orden secuencial de paso obligatorio en el itinerario.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- TABLA 6: transit_dispatch -->
+            <div class="table-card" data-category="despachos" data-search="transit_dispatch vuelta despacho icf semaforo cumplimiento regulatorio vmt res 065">
+                <div class="table-card-header">
+                    <div class="table-name-group">
+                        <span class="table-name">transit_dispatch</span>
+                        <span class="table-tag" style="background: rgba(239, 68, 68, 0.15); color: #f87171;">DESPACHO & REGULACIÓN VMT</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-faint); font-family: monospace;">PK: id | FKs: vehicle_id, driver_id, route_id, service_id</div>
+                </div>
+                <div class="table-desc">
+                    Registro maestro de cada viaje o vuelta ejecutada. Contiene las variables de auditoría de la Res. GVMT 065/2024: semáforo de 5 estados, clasificación por franjas horarias e ICF Provisorio.
+                </div>
+                <table class="schema-table">
+                    <thead>
+                        <tr>
+                            <th>Columna</th>
+                            <th>Tipo de Dato</th>
+                            <th>Restricciones</th>
+                            <th>Descripción Funcional</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="col-name">id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-pk">PRIMARY KEY</span></td>
+                            <td>ID del despacho.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">vehicle_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: fleet_vehicle.id</span></td>
+                            <td>Unidad de transporte asignada físicamente a la vuelta.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">driver_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: res_partner.id</span></td>
+                            <td>Chofer profesional habilitado al volante.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">route_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: transit_route.id</span></td>
+                            <td>Ramal recorrido en esta vuelta.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">state</td>
+                            <td class="col-type">VARCHAR(32)</td>
+                            <td>SELECTION</td>
+                            <td>Estado operativo: <code>draft</code>, <code>scheduled</code>, <code>in_transit</code>, <code>completed</code>, <code>cancelled</code>.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">semaphore_color</td>
+                            <td class="col-type">VARCHAR(16)</td>
+                            <td>COMPUTED</td>
+                            <td>Auditoría VMT: <code>green</code> (100%), <code>yellow</code> (tolerancia), <code>red</code> (déficit), <code>purple</code> (desvío), <code>black</code> (no realizado).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">franja_horaria</td>
+                            <td class="col-type">VARCHAR(64)</td>
+                            <td>COMPUTED</td>
+                            <td>Franja oficial: Punta Mañana (05:00-08:30), Valle (08:31-16:00), Punta Tarde (16:01-19:30).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">provisorio_icf</td>
+                            <td class="col-type">FLOAT</td>
+                            <td>COMPUTED</td>
+                            <td>Índice de Cumplimiento de Frecuencia Provisorio según fórmula VMT.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">actual_departure</td>
+                            <td class="col-type">TIMESTAMP</td>
+                            <td>GPS DETECTED</td>
+                            <td>Hora real de salida de la cabecera registrada por geocerca.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">actual_arrival</td>
+                            <td class="col-type">TIMESTAMP</td>
+                            <td>GPS DETECTED</td>
+                            <td>Hora real de llegada a la terminal destino.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- TABLA 7: fleet_vehicle -->
+            <div class="table-card" data-category="flota" data-search="fleet_vehicle bus unidad placa patente mean_id odometro sensor bateria">
+                <div class="table-card-header">
+                    <div class="table-name-group">
+                        <span class="table-name">fleet_vehicle</span>
+                        <span class="table-tag" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">FLOTA DE BUSES (CORE ODOO)</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-faint); font-family: monospace;">PK: id | FKs: concessionaire_id, model_id</div>
+                </div>
+                <div class="table-desc">
+                    Ficha técnica de cada autobús. Vincula el odómetro oficial, el identificador único de telemetría del VMT (mean_id) y los sensores de consumo.
+                </div>
+                <table class="schema-table">
+                    <thead>
+                        <tr>
+                            <th>Columna</th>
+                            <th>Tipo de Dato</th>
+                            <th>Restricciones</th>
+                            <th>Descripción Funcional</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="col-name">id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-pk">PRIMARY KEY</span></td>
+                            <td>ID interno del vehículo en Odoo.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">name</td>
+                            <td class="col-type">VARCHAR(64)</td>
+                            <td>NOT NULL</td>
+                            <td>Número interno de móvil (ej: <code>BUS-104</code>, <code>COCHE-20</code>).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">license_plate</td>
+                            <td class="col-type">VARCHAR(32)</td>
+                            <td>UNIQUE</td>
+                            <td>Matrícula / Chapa oficial del automotor.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">mean_id</td>
+                            <td class="col-type">VARCHAR(64)</td>
+                            <td>INDEXED</td>
+                            <td>Identificador numérico decimal transmitido por el equipo AVL para validación VMT.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">concessionaire_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: transit_concessionaire.id</span></td>
+                            <td>Empresa operadora titular del ómnibus.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">odometer</td>
+                            <td class="col-type">FLOAT</td>
+                            <td>TELEMETRY UPDATED</td>
+                            <td>Kilometraje acumulado actualizado automáticamente por el broker GPS.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- TABLA 8: transit_clearing_settlement -->
+            <div class="table-card" data-category="clearing" data-search="transit_clearing_settlement liquidacion subsidio billetaje pasajes compensacion financiera">
+                <div class="table-card-header">
+                    <div class="table-name-group">
+                        <span class="table-name">transit_clearing_settlement</span>
+                        <span class="table-tag" style="background: rgba(192, 132, 252, 0.15); color: #c084fc;">CLEARING & SUBSIDIOS</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-faint); font-family: monospace;">PK: id | FKs: period_id, concessionaire_id</div>
+                </div>
+                <div class="table-desc">
+                    Liquidación quincenal/mensual de subsidios al pasaje. Cruza los kilómetros efectivamente comerciales y el ICF auditado con el subsidio reconocido por el Estado.
+                </div>
+                <table class="schema-table">
+                    <thead>
+                        <tr>
+                            <th>Columna</th>
+                            <th>Tipo de Dato</th>
+                            <th>Restricciones</th>
+                            <th>Descripción Funcional</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="col-name">id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-pk">PRIMARY KEY</span></td>
+                            <td>ID de la liquidación de clearing.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">concessionaire_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: transit_concessionaire.id</span></td>
+                            <td>Empresa beneficiaria de la compensación de subsidio.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">total_commercial_km</td>
+                            <td class="col-type">FLOAT</td>
+                            <td>NOT NULL</td>
+                            <td>Kilómetros comerciales válidos auditados por pings GPS.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">recognized_subsidy</td>
+                            <td class="col-type">NUMERIC(14,2)</td>
+                            <td>NOT NULL</td>
+                            <td>Monto total en Guaraníes (PYG) liquidado a favor de la concesionaria.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- TABLA 9: transit_charging_session -->
+            <div class="table-card" data-category="electro" data-search="transit_charging_session electro movilidad cargador estacion kwh bateria soc">
+                <div class="table-card-header">
+                    <div class="table-name-group">
+                        <span class="table-name">transit_charging_session</span>
+                        <span class="table-tag" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">ELECTROMOVILIDAD</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-faint); font-family: monospace;">PK: id | FKs: vehicle_id, station_id, charger_id</div>
+                </div>
+                <div class="table-desc">
+                    Control de recarga de autobuses 100% eléctricos. Registra kWh consumidos, estado de salud de batería (SoC) y costos energéticos por kilómetro.
+                </div>
+                <table class="schema-table">
+                    <thead>
+                        <tr>
+                            <th>Columna</th>
+                            <th>Tipo de Dato</th>
+                            <th>Restricciones</th>
+                            <th>Descripción Funcional</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="col-name">id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-pk">PRIMARY KEY</span></td>
+                            <td>ID de la sesión de carga.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">vehicle_id</td>
+                            <td class="col-type">INTEGER</td>
+                            <td><span class="badge-fk">FK: fleet_vehicle.id</span></td>
+                            <td>Bus eléctrico conectado a la electrolinera.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">energy_kwh</td>
+                            <td class="col-type">FLOAT</td>
+                            <td>NOT NULL</td>
+                            <td>Energía suministrada en kilovatios-hora (kWh).</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">initial_soc</td>
+                            <td class="col-type">FLOAT</td>
+                            <td>%</td>
+                            <td>Porcentaje de batería inicial al enchufar.</td>
+                        </tr>
+                        <tr>
+                            <td class="col-name">final_soc</td>
+                            <td class="col-type">FLOAT</td>
+                            <td>%</td>
+                            <td>Porcentaje de batería final al completar la recarga.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        Poliverso Transit • Sistema Integrado de Control Satelital, Frecuencias y ERP para Transporte Metropolitano (VMT Paraguay)<br>
+        PostgreSQL 15.4 • PostGIS 3.4 • Redis 7 • Odoo 18.0 Community/Enterprise • Estándar Res. GVMT N° 065/2024
+    </footer>
+
+    <!-- Scripts de Interactividad y Filtrado -->
+    <script>
+        // Inicializar diagramas Mermaid con tema oscuro personalizado
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                darkMode: true,
+                background: '#090e17',
+                primaryColor: '#1e293b',
+                primaryTextColor: '#f8fafc',
+                primaryBorderColor: '#38bdf8',
+                lineColor: '#818cf8',
+                secondaryColor: '#0f172a',
+                tertiaryColor: '#1e293b'
+            }
+        });
+
+        // Filtrado por Buscador
+        function filterSchema() {
+            const query = document.getElementById('schema-search').value.toLowerCase().trim();
+            const cards = document.querySelectorAll('.table-card');
+
+            cards.forEach(card => {
+                const searchData = (card.getAttribute('data-search') || '').toLowerCase();
+                const textContent = card.innerText.toLowerCase();
+
+                if (query === '' || searchData.includes(query) || textContent.includes(query)) {
+                    card.style.display = 'block';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        }
+
+        // Cambio de Categorías por Pestañas
+        function switchCategory(cat, btn) {
+            // Actualizar botones
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            const erdSection = document.getElementById('section-erd');
+            const cards = document.querySelectorAll('.table-card');
+
+            if (cat === 'erd') {
+                erdSection.style.display = 'block';
+                cards.forEach(c => c.style.display = 'none');
+                return;
+            }
+
+            erdSection.style.display = (cat === 'all') ? 'block' : 'none';
+
+            cards.forEach(card => {
+                const cardCat = card.getAttribute('data-category');
+                if (cat === 'all' || cardCat === cat) {
+                    card.style.display = 'block';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+</html>

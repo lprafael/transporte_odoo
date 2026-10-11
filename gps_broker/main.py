@@ -1477,6 +1477,19 @@ async def logout_view(request: Request):
     return resp
 
 # ------------------------------------------------------------------------------
+# Informe y Diccionario de Datos de la Base de Datos (flota_db)
+# ------------------------------------------------------------------------------
+from db_report_service import get_db_schema_html
+
+@app.get("/db-schema", response_class=HTMLResponse)
+@app.get("/database", response_class=HTMLResponse)
+async def db_schema_view(request: Request):
+    user = get_current_user_from_request(request)
+    if not user:
+        return RedirectResponse(url="/login?redirect=/db-schema", status_code=303)
+    return HTMLResponse(get_db_schema_html())
+
+# ------------------------------------------------------------------------------
 # Tablero Lineal de Frecuencias & Detector de Pegonamiento (Headway Monitoring)
 # ------------------------------------------------------------------------------
 from headway_service import get_headway_data, get_headway_html
