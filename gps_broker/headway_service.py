@@ -327,9 +327,21 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
         "routes": list(routes_dict.values())
     }
 
-def get_headway_html() -> str:
-    """Retorna la página HTML interactiva del Tablero Lineal."""
-    return """<!DOCTYPE html>
+def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
+    """Retorna la página HTML interactiva del Tablero Lineal con integración de sesión Odoo."""
+    user_name = (user.get("name") or user.get("login") or "Operador") if user else "Operador"
+    conc_name = (user.get("concessionaire_name") or "Consorcio Arapotí") if user else "Consorcio Arapotí"
+    user_badge_html = f'''
+            <div class="user-badge" style="display:inline-flex; align-items:center; gap:8px; background:rgba(30, 41, 59, 0.85); border:1px solid rgba(56, 189, 248, 0.3); padding:5px 12px; border-radius:9999px; font-size:11px;">
+                <span style="color:#38bdf8;">👤</span>
+                <span style="font-weight:700; color:#f8fafc;">{user_name}</span>
+                <span style="color:#94a3b8; font-size:10px; background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px;">{conc_name}</span>
+            </div>
+            <a href="/logout" class="nav-btn" style="border-color:rgba(239, 68, 68, 0.4); color:#fca5a5;" title="Cerrar sesión de Odoo">
+                <span>🚪 Salir</span>
+            </a>
+    '''
+    html_content = """<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -1278,9 +1290,10 @@ def get_headway_html() -> str:
             <a href="/map" class="nav-btn">
                 <span>🗺️ Radar Satelital</span>
             </a>
-            <a href="http://localhost:8069" target="_blank" class="nav-btn">
+            <a id="odoo-erp-nav-btn" href="http://187.77.247.23:8069" target="_blank" class="nav-btn">
                 <span>⚡ Odoo ERP</span>
             </a>
+            {user_badge_html}
         </div>
     </header>
 
@@ -1582,6 +1595,10 @@ def get_headway_html() -> str:
         async function fetchHeadwayData() {
             try {
                 const res = await fetch('/api/v1/headway/data');
+                if (res.status === 401) {
+                    window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+                    return;
+                }
                 const data = await res.json();
                 latestDashboardData = data;
                 renderDashboard(data);
@@ -1876,3 +1893,6 @@ def get_headway_html() -> str:
 </body>
 </html>
 """
+    return html_content.replace("{user_badge_html}", user_badge_html)
+
+

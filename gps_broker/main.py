@@ -27,6 +27,7 @@ import os
 import math
 import time
 import json
+import urllib.parse
 import asyncio
 import logging
 import threading
@@ -37,9 +38,18 @@ import requests
 import psycopg2
 from psycopg2.extras import execute_values, RealDictCursor
 from fastapi import FastAPI, BackgroundTasks, Header, HTTPException, WebSocket, WebSocketDisconnect, Request, Query
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+from auth import (
+    get_current_user_from_request,
+    require_authenticated_user,
+    authenticate_odoo_user,
+    invalidate_session,
+    render_login_page,
+    is_device_or_internal_token,
+)
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -1410,6 +1420,63 @@ async def devtools_probe(path: str):
     return Response(status_code=204)
 
 # ------------------------------------------------------------------------------
+# Autenticación y Sesión Unificada Odoo ERP (flota_db)
+# ------------------------------------------------------------------------------
+@app.get("/login", response_class=HTMLResponse)
+async def login_view(request: Request, redirect: str = "/headway"):
+    user = get_current_user_from_request(request)
+    if user:
+        return RedirectResponse(url=redirect or "/headway", status_code=303)
+    return HTMLResponse(render_login_page(redirect_url=redirect))
+
+@app.post("/login")
+async def login_submit(request: Request):
+    login = ""
+    password = ""
+    redirect_url = "/headway"
+    try:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            body = await request.json()
+            login = str(body.get("login", "")).strip()
+            password = str(body.get("password", "")).strip()
+            redirect_url = str(body.get("redirect", "/headway") or "/headway").strip()
+        else:
+            raw_body = (await request.body()).decode("utf-8")
+            parsed = urllib.parse.parse_qs(raw_body)
+            login = parsed.get("login", [""])[0].strip()
+            password = parsed.get("password", [""])[0].strip()
+            redirect_url = parsed.get("redirect", ["/headway"])[0].strip() or "/headway"
+    except Exception as e:
+        logger.warning(f"Error parseando login submit: {e}")
+    
+    success, session_id, user_dict, err_msg = authenticate_odoo_user(login, password)
+    if not success or not session_id:
+        return HTMLResponse(
+            render_login_page(error_msg=err_msg or "Credenciales incorrectas en Odoo ERP.", redirect_url=redirect_url),
+            status_code=401
+        )
+    
+    resp = RedirectResponse(url=redirect_url, status_code=303)
+    resp.set_cookie(
+        key="session_id",
+        value=session_id,
+        max_age=86400 * 7,
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
+    return resp
+
+@app.get("/logout")
+async def logout_view(request: Request):
+    session_id = request.cookies.get("session_id")
+    invalidate_session(session_id)
+    resp = RedirectResponse(url="/login", status_code=303)
+    resp.delete_cookie(key="session_id", path="/")
+    return resp
+
+# ------------------------------------------------------------------------------
 # Tablero Lineal de Frecuencias & Detector de Pegonamiento (Headway Monitoring)
 # ------------------------------------------------------------------------------
 from headway_service import get_headway_data, get_headway_html
@@ -1421,7 +1488,11 @@ async def api_hydrate_fleet(force: bool = Query(True, description="Forzar recarg
     return {"status": "success", "hydrated_buses": count}
 
 @app.get("/api/v1/headway/data")
-async def api_headway_data():
+async def api_headway_data(request: Request):
+    user = get_current_user_from_request(request)
+    if not user and not is_device_or_internal_token(request):
+        raise HTTPException(status_code=401, detail="Sesión no iniciada. Inicie sesión en Odoo ERP.")
+
     hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory)
     if hw_data.get("total_active_buses", 0) == 0:
         logger.info("Headway solicitó datos pero encontró 0 buses. Ejecutando auto-hidratación desde PostgreSQL...")
@@ -1430,8 +1501,11 @@ async def api_headway_data():
     return hw_data
 
 @app.get("/headway", response_class=HTMLResponse)
-async def headway_dashboard_view():
-    return get_headway_html()
+async def headway_dashboard_view(request: Request):
+    user = get_current_user_from_request(request)
+    if not user:
+        return RedirectResponse(url="/login?redirect=/headway", status_code=303)
+    return get_headway_html(user=user)
 
 @app.get("/api/v1/bunching/alerts")
 async def api_bunching_alerts():
@@ -1508,21 +1582,28 @@ async def stop_page(stop_code: str, request: Request):
 from compliance_service import get_today_compliance, get_compliance_alerts, get_compliance_html, get_available_services
 
 @app.get("/compliance", response_class=HTMLResponse)
-async def compliance_dashboard():
+async def compliance_dashboard(request: Request):
     """
     Dashboard interactivo de cumplimiento regulatorio (Res. GVMT 065/2024 & Dec. 710/2023)
     con soporte multilínea (Línea 20 E1, E2, E3, Búhos, etc.), cálculo de ICF Provisorio
     y clasificación en 5 estados de despacho.
     """
+    user = get_current_user_from_request(request)
+    if not user:
+        return RedirectResponse(url="/login?redirect=/compliance", status_code=303)
     return get_compliance_html()
 
 @app.get("/api/v1/compliance/services")
-async def api_compliance_services():
+async def api_compliance_services(request: Request):
     """Lista de servicios operativos activos parametrizados en el sistema."""
+    user = get_current_user_from_request(request)
+    if not user and not is_device_or_internal_token(request):
+        raise HTTPException(status_code=401, detail="Sesión no iniciada. Inicie sesión en Odoo ERP.")
     return get_available_services()
 
 @app.get("/api/v1/compliance/today")
 async def api_compliance_today(
+    request: Request,
     service: Optional[str] = Query(None, description="Filtrar por código de servicio (ej: ALL, E1, E2, E3)"),
     date: Optional[str] = Query(None, description="Fecha de evaluación (YYYY-MM-DD)")
 ):
@@ -1531,6 +1612,9 @@ async def api_compliance_today(
     Incluye: despachos ejecutados, programados, % cumplimiento, proyecciones,
     desglose por ramales, cálculo de ICF Provisorio por franjas y auditoría en 5 estados.
     """
+    user = get_current_user_from_request(request)
+    if not user and not is_device_or_internal_token(request):
+        raise HTTPException(status_code=401, detail="Sesión no iniciada. Inicie sesión en Odoo ERP.")
     return get_today_compliance(redis_client, service_code=service, target_date=date)
 
 @app.get("/api/v1/compliance/alerts")
@@ -1700,7 +1784,10 @@ async def api_waze_corridor_impacts():
 # Dashboard Radar Web en Vivo con PostGIS Shapes y Visor Histórico
 # ------------------------------------------------------------------------------
 @app.get("/map", response_class=HTMLResponse)
-async def live_map_view():
+async def live_map_view(request: Request):
+    user = get_current_user_from_request(request)
+    if not user:
+        return RedirectResponse(url="/login?redirect=/map", status_code=303)
     return """<!DOCTYPE html>
 <html lang="es">
 <head>
