@@ -158,3 +158,61 @@ class FleetVehicle(models.Model):
             display = f"[{internal}] {model} ({plate})".strip()
             res.append((vehicle.id, display))
         return res
+
+    def unlink(self):
+        """Permitir eliminar buses limpiando previamente los logs y registros técnicos vinculados"""
+        # 1. Odómetros y logs técnicos de flota
+        odometers = self.env['fleet.vehicle.odometer'].sudo().search([('vehicle_id', 'in', self.ids)])
+        if odometers:
+            odometers.unlink()
+
+        assignation_logs = self.env['fleet.vehicle.assignation.log'].sudo().search([('vehicle_id', 'in', self.ids)])
+        if assignation_logs:
+            assignation_logs.unlink()
+
+        service_logs = self.env['fleet.vehicle.log.services'].sudo().search([('vehicle_id', 'in', self.ids)])
+        if service_logs:
+            service_logs.unlink()
+
+        contracts = self.env['fleet.vehicle.log.contract'].sudo().search([('vehicle_id', 'in', self.ids)])
+        if contracts:
+            contracts.unlink()
+
+        # 2. Sesiones de recarga eléctrica
+        if 'transit.charging.session' in self.env:
+            charging_sessions = self.env['transit.charging.session'].sudo().search([('vehicle_id', 'in', self.ids)])
+            if charging_sessions:
+                charging_sessions.unlink()
+
+        # 3. Hojas de ruta / turnos programados del bus
+        if 'transit.bus.schedule' in self.env:
+            schedules = self.env['transit.bus.schedule'].sudo().search([('vehicle_id', 'in', self.ids)])
+            if schedules:
+                schedules.unlink()
+
+        return super().unlink()
+
+
+class FleetVehicleOdometer(models.Model):
+    _inherit = 'fleet.vehicle.odometer'
+
+    vehicle_id = fields.Many2one('fleet.vehicle', 'Vehicle', required=True, ondelete='cascade')
+
+
+class FleetVehicleAssignationLog(models.Model):
+    _inherit = 'fleet.vehicle.assignation.log'
+
+    vehicle_id = fields.Many2one('fleet.vehicle', string="Vehicle", required=True, ondelete='cascade')
+
+
+class FleetVehicleLogServices(models.Model):
+    _inherit = 'fleet.vehicle.log.services'
+
+    vehicle_id = fields.Many2one('fleet.vehicle', 'Vehicle', required=True, ondelete='cascade')
+
+
+class FleetVehicleLogContract(models.Model):
+    _inherit = 'fleet.vehicle.log.contract'
+
+    vehicle_id = fields.Many2one('fleet.vehicle', 'Vehicle', required=True, ondelete='cascade')
+

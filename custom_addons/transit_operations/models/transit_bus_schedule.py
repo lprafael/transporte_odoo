@@ -59,6 +59,7 @@ class TransitBusSchedule(models.Model):
         required=True,
         index=True,
         tracking=True,
+        ondelete='cascade',
         help='Vehículo titular asignado a ejecutar esta secuencia de itinerarios.'
     )
     driver_id = fields.Many2one(

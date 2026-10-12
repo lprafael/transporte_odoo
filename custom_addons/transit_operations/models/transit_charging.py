@@ -143,7 +143,7 @@ class TransitChargingSession(models.Model):
 
     station_id = fields.Many2one('transit.charging.station', string='Patio / Estación', required=True)
     charger_id = fields.Many2one('transit.charger', string='Cargador', required=True)
-    vehicle_id = fields.Many2one('fleet.vehicle', string='Unidad / Bus Eléctrico', required=True)
+    vehicle_id = fields.Many2one('fleet.vehicle', string='Unidad / Bus Eléctrico', required=True, ondelete='cascade')
     
     start_time = fields.Datetime(string='Inicio de Conexión', default=fields.Datetime.now, required=True)
     end_time = fields.Datetime(string='Fin de Conexión')
