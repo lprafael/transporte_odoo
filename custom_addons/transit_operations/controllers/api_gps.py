@@ -277,3 +277,14 @@ class TransitGpsApiController(http.Controller):
             status=200,
             content_type='application/json'
         )
+
+    @http.route(['/transit/redirect/<string:target>'], type='http', auth='public', methods=['GET'])
+    def redirect_broker_target(self, target, **kwargs):
+        """Redirige dinámicamente al microservicio FastAPI (puerto 8088) usando el mismo host que el cliente"""
+        host = request.httprequest.host.split(':')[0]
+        query = request.httprequest.query_string.decode('utf-8')
+        url = f'http://{host}:8088/{target}'
+        if query:
+            url += f'?{query}'
+        return request.redirect(url, local=False)
+

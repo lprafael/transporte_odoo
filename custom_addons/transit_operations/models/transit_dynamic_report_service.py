@@ -208,6 +208,9 @@ class TransitDynamicReportEngine:
         dt = target_date or self.target_date
         sname = str(dt.day)
 
+        if not round_trips:
+            return 0, self.file_path
+
         if not os.path.exists(self.file_path):
             raise FileNotFoundError(f"No se encontró el archivo de planilla: {self.file_path}")
 

@@ -42,19 +42,19 @@
     <!-- Acciones URL para Tableros de Telemetría en Tiempo Real -->
     <record id="action_transit_headway_dashboard" model="ir.actions.act_url">
         <field name="name">Tablero Lineal de Frecuencias (Pegonamiento)</field>
-        <field name="url">http://localhost:8088/headway</field>
+        <field name="url">/transit/redirect/headway</field>
         <field name="target">new</field>
     </record>
 
     <record id="action_transit_live_radar" model="ir.actions.act_url">
         <field name="name">Radar Satelital GPS (En Vivo)</field>
-        <field name="url">http://localhost:8088/map</field>
+        <field name="url">/transit/redirect/map</field>
         <field name="target">new</field>
     </record>
 
     <record id="action_transit_compliance_dashboard" model="ir.actions.act_url">
         <field name="name">Tablero de Cumplimiento VMT e ICF Provisorio</field>
-        <field name="url">http://localhost:8088/compliance</field>
+        <field name="url">/transit/redirect/compliance</field>
         <field name="target">new</field>
     </record>
 

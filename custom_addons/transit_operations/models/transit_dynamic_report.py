@@ -65,7 +65,7 @@ class TransitDynamicReport(models.Model):
 
     file_name = fields.Char(string='Archivo Excel', compute='_compute_file_info', store=True)
     file_path = fields.Char(string='Ruta en Servidor', compute='_compute_file_info', store=True)
-    file_exists = fields.Boolean(string='Archivo Existe en Disco', compute='_compute_file_info')
+    file_exists = fields.Boolean(string='Archivo Existe en Disco', compute='_compute_file_exists')
 
     excel_file = fields.Binary(string='Descargar Planilla (.xlsx)', attachment=True)
     excel_filename = fields.Char(string='Nombre Archivo Descarga')
@@ -134,9 +134,13 @@ class TransitDynamicReport(models.Model):
             p = find_spreadsheet_path(code, dummy_date)
             rec.file_path = p
             rec.file_name = os.path.basename(p) if p else ''
-            rec.file_exists = os.path.exists(p) if p else False
 
-    @api.depends('service_code', 'target_date', 'last_sync')
+    @api.depends('file_path')
+    def _compute_file_exists(self):
+        for rec in self:
+            rec.file_exists = bool(rec.file_path and os.path.exists(rec.file_path))
+
+    @api.depends('service_code', 'target_date')
     def _compute_live_metrics(self):
         for rec in self:
             code = rec.service_code or 'E1'
@@ -179,6 +183,36 @@ class TransitDynamicReport(models.Model):
         eval_date = self.target_date or fields.Date.today()
         code = self.service_code or 'E1'
 
+        updated_count = self._do_detect_and_sync()
+
+        if updated_count > 0:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': f'Planilla {code} Actualizada',
+                    'message': f"Se sincronizaron con éxito {updated_count} redondos concluidos en la hoja del día {eval_date.day}. IPK actual: {self.ipk_today}",
+                    'type': 'success',
+                    'sticky': False,
+                }
+            }
+        else:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': f'Planilla {code} al Día',
+                    'message': f"No hay nuevos redondos concluidos pendientes de sincronización.",
+                    'type': 'info',
+                    'sticky': False,
+                }
+            }
+
+    def _do_detect_and_sync(self) -> int:
+        self.ensure_one()
+        eval_date = self.target_date or fields.Date.today()
+        code = self.service_code or 'E1'
+
         # 1. Obtener los redondos concluidos para esta fecha y servicio
         round_trips = self._gather_completed_round_trips(code, eval_date)
 
@@ -186,34 +220,31 @@ class TransitDynamicReport(models.Model):
         engine = TransitDynamicReportEngine(code, eval_date)
         updated_count, saved_path = engine.sync_concluded_round_trips(round_trips, eval_date)
 
-        # 3. Actualizar binario en Odoo para descarga inmediata
-        file_bytes = engine.read_workbook_bytes()
-        self.write({
-            'excel_file': base64.b64encode(file_bytes),
-            'excel_filename': os.path.basename(saved_path),
-            'last_sync': fields.Datetime.now(),
-        })
+        write_vals = {'last_sync': fields.Datetime.now()}
 
-        # 4. Registrar en chatter
-        self.message_post(
-            body=f"✅ <b>Sincronización Dinámica Completada</b>: Se detectaron e integraron "
-                 f"<b>{updated_count} redondos concluidos</b> para la fecha {eval_date} "
-                 f"en la hoja '{eval_date.day}'.<br/>"
-                 f"📊 <b>Total Concluidos Hoy</b>: {self.total_completed_trips_today} redondos | "
-                 f"👥 <b>Pasajeros</b>: {self.total_passengers_today} | "
-                 f"📈 <b>IPK</b>: {self.ipk_today}"
-        )
+        # 3. Actualizar binario en Odoo SOLO si se actualizaron redondos o falta el archivo
+        if updated_count > 0 or not self.excel_file:
+            if os.path.exists(saved_path):
+                file_bytes = engine.read_workbook_bytes()
+                write_vals.update({
+                    'excel_file': base64.b64encode(file_bytes),
+                    'excel_filename': os.path.basename(saved_path),
+                })
 
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': f'Planilla {code} Actualizada',
-                'message': f"Se sincronizaron con éxito {updated_count} redondos concluidos en la hoja del día {eval_date.day}. IPK actual: {self.ipk_today}",
-                'type': 'success',
-                'sticky': False,
-            }
-        }
+        self.write(write_vals)
+
+        # 4. Registrar en chatter únicamente si hubo redondos nuevos
+        if updated_count > 0:
+            self.message_post(
+                body=f"✅ <b>Sincronización Dinámica Completada</b>: Se detectaron e integraron "
+                     f"<b>{updated_count} redondos concluidos</b> para la fecha {eval_date} "
+                     f"en la hoja '{eval_date.day}'.<br/>"
+                     f"📊 <b>Total Concluidos Hoy</b>: {self.total_completed_trips_today} redondos | "
+                     f"👥 <b>Pasajeros</b>: {self.total_passengers_today} | "
+                     f"📈 <b>IPK</b>: {self.ipk_today}"
+            )
+
+        return updated_count
 
     def _gather_completed_round_trips(self, service_code: str, target_date: date) -> List[Dict[str, Any]]:
         """
@@ -329,12 +360,13 @@ class TransitDynamicReport(models.Model):
     @api.model
     def cron_auto_sync_all_reports(self):
         """
-        Cron periódico (ej. cada 3 minutos):
-        Detecta servicios recién concluidos y actualiza las 3 planillas automáticamente.
+        Cron periódico (ej. cada 15 minutos):
+        Detecta servicios recién concluidos y actualiza las planillas automáticamente.
         """
         today = fields.Date.today()
         services = self.env['transit.service'].search([('code', 'in', ['E1', 'E2', 'E3'])])
-        synced_total = 0
+        synced_total_services = 0
+        total_trips_updated = 0
 
         for s in services:
             report = self.search([
@@ -354,17 +386,18 @@ class TransitDynamicReport(models.Model):
 
             if report.auto_sync_enabled:
                 try:
-                    report.action_detect_and_sync()
-                    synced_total += 1
+                    updated_cnt = report._do_detect_and_sync()
+                    total_trips_updated += updated_cnt
+                    synced_total_services += 1
                 except Exception as e:
                     logger.error(f"Error en auto-sync de planilla {s.code}: {e}")
 
-        # Sincronizar también la tabla unificada transit.service.roundtrip
-        if 'transit.service.roundtrip' in self.env:
+        # Sincronizar también la tabla unificada transit.service.roundtrip SOLO si hubo redondos nuevos
+        if total_trips_updated > 0 and 'transit.service.roundtrip' in self.env:
             try:
                 self.env['transit.service.roundtrip'].sync_from_excel_files(today)
             except Exception as e:
                 logger.error(f"Error sincronizando tabla unificada transit.service.roundtrip: {e}")
 
-        logger.info(f"Cron auto-sync de planillas completado para {synced_total} servicios.")
+        logger.info(f"Cron auto-sync de planillas completado para {synced_total_services} servicios ({total_trips_updated} redondos nuevos).")
         return True
