@@ -21,6 +21,18 @@
               action="action_transit_bus_schedule"
               sequence="5"/>
 
+    <menuitem id="menu_transit_service_roundtrip"
+              name="Planilla Unificada de Servicios (Redondos)"
+              parent="menu_transit_daily_operations"
+              action="action_transit_service_roundtrip"
+              sequence="6"/>
+
+    <menuitem id="menu_transit_dynamic_report"
+              name="Planillas Principales (Libros Excel .xlsx)"
+              parent="menu_transit_daily_operations"
+              action="action_transit_dynamic_report"
+              sequence="8"/>
+
     <menuitem id="menu_transit_dispatch"
               name="Despachos Diarios (Tablero en Vivo)"
               parent="menu_transit_daily_operations"

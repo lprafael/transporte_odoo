@@ -15,6 +15,7 @@ class ResPartner(models.Model):
         tracking=True,
         help='Empresa de transporte concesionada a la que pertenece el chofer o colaborador'
     )
+    driver_code = fields.Char(string='Código de Conductor / Ficha', index=True, help='Código identificador del chofer (ej. 001, 027, 034)')
     driver_license_number = fields.Char(string='Nº Registro / Licencia')
     driver_license_category = fields.Selection([
         ('prof_a', 'Profesional A (Transporte Pasajeros Internacional)'),

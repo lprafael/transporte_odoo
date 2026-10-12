@@ -245,6 +245,21 @@ class TransitDispatch(models.Model):
         ('canceled', 'Cancelado'),
     ], string='Estado de Operación', default='draft', tracking=True)
 
+    # Sincronización con Planilla Excel Dinámica
+    is_reported_in_sheet = fields.Boolean(
+        string='Registrado en Planilla Excel',
+        default=False,
+        copy=False,
+        tracking=True,
+        help='Indica si este servicio ya fue insertado en la planilla Excel oficial.'
+    )
+    sheet_row_number = fields.Integer(
+        string='Fila en Planilla Excel',
+        readonly=True,
+        copy=False,
+        help='Número de fila en la hoja del día de la planilla Excel donde quedó registrado este servicio.'
+    )
+
     checkpoint_ids = fields.One2many(
         'transit.dispatch.checkpoint',
         'dispatch_id',
@@ -630,7 +645,7 @@ class TransitDispatch(models.Model):
         self.write({'state': 'in_transit'})
 
     def action_complete(self):
-        """Finaliza el viaje y actualiza el odómetro central de Odoo Fleet"""
+        """Finaliza el viaje y actualiza el odómetro central de Odoo Fleet y la Planilla Excel Dinámica"""
         for rec in self:
             now = fields.Datetime.now()
             rec.write({
@@ -644,6 +659,38 @@ class TransitDispatch(models.Model):
                     'value': rec.final_odometer,
                     'date': rec.date,
                 })
+            # Sincronización automática con la Planilla Excel Dinámica
+            rec._sync_to_dynamic_report()
+
+    def _sync_to_dynamic_report(self):
+        """Dispara la actualización automática de la tabla unificada y la planilla Excel al culminar el servicio"""
+        self.ensure_one()
+        if not self.service_id or not self.date:
+            return
+        try:
+            # 1. Sincronizar en la tabla unificada de redondos
+            if 'transit.service.roundtrip' in self.env:
+                self.env['transit.service.roundtrip'].sync_from_excel_files(self.date)
+
+            # 2. Sincronizar en la Planilla Excel Dinámica
+            report_obj = self.env['transit.dynamic.report']
+            report = report_obj.search([
+                ('service_id', '=', self.service_id.id),
+                ('year', '=', self.date.year),
+                ('month', '=', str(self.date.month)),
+            ], limit=1)
+            if not report:
+                report = report_obj.create({
+                    'service_id': self.service_id.id,
+                    'year': self.date.year,
+                    'month': str(self.date.month),
+                    'target_date': self.date,
+                    'auto_sync_enabled': True,
+                })
+            report.action_detect_and_sync()
+            self.write({'is_reported_in_sheet': True})
+        except Exception as e:
+            self.message_post(body=f"⚠️ Aviso al sincronizar en Planilla Excel Dinámica: {e}")
 
     def action_mark_incomplete(self):
         """Marca el viaje como incompleto (alcanzó el retorno al 80% pero no completó)"""

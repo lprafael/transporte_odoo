@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Vista Formulario de Planilla Dinámica -->
+    <record id="view_transit_dynamic_report_form" model="ir.ui.view">
+        <field name="name">transit.dynamic.report.form</field>
+        <field name="model">transit.dynamic.report</field>
+        <field name="arch" type="xml">
+            <form string="Planilla Principal de Tránsito (Excel Dinámico)">
+                <header>
+                    <button name="action_detect_and_sync"
+                            string="🔄 Sincronizar y Detectar Servicios Concluidos"
+                            type="object"
+                            class="oe_highlight"/>
+                    <button name="action_download_excel"
+                            string="📥 Descargar Planilla Excel (.xlsx)"
+                            type="object"
+                            class="btn-primary"
+                            icon="fa-file-excel-o"/>
+                    <field name="status_badge" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_detect_and_sync" type="object" class="oe_stat_button" icon="fa-bus">
+                            <div class="o_stat_info">
+                                <field name="total_completed_trips_today" class="o_stat_value"/>
+                                <span class="o_stat_text">Redondos Hoy</span>
+                            </div>
+                        </button>
+                        <button name="action_detect_and_sync" type="object" class="oe_stat_button" icon="fa-users">
+                            <div class="o_stat_info">
+                                <field name="total_passengers_today" class="o_stat_value"/>
+                                <span class="o_stat_text">Pasajeros Hoy</span>
+                            </div>
+                        </button>
+                        <button name="action_detect_and_sync" type="object" class="oe_stat_button" icon="fa-road">
+                            <div class="o_stat_info">
+                                <field name="total_km_today" class="o_stat_value"/>
+                                <span class="o_stat_text">Km Recorridos</span>
+                            </div>
+                        </button>
+                        <button name="action_detect_and_sync" type="object" class="oe_stat_button" icon="fa-line-chart">
+                            <div class="o_stat_info">
+                                <field name="ipk_today" class="o_stat_value"/>
+                                <span class="o_stat_text">IPK del Día</span>
+                            </div>
+                        </button>
+                    </div>
+
+                    <div class="oe_title">
+                        <label for="name" class="oe_edit_only" string="Planilla Oficial"/>
+                        <h1>
+                            <field name="name" readonly="1"/>
+                        </h1>
+                        <h4>
+                            <span class="text-muted">Servicio: </span>
+                            <field name="service_code" class="fw-bold text-primary"/>
+                            <span class="text-muted"> | Avance Hoy: </span>
+                            <field name="completion_percentage" widget="progressbar"/>
+                        </h4>
+                    </div>
+
+                    <group>
+                        <group string="Parámetros de la Planilla">
+                            <field name="service_id"/>
+                            <field name="target_date"/>
+                            <label for="month" string="Período Mensual"/>
+                            <div class="d-flex">
+                                <field name="month" class="me-2"/>
+                                <field name="year"/>
+                            </div>
+                            <field name="auto_sync_enabled"/>
+                        </group>
+                        <group string="Ubicación y Archivo Excel">
+                            <field name="file_name" readonly="1"/>
+                            <field name="file_path" readonly="1"/>
+                            <field name="file_exists" widget="boolean_toggle" readonly="1"/>
+                            <field name="last_sync" readonly="1"/>
+                            <field name="excel_filename" invisible="1"/>
+                            <field name="excel_file" filename="excel_filename" readonly="1" widget="binary"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Resumen de Integración y Hoja del Día">
+                            <div class="alert alert-info" role="alert">
+                                ℹ️ <b>Detección Automática de Servicios Concluidos:</b> Al completarse cada despacho o ciclo redondo (Ida + Vuelta) en Odoo o a través de la telemetría GPS/geocercas, el sistema escribe en tiempo real en la hoja correspondiente al día (ej. hoja <code>11</code> para hoy). Las 35 hojas del libro Excel, incluyendo los resúmenes por conductor, por bus y la matriz IPK se recalculan de forma dinámica.
+                            </div>
+                            <group>
+                                <group string="Métricas Clave del Día">
+                                    <field name="total_scheduled_trips_today" readonly="1"/>
+                                    <field name="total_completed_trips_today" readonly="1"/>
+                                    <field name="completion_percentage" widget="percentpie" readonly="1"/>
+                                </group>
+                                <group string="Indicadores de Eficiencia">
+                                    <field name="total_passengers_today" readonly="1"/>
+                                    <field name="total_km_today" readonly="1"/>
+                                    <field name="ipk_today" readonly="1"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vista Lista (Tree) -->
+    <record id="view_transit_dynamic_report_list" model="ir.ui.view">
+        <field name="name">transit.dynamic.report.list</field>
+        <field name="model">transit.dynamic.report</field>
+        <field name="arch" type="xml">
+            <list string="Planillas Principales de Tránsito" decoration-success="total_completed_trips_today &gt; 0">
+                <field name="service_code" widget="badge" decoration-info="service_code == 'E1'" decoration-warning="service_code == 'E2'" decoration-success="service_code == 'E3'"/>
+                <field name="name"/>
+                <field name="target_date"/>
+                <field name="total_completed_trips_today" string="Redondos Hoy"/>
+                <field name="total_passengers_today" string="Pasajeros Hoy"/>
+                <field name="total_km_today" string="Km Hoy"/>
+                <field name="ipk_today" string="IPK"/>
+                <field name="completion_percentage" widget="progressbar" string="% Cumplimiento"/>
+                <field name="status_badge" widget="badge" decoration-success="status_badge == 'synced'" decoration-muted="status_badge == 'empty'"/>
+                <field name="last_sync" string="Última Sincronización"/>
+                <button name="action_detect_and_sync" string="Actualizar" type="object" icon="fa-refresh" title="Detectar y Actualizar Servicios Concluidos"/>
+                <button name="action_download_excel" string="Descargar Excel" type="object" icon="fa-download" title="Descargar archivo Excel oficial"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Kanban de Alto Impacto Visual -->
+    <record id="view_transit_dynamic_report_kanban" model="ir.ui.view">
+        <field name="name">transit.dynamic.report.kanban</field>
+        <field name="model">transit.dynamic.report</field>
+        <field name="arch" type="xml">
+            <kanban class="o_kanban_mobile" sample="1">
+                <field name="id"/>
+                <field name="name"/>
+                <field name="service_code"/>
+                <field name="total_completed_trips_today"/>
+                <field name="total_passengers_today"/>
+                <field name="total_km_today"/>
+                <field name="ipk_today"/>
+                <field name="completion_percentage"/>
+                <field name="last_sync"/>
+                <field name="status_badge"/>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div class="oe_kanban_global_click p-3 border rounded shadow-sm bg-white">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="badge bg-primary fs-6 px-3 py-1">
+                                    <t t-esc="record.service_code.value"/>
+                                </span>
+                                <span t-if="record.status_badge.raw_value == 'synced'" class="badge bg-success">
+                                    🟢 AL DÍA
+                                </span>
+                                <span t-else="" class="badge bg-secondary">
+                                    ⚪ PENDIENTE
+                                </span>
+                            </div>
+                            <h5 class="fw-bold text-dark mb-1">
+                                <t t-esc="record.name.value"/>
+                            </h5>
+                            <div class="text-muted small mb-3">
+                                Última sincronización: <t t-esc="record.last_sync.value || 'Pendiente'"/>
+                            </div>
+
+                            <div class="row text-center mb-3 g-2">
+                                <div class="col-4 bg-light p-2 rounded">
+                                    <div class="text-muted small">Redondos</div>
+                                    <div class="fs-5 fw-bold text-primary">
+                                        <t t-esc="record.total_completed_trips_today.value"/>
+                                    </div>
+                                </div>
+                                <div class="col-4 bg-light p-2 rounded">
+                                    <div class="text-muted small">Pasajeros</div>
+                                    <div class="fs-5 fw-bold text-success">
+                                        <t t-esc="record.total_passengers_today.value"/>
+                                    </div>
+                                </div>
+                                <div class="col-4 bg-light p-2 rounded">
+                                    <div class="text-muted small">IPK</div>
+                                    <div class="fs-5 fw-bold text-warning">
+                                        <t t-esc="record.ipk_today.value"/>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between small text-muted mb-1">
+                                    <span>Avance Diario</span>
+                                    <span><t t-esc="record.completion_percentage.value"/>%</span>
+                                </div>
+                                <div class="progress" style="height: 6px;">
+                                    <div class="progress-bar bg-primary" role="progressbar"
+                                         t-attf-style="width: #{record.completion_percentage.raw_value}%">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex justify-content-between pt-2 border-top">
+                                <button name="action_detect_and_sync" type="object" class="btn btn-sm btn-outline-primary">
+                                    <i class="fa fa-refresh me-1"/> Actualizar
+                                </button>
+                                <button name="action_download_excel" type="object" class="btn btn-sm btn-success">
+                                    <i class="fa fa-download me-1"/> Descargar Excel
+                                </button>
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana para Planillas Dinámicas -->
+    <record id="action_transit_dynamic_report" model="ir.actions.act_window">
+        <field name="name">Planillas Principales de Tránsito (Excel Dinámico)</field>
+        <field name="res_model">transit.dynamic.report</field>
+        <field name="view_mode">kanban,list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Planillas Oficiales de Tránsito de Líneas Eléctricas (E1, E2, E3)
+            </p>
+            <p>
+                Los libros Excel se sincronizan de forma automatizada a medida que cada bus y conductor culminan sus viajes en ruta.
+            </p>
+        </field>
+    </record>
+</odoo>

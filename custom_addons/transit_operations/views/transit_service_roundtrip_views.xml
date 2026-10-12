@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Vista Búsqueda y Filtros Dinámicos -->
+    <record id="view_transit_service_roundtrip_search" model="ir.ui.view">
+        <field name="name">transit.service.roundtrip.search</field>
+        <field name="model">transit.service.roundtrip</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Servicios y Redondos">
+                <!-- Búsqueda rápida por texto -->
+                <field name="service_code" string="Línea (E1, E2, E3)"/>
+                <field name="bus_internal_number" string="Nº de Bus"/>
+                <field name="driver_code" string="Código de Chofer"/>
+                <field name="driver_name" string="Nombre de Chofer"/>
+                <field name="date" string="Fecha"/>
+
+                <!-- Filtros Directos por Servicio -->
+                <separator/>
+                <filter string="⚡ Línea E1" name="filter_service_e1" domain="[('service_code', '=', 'E1')]"/>
+                <filter string="⚡ Línea E2" name="filter_service_e2" domain="[('service_code', '=', 'E2')]"/>
+                <filter string="⚡ Línea E3" name="filter_service_e3" domain="[('service_code', '=', 'E3')]"/>
+
+                <!-- Filtros Directos por Fecha -->
+                <separator/>
+                <filter string="📅 Hoy" name="filter_today" domain="[('date', '=', context_today())]"/>
+                <filter string="📅 Ayer" name="filter_yesterday" domain="[('date', '=', (context_today() - datetime.timedelta(days=1)).strftime('%Y-%m-%d'))]"/>
+                <filter string="📅 Este Mes" name="filter_this_month" domain="[('date', '&gt;=', context_today().strftime('%Y-%m-01'))]"/>
+
+                <!-- Filtros por Estado y Eficiencia -->
+                <separator/>
+                <filter string="✅ Concluidos" name="filter_completed" domain="[('state', '=', 'completed')]"/>
+                <filter string="🚍 En Ruta" name="filter_in_transit" domain="[('state', '=', 'in_transit')]"/>
+                <filter string="⚠️ Alerta Exceso Batería (&gt;50%)" name="filter_excess_battery" domain="[('excess_consumption', '=', 'exceso')]"/>
+
+                <!-- Agrupadores Dinámicos -->
+                <group expand="1" string="Agrupar Por">
+                    <filter string="Servicio / Línea" name="group_by_service" context="{'group_by': 'service_id'}"/>
+                    <filter string="Fecha (Día)" name="group_by_date_day" context="{'group_by': 'date:day'}"/>
+                    <filter string="Fecha (Mes)" name="group_by_date_month" context="{'group_by': 'date:month'}"/>
+                    <filter string="Conductor / Chofer" name="group_by_driver" context="{'group_by': 'driver_id'}"/>
+                    <filter string="Nº de Bus" name="group_by_bus" context="{'group_by': 'bus_internal_number'}"/>
+                    <filter string="Estado" name="group_by_state" context="{'group_by': 'state'}"/>
+                    <filter string="Alerta Batería" name="group_by_excess" context="{'group_by': 'excess_consumption'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Vista Lista (Tree / List) Idéntica a Planilla Excel Oficial -->
+    <record id="view_transit_service_roundtrip_list" model="ir.ui.view">
+        <field name="name">transit.service.roundtrip.list</field>
+        <field name="model">transit.service.roundtrip</field>
+        <field name="arch" type="xml">
+            <list string="Planilla Unificada de Servicios de Tránsito"
+                  decoration-success="state == 'completed'"
+                  decoration-warning="state == 'in_transit'"
+                  decoration-danger="excess_consumption == 'exceso'">
+                <header>
+                    <button name="action_sync_today" string="🔄 Sincronizar Hoy" type="object" class="btn-primary"/>
+                    <button name="action_sync_current_month" string="📅 Sincronizar Todo el Mes" type="object" class="btn-secondary"/>
+                </header>
+                <field name="date"/>
+                <field name="service_code" widget="badge"
+                       decoration-info="service_code == 'E1'"
+                       decoration-warning="service_code == 'E2'"
+                       decoration-success="service_code == 'E3'"/>
+                <field name="bus_internal_number" string="Nº Bus"/>
+                <field name="driver_code" string="Cód."/>
+                <field name="driver_name" string="Conductor"/>
+                <field name="departure_ida" string="Salida Ida"/>
+                <field name="km_ida" string="Km Ida" optional="show"/>
+                <field name="passengers_ida" string="Pas. Ida" sum="Total Pas. Ida"/>
+                <field name="validations_ida" string="Tarj. Ida" sum="Total Tarj. Ida" optional="show"/>
+                <field name="departure_vuelta" string="Retorno Vta"/>
+                <field name="arrival_vuelta" string="Llegada Vta"/>
+                <field name="km_vuelta" string="Km Vta" optional="show"/>
+                <field name="passengers_vuelta" string="Pas. Vta" sum="Total Pas. Vta"/>
+                <field name="validations_vuelta" string="Tarj. Vta" sum="Total Tarj. Vta" optional="show"/>
+                <field name="total_km" string="Km Total" sum="Total Km Recorridos"/>
+                <field name="total_passengers" string="Total Pasajeros" sum="Total Pasajeros" class="fw-bold"/>
+                <field name="total_validations" string="Total Tarjetas" sum="Total Tarjetas" optional="show"/>
+                <field name="ipk_round" string="IPK Viaje" optional="show"/>
+                <field name="battery_soc_start" string="SoC Salida (%)" optional="show"/>
+                <field name="battery_soc_end" string="SoC Llegada (%)" optional="show"/>
+                <field name="battery_consumption" string="Consumo (%)" avg="Promedio Consumo"/>
+                <field name="excess_consumption" string="Alerta Batería" widget="badge"
+                       decoration-danger="excess_consumption == 'exceso'"
+                       decoration-success="excess_consumption == 'ok'"/>
+                <field name="duration_str" string="Tiempo Redondo"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'completed'"
+                       decoration-warning="state == 'in_transit'"
+                       decoration-muted="state == 'scheduled'"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Pivot para Análisis Multidimensional -->
+    <record id="view_transit_service_roundtrip_pivot" model="ir.ui.view">
+        <field name="name">transit.service.roundtrip.pivot</field>
+        <field name="model">transit.service.roundtrip</field>
+        <field name="arch" type="xml">
+            <pivot string="Matriz de Servicios y Pasajeros" sample="1">
+                <field name="date" interval="day" type="row"/>
+                <field name="service_id" type="col"/>
+                <field name="total_passengers" type="measure"/>
+                <field name="total_km" type="measure"/>
+                <field name="total_validations" type="measure"/>
+                <field name="battery_consumption" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <!-- Vista Gráfico Dinámico -->
+    <record id="view_transit_service_roundtrip_graph" model="ir.ui.view">
+        <field name="name">transit.service.roundtrip.graph</field>
+        <field name="model">transit.service.roundtrip</field>
+        <field name="arch" type="xml">
+            <graph string="Evolución de Pasajeros y Demanda" type="bar" sample="1">
+                <field name="date" interval="day"/>
+                <field name="service_id"/>
+                <field name="total_passengers" type="measure"/>
+            </graph>
+        </field>
+    </record>
+
+    <!-- Vista Kanban para Seguimiento Operativo -->
+    <record id="view_transit_service_roundtrip_kanban" model="ir.ui.view">
+        <field name="name">transit.service.roundtrip.kanban</field>
+        <field name="model">transit.service.roundtrip</field>
+        <field name="arch" type="xml">
+            <kanban class="o_kanban_mobile" sample="1">
+                <field name="id"/>
+                <field name="name"/>
+                <field name="service_code"/>
+                <field name="bus_internal_number"/>
+                <field name="driver_name"/>
+                <field name="departure_ida"/>
+                <field name="arrival_vuelta"/>
+                <field name="total_passengers"/>
+                <field name="total_km"/>
+                <field name="battery_consumption"/>
+                <field name="excess_consumption"/>
+                <field name="state"/>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div class="oe_kanban_global_click p-3 border rounded shadow-sm bg-white">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="badge bg-primary fs-6 px-2 py-1">
+                                    <t t-esc="record.service_code.value"/> - Bus <t t-esc="record.bus_internal_number.value"/>
+                                </span>
+                                <span t-if="record.state.raw_value == 'completed'" class="badge bg-success">
+                                    CONCLUIDO
+                                </span>
+                                <span t-elif="record.state.raw_value == 'in_transit'" class="badge bg-warning text-dark">
+                                    EN RUTA
+                                </span>
+                                <span t-else="" class="badge bg-secondary">
+                                    PROGRAMADO
+                                </span>
+                            </div>
+                            <h6 class="fw-bold text-dark mb-1">
+                                👨‍✈️ <t t-esc="record.driver_name.value || 'Sin Conductor'"/>
+                            </h6>
+                            <div class="text-muted small mb-2">
+                                🕒 Horario: <t t-esc="record.departure_ida.value"/> ➔ <t t-esc="record.arrival_vuelta.value || '--:--'"/>
+                            </div>
+                            <div class="row text-center g-1 mb-2">
+                                <div class="col-4 bg-light p-1 rounded">
+                                    <div class="small text-muted">Pasajeros</div>
+                                    <div class="fw-bold text-success"><t t-esc="record.total_passengers.value"/></div>
+                                </div>
+                                <div class="col-4 bg-light p-1 rounded">
+                                    <div class="small text-muted">Km</div>
+                                    <div class="fw-bold text-primary"><t t-esc="record.total_km.value"/></div>
+                                </div>
+                                <div class="col-4 bg-light p-1 rounded">
+                                    <div class="small text-muted">Consumo</div>
+                                    <div class="fw-bold text-warning"><t t-esc="record.battery_consumption.value"/>%</div>
+                                </div>
+                            </div>
+                            <div t-if="record.excess_consumption.raw_value == 'exceso'" class="alert alert-danger p-1 mb-0 small text-center">
+                                ⚠️ Consumo de Batería Excesivo (&gt;50%)
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- Vista Formulario Detallada -->
+    <record id="view_transit_service_roundtrip_form" model="ir.ui.view">
+        <field name="name">transit.service.roundtrip.form</field>
+        <field name="model">transit.service.roundtrip</field>
+        <field name="arch" type="xml">
+            <form string="Servicio Redondo de Tránsito">
+                <header>
+                    <button name="action_sync_today" string="🔄 Sincronizar" type="object" class="btn-primary"/>
+                    <field name="state" widget="statusbar" statusbar_visible="scheduled,in_transit,completed"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" string="Servicio Redondo"/>
+                        <h1>
+                            <field name="name" readonly="1"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Datos del Servicio">
+                            <field name="date"/>
+                            <field name="service_id"/>
+                            <field name="vehicle_id"/>
+                            <field name="bus_internal_number"/>
+                        </group>
+                        <group string="Conductor">
+                            <field name="driver_id"/>
+                            <field name="driver_code"/>
+                            <field name="driver_name"/>
+                            <field name="source" readonly="1"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Tramo de Ida y Regreso (Horarios y Carga)">
+                            <div class="row">
+                                <div class="col-md-6 border-end">
+                                    <h5 class="text-primary mb-3">📍 Tramo de Ida</h5>
+                                    <group>
+                                        <field name="departure_ida"/>
+                                        <field name="arrival_ida"/>
+                                        <field name="km_ida"/>
+                                        <field name="passengers_ida"/>
+                                        <field name="validations_ida"/>
+                                        <field name="cash_ida"/>
+                                    </group>
+                                </div>
+                                <div class="col-md-6">
+                                    <h5 class="text-success mb-3">🔄 Tramo de Retorno / Vuelta</h5>
+                                    <group>
+                                        <field name="departure_vuelta"/>
+                                        <field name="arrival_vuelta"/>
+                                        <field name="km_vuelta"/>
+                                        <field name="passengers_vuelta"/>
+                                        <field name="validations_vuelta"/>
+                                        <field name="cash_vuelta"/>
+                                    </group>
+                                </div>
+                            </div>
+                        </page>
+                        <page string="Totales, Eficiencia y Batería EV">
+                            <group>
+                                <group string="Consolidados del Redondo">
+                                    <field name="total_km"/>
+                                    <field name="total_passengers"/>
+                                    <field name="total_validations"/>
+                                    <field name="ipk_round"/>
+                                    <field name="duration_str"/>
+                                    <field name="duration_hours"/>
+                                </group>
+                                <group string="Consumo Eléctrico">
+                                    <field name="battery_soc_start"/>
+                                    <field name="battery_soc_end"/>
+                                    <field name="battery_consumption"/>
+                                    <field name="excess_consumption" widget="badge"
+                                           decoration-danger="excess_consumption == 'exceso'"
+                                           decoration-success="excess_consumption == 'ok'"/>
+                                    <field name="excel_row" readonly="1"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana para la Planilla Unificada -->
+    <record id="action_transit_service_roundtrip" model="ir.actions.act_window">
+        <field name="name">Planilla Unificada de Servicios (Redondos)</field>
+        <field name="res_model">transit.service.roundtrip</field>
+        <field name="view_mode">list,pivot,graph,kanban,form</field>
+        <field name="search_view_id" ref="view_transit_service_roundtrip_search"/>
+        <field name="context">{
+            'search_default_group_by_service': 1,
+            'search_default_group_by_date_day': 1
+        }</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Planilla Centralizada de Servicios y Redondos (E1, E2, E3)
+            </p>
+            <p>
+                Todos los datos de los servicios se registran y actualizan aquí automáticamente.
+                Use los filtros superiores para ver por Línea (E1, E2, E3) o por Fecha (Hoy, Ayer, Mes o Rango personalizado).
+            </p>
+        </field>
+    </record>
+</odoo>

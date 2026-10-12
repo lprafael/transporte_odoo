@@ -20,3 +20,6 @@ from . import transit_evaluation
 from . import transit_charging
 from . import transit_shift_preference
 from . import transit_bus_schedule
+from . import transit_dynamic_report_service
+from . import transit_dynamic_report
+from . import transit_service_roundtrip
