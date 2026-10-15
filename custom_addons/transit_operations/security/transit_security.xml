@@ -47,6 +47,7 @@
         <field name="name">Flota: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="fleet.model_fleet_vehicle"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
@@ -55,6 +56,7 @@
         <field name="name">Despachos: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_dispatch"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
@@ -63,6 +65,7 @@
         <field name="name">Rutas: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_route"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
@@ -71,6 +74,7 @@
         <field name="name">Horarios: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_timetable"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
@@ -79,6 +83,7 @@
         <field name="name">Servicios: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_service"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
@@ -87,6 +92,7 @@
         <field name="name">Hojas de Ruta: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_bus_schedule"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
@@ -95,6 +101,7 @@
         <field name="name">Empleados: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="hr.model_hr_employee"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
@@ -103,6 +110,7 @@
         <field name="name">Contactos: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="base.model_res_partner"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
@@ -111,6 +119,7 @@
         <field name="name">Concesionaria: Aislamiento Propia Empresa</field>
         <field name="model_id" ref="model_transit_concessionaire"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
@@ -119,6 +128,7 @@
         <field name="name">Boletos: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_ticket"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
@@ -127,6 +137,7 @@
         <field name="name">Estaciones de Carga: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_charging_station"/>
         <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 </odoo>

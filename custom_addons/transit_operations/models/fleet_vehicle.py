@@ -10,8 +10,19 @@ class FleetVehicle(models.Model):
         'transit.concessionaire',
         string='Empresa Concesionaria',
         tracking=True,
+        default=lambda self: self._default_concessionaire_id(),
         help='Empresa operadora concesionada titular o responsable del bus'
     )
+
+    @api.model
+    def _default_concessionaire_id(self):
+        user = self.env.user
+        if user.concessionaire_id:
+            return user.concessionaire_id.id
+        if user.concessionaire_ids:
+            return user.concessionaire_ids[0].id
+        return False
+
     service_id = fields.Many2one(
         'transit.service',
         string='Servicio Operativo Asignado',
