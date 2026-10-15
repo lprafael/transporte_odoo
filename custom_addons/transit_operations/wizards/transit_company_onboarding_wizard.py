@@ -7,28 +7,26 @@ class TransitCompanyOnboardingWizard(models.TransientModel):
     _description = 'Asistente de Alta y Provisión de Empresa de Transporte (Multi-Tenant)'
 
     # 1. Datos de la Empresa Concesionaria
-    company_name = fields.Char(string='Nombre Comercial de la Empresa', required=True, placeholder='Ej: Consorcio Arapotí')
+    company_name = fields.Char(string='Nombre Comercial de la Empresa', required=True)
     agency_id = fields.Char(
         string='Código Telemática / VMT (Agency ID)',
         required=True,
-        placeholder='Ej: 004B',
         help='Código que transmitirán los dispositivos GPS en el campo agency_id del payload.'
     )
     code = fields.Char(
         string='Código Interno de Concesión',
         required=True,
-        placeholder='Ej: CONC-01',
         help='Identificador único interno dentro del ERP.'
     )
-    legal_name = fields.Char(string='Razón Social Oficial', placeholder='Ej: Consorcio Arapotí S.A.')
-    vat_ruc = fields.Char(string='RUC / Identificación Fiscal', placeholder='Ej: 80099887-1')
+    legal_name = fields.Char(string='Razón Social Oficial')
+    vat_ruc = fields.Char(string='RUC / Identificación Fiscal')
     address = fields.Char(string='Dirección Base / Patio Central')
     contact_phone = fields.Char(string='Teléfono de Contacto')
     contact_email = fields.Char(string='Correo Electrónico Institucional')
 
     # 2. Usuario Inicial Administrador / Jefe de Tráfico
-    admin_name = fields.Char(string='Nombre del Responsable', required=True, placeholder='Ej: Juan Pérez')
-    admin_login = fields.Char(string='Usuario de Acceso (Login / Email)', required=True, placeholder='Ej: trafico@arapoti.com.py')
+    admin_name = fields.Char(string='Nombre del Responsable', required=True)
+    admin_login = fields.Char(string='Usuario de Acceso (Login / Email)', required=True)
     admin_password = fields.Char(string='Contraseña Inicial', required=True, default='Transporte2026!')
 
     def action_create_company(self):
