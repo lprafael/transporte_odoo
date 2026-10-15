@@ -36,171 +36,97 @@
     </record>
 
     <!-- ================================================================= -->
-    <!-- REGLAS DE REGISTRO MULTI-TENANT ESTRICTAS (SIN ESCAPES = FALSE)   -->
+    <!-- REGLAS DE REGISTRO MULTI-TENANT GLOBALES (AISLAMIENTO ABSOLUTO)   -->
+    <!-- Las reglas globales se combinan con AND (&) y no pueden ser       -->
+    <!-- eludidas por ningún permiso de grupo. El Administrador Global    -->
+    <!-- (Regulador / GVMT) recibe un domain vacío [] para ver todo.      -->
     <!-- ================================================================= -->
 
     <!-- 1. Flota de Vehículos: fleet.vehicle -->
     <record id="fleet_vehicle_concessionaire_rule" model="ir.rule">
-        <field name="name">Flota: Aislamiento Estricto por Concesionaria</field>
+        <field name="name">Flota: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="fleet.model_fleet_vehicle"/>
-        <field name="domain_force">['|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="fleet_vehicle_global_manager_rule" model="ir.rule">
-        <field name="name">Flota: Acceso Global Administrador</field>
-        <field name="model_id" ref="fleet.model_fleet_vehicle"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 2. Despachos Diarios: transit.dispatch -->
     <record id="transit_dispatch_concessionaire_rule" model="ir.rule">
-        <field name="name">Despachos: Aislamiento Estricto por Concesionaria</field>
+        <field name="name">Despachos: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_dispatch"/>
-        <field name="domain_force">['|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="transit_dispatch_global_manager_rule" model="ir.rule">
-        <field name="name">Despachos: Acceso Global Administrador</field>
-        <field name="model_id" ref="model_transit_dispatch"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 3. Rutas e Itinerarios: transit.route -->
     <record id="transit_route_concessionaire_rule" model="ir.rule">
-        <field name="name">Rutas: Aislamiento Estricto por Concesionaria</field>
+        <field name="name">Rutas: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_route"/>
-        <field name="domain_force">['|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="transit_route_global_manager_rule" model="ir.rule">
-        <field name="name">Rutas: Acceso Global Administrador</field>
-        <field name="model_id" ref="model_transit_route"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 4. Cuadro de Marchas y Horarios: transit.timetable -->
     <record id="transit_timetable_concessionaire_rule" model="ir.rule">
-        <field name="name">Horarios: Aislamiento Estricto por Concesionaria</field>
+        <field name="name">Horarios: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_timetable"/>
-        <field name="domain_force">['|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="transit_timetable_global_manager_rule" model="ir.rule">
-        <field name="name">Horarios: Acceso Global Administrador</field>
-        <field name="model_id" ref="model_transit_timetable"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 5. Servicios / Concesiones: transit.service -->
     <record id="transit_service_concessionaire_rule" model="ir.rule">
-        <field name="name">Servicios: Aislamiento Estricto por Concesionaria</field>
+        <field name="name">Servicios: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_service"/>
-        <field name="domain_force">['|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="transit_service_global_manager_rule" model="ir.rule">
-        <field name="name">Servicios: Acceso Global Administrador</field>
-        <field name="model_id" ref="model_transit_service"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 6. Hojas de Ruta de Buses: transit.bus.schedule -->
     <record id="transit_bus_schedule_concessionaire_rule" model="ir.rule">
-        <field name="name">Hojas de Ruta: Aislamiento Estricto por Concesionaria</field>
+        <field name="name">Hojas de Ruta: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_bus_schedule"/>
-        <field name="domain_force">['|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="transit_bus_schedule_global_manager_rule" model="ir.rule">
-        <field name="name">Hojas de Ruta: Acceso Global Administrador</field>
-        <field name="model_id" ref="model_transit_bus_schedule"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 7. Empleados de Transporte: hr.employee -->
     <record id="hr_employee_concessionaire_rule" model="ir.rule">
-        <field name="name">Empleados: Aislamiento Estricto por Concesionaria</field>
+        <field name="name">Empleados: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="hr.model_hr_employee"/>
-        <field name="domain_force">['|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="hr_employee_global_manager_rule" model="ir.rule">
-        <field name="name">Empleados: Acceso Global Administrador</field>
-        <field name="model_id" ref="hr.model_hr_employee"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 8. Choferes y Contactos de Empresa: res.partner -->
     <record id="res_partner_driver_concessionaire_rule" model="ir.rule">
-        <field name="name">Contactos: Aislamiento Estricto por Concesionaria</field>
+        <field name="name">Contactos: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="base.model_res_partner"/>
-        <field name="domain_force">['|', ('concessionaire_id', '=', False), '|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="res_partner_driver_global_manager_rule" model="ir.rule">
-        <field name="name">Contactos: Acceso Global Administrador</field>
-        <field name="model_id" ref="base.model_res_partner"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 9. Concesionarias: transit.concessionaire -->
     <record id="transit_concessionaire_company_rule" model="ir.rule">
         <field name="name">Concesionaria: Aislamiento Propia Empresa</field>
         <field name="model_id" ref="model_transit_concessionaire"/>
-        <field name="domain_force">['|', ('id', '=', user.concessionaire_id.id), ('id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="transit_concessionaire_global_manager_rule" model="ir.rule">
-        <field name="name">Concesionaria: Acceso Global Administrador</field>
-        <field name="model_id" ref="model_transit_concessionaire"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 10. Boletos / Pasajes: transit.ticket -->
     <record id="transit_ticket_concessionaire_rule" model="ir.rule">
-        <field name="name">Boletos: Aislamiento Estricto por Concesionaria</field>
+        <field name="name">Boletos: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_ticket"/>
-        <field name="domain_force">['|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="transit_ticket_global_manager_rule" model="ir.rule">
-        <field name="name">Boletos: Acceso Global Administrador</field>
-        <field name="model_id" ref="model_transit_ticket"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 11. Patios y Estaciones de Carga EV: transit.charging.station -->
     <record id="transit_charging_station_concessionaire_rule" model="ir.rule">
-        <field name="name">Estaciones de Carga: Aislamiento Estricto</field>
+        <field name="name">Estaciones de Carga: Aislamiento Multi-Tenant Estricto</field>
         <field name="model_id" ref="model_transit_charging_station"/>
-        <field name="domain_force">['|', ('concessionaire_id', '=', user.concessionaire_id.id), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_user'))]"/>
-    </record>
-
-    <record id="transit_charging_station_global_manager_rule" model="ir.rule">
-        <field name="name">Estaciones de Carga: Acceso Global Administrador</field>
-        <field name="model_id" ref="model_transit_charging_station"/>
-        <field name="domain_force">[(1, '=', 1)]</field>
-        <field name="groups" eval="[(4, ref('group_transit_manager'))]"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 </odoo>
