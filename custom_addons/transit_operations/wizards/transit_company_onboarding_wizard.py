@@ -54,18 +54,25 @@ class TransitCompanyOnboardingWizard(models.TransientModel):
             'active': True,
         })
 
-        # 2. Asignar grupos de Jefe de Tráfico
+        # 2. Asignar grupos de Jefe de Tráfico (Gestor de Flota y Empleados del Tenant)
         group_user = self.env.ref('transit_operations.group_transit_user')
         group_company_mgr = self.env.ref('transit_operations.group_transit_company_manager')
-        group_fleet_user = self.env.ref('fleet.fleet_group_user')
+        group_fleet_mgr = self.env.ref('fleet.fleet_group_manager', raise_if_not_found=False)
+        group_fleet_user = self.env.ref('fleet.fleet_group_user', raise_if_not_found=False)
+        group_hr_user = self.env.ref('hr.group_hr_user', raise_if_not_found=False)
         group_base_user = self.env.ref('base.group_user')
 
         groups = [
             (4, group_base_user.id),
             (4, group_user.id),
             (4, group_company_mgr.id),
-            (4, group_fleet_user.id),
         ]
+        if group_fleet_mgr:
+            groups.append((4, group_fleet_mgr.id))
+        elif group_fleet_user:
+            groups.append((4, group_fleet_user.id))
+        if group_hr_user:
+            groups.append((4, group_hr_user.id))
 
         # 3. Crear el Usuario por el ORM oficial (genera hash de contraseña correcto y partner vinculado)
         user = self.env['res.users'].create({
