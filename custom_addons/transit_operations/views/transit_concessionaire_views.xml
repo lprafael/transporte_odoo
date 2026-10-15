@@ -6,6 +6,7 @@
         <field name="model">transit.concessionaire</field>
         <field name="arch" type="xml">
             <list string="Empresas Concesionarias">
+                <field name="agency_id" string="Agency ID"/>
                 <field name="code"/>
                 <field name="name"/>
                 <field name="legal_name"/>
@@ -32,8 +33,11 @@
                     </div>
                     <div class="oe_title">
                         <label for="name" string="Nombre Comercial"/>
-                        <h1><field name="name" placeholder="Ej: Empresa de Transporte San Lorenzo S.A."/></h1>
-                        <h3><field name="code" placeholder="Código: CONC-01"/></h3>
+                        <h1><field name="name" placeholder="Ej: Consorcio Arapotí"/></h1>
+                        <div class="d-flex gap-3">
+                            <div><label for="agency_id" string="Agency ID (VMT)"/><field name="agency_id" placeholder="Ej: 004B"/></div>
+                            <div><label for="code" string="Código Interno"/><field name="code" placeholder="Ej: CONC-01"/></div>
+                        </div>
                     </div>
                     <group>
                         <group string="Datos Fiscales y Jurídicos">
@@ -81,6 +85,15 @@
                                     <field name="ranking_position"/>
                                     <field name="performance_tier"/>
                                     <field name="incentive_bonus" widget="monetary"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Usuarios de la Empresa" name="users">
+                            <field name="user_ids">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="login"/>
+                                    <field name="email"/>
                                 </list>
                             </field>
                         </page>

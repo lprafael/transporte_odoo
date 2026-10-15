@@ -7,6 +7,13 @@ class TransitDispatchCheckpoint(models.Model):
     _order = 'sequence asc, id asc'
 
     dispatch_id = fields.Many2one('transit.dispatch', string='Despacho', ondelete='cascade', required=True)
+    concessionaire_id = fields.Many2one(
+        'transit.concessionaire',
+        related='dispatch_id.concessionaire_id',
+        store=True,
+        string='Empresa Concesionaria',
+        index=True
+    )
     sequence = fields.Integer(string='Orden', default=10)
     name = fields.Char(string='Nombre Parada / Checkpoint', required=True)
     checkpoint_type = fields.Selection([

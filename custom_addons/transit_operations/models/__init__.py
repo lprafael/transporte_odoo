@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from . import sifen_util
+from . import transit_tenant_mixin
 from . import transit_concessionaire
 from . import transit_service
 from . import transit_holiday
@@ -23,3 +24,4 @@ from . import transit_bus_schedule
 from . import transit_dynamic_report_service
 from . import transit_dynamic_report
 from . import transit_service_roundtrip
+from . import hr_employee

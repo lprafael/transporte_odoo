@@ -4,7 +4,7 @@ from odoo import api, fields, models
 class TransitShiftPreference(models.Model):
     _name = 'transit.shift.preference'
     _description = 'Preferencia y Licitación de Turnos de Chofer (Preference Bidding)'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _inherit = ['transit.tenant.mixin', 'mail.thread', 'mail.activity.mixin']
     _order = 'seniority_years desc, id desc'
 
     name = fields.Char(string='Referencia de Solicitud', required=True, copy=False, default='Nuevo')

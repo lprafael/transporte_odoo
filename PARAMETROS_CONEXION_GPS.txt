@@ -1,0 +1,123 @@
+================================================================================
+ESPECIFICACIONES DE INTEGRACIÓN TELEMÁTICA GPS / AVL - POLIVERSO TRANSIT
+Empresa Concesionaria: Consorcio Arapotí / Empresa Ciudad de Asunción S.A.
+Código Empresa GVMT: 004B
+Estándar Regulatorio: Resolución GVMT N° 065/2024 (Viceministerio de Transporte)
+================================================================================
+
+Estimado Proveedor de Rastreo Satelital / Telemática:
+
+Para habilitar la transmisión de posiciones en tiempo real de los buses de la 
+flota, favor configurar sus equipos o plataforma con los siguientes parámetros:
+
+--------------------------------------------------------------------------------
+1. PARÁMETROS GENERALES DEL SERVIDOR
+--------------------------------------------------------------------------------
+- Host / Dirección IP:       187.77.247.23
+- Código de Empresa (Agency): 004B
+- Token de Autenticación:     GPS_DEVICE_SECRET_2026
+- Intervalo de Transmisión:   Cada 10 segundos (rango admitido: 5 a 15 segundos)
+
+--------------------------------------------------------------------------------
+2. OPCIÓN A: TRANSMISIÓN VÍA API REST (HTTP POST) - RECOMENDADA
+--------------------------------------------------------------------------------
+- Endpoint URL:
+    http://187.77.247.23:8088/api/v1/telemetry
+    (Alias admitido: http://187.77.247.23:8088/telemetry/gps)
+
+- Método HTTP:
+    POST
+
+- Encabezados (Headers) Obligatorios:
+    Content-Type: application/json
+    X-Device-Token: GPS_DEVICE_SECRET_2026
+
+- Formato del Payload (JSON UTF-8):
+{
+  "mean_id": "00016",
+  "license_plate": "AARX 104",
+  "agency_id": "004B",
+  "route_id": "020c",
+  "driver_id": "4589123",
+  "latitude": -25.33412,
+  "longitude": -57.52145,
+  "velocidad": 38.5,
+  "rumbo": 295.0,
+  "odometer_km": 48230.5,
+  "precision": 8,
+  "fecha_hora": "2026-10-15T15:30:00Z",
+  "type": 2
+}
+
+- Descripción de Campos del JSON:
+  * mean_id:       (Texto, Obligatorio) N° de Interno o Identificador del móvil (ej: "00016", "100", "IOT100").
+  * license_plate: (Texto, Opcional) Matrícula / Chapa Mercosur (ej: "AARX 104", "IOT100").
+  * agency_id:     (Texto, Obligatorio) Debe ser exactamente "004B".
+  * route_id:      (Texto, Obligatorio) Código de ramal oficial en servicio (ej: "020c", "020d", "020e", "020f").
+  * driver_id:     (Texto, Opcional) N° de Cédula o Legajo del chofer.
+  * latitude:      (Decimal WGS84, Obligatorio) Latitud geográfica (ej: -25.334120). No enviar 0.0.
+  * longitude:     (Decimal WGS84, Obligatorio) Longitud geográfica (ej: -57.521450). No enviar 0.0.
+  * velocidad:     (Decimal, Obligatorio) Velocidad instantánea en km/h (ej: 38.5).
+  * rumbo:         (Decimal, Obligatorio) Orientación en grados de 0 a 360 (ej: 295.0).
+  * odometer_km:   (Decimal, Opcional) Kilometraje acumulado del odómetro (ej: 48230.5).
+  * precision:     (Entero, Opcional) Margen de precisión satelital en metros (HDOP).
+  * fecha_hora:    (Texto ISO-8601 UTC, Obligatorio) Marca de tiempo satelital (ej: "2026-10-15T15:30:00Z").
+  * type:          (Entero, Obligatorio) Estado operativo del viaje:
+                     0 = INICIADO (Salida de cabecera)
+                     2 = OPERANDO (En recorrido / habitual)
+                     1 = FINALIZADO (Llegada a destino)
+
+- Ejemplo cURL de Prueba Rápida:
+curl -X POST "http://187.77.247.23:8088/api/v1/telemetry" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Token: GPS_DEVICE_SECRET_2026" \
+  -d '{
+    "mean_id": "00016",
+    "license_plate": "AARX 104",
+    "agency_id": "004B",
+    "route_id": "020c",
+    "latitude": -25.33412,
+    "longitude": -57.52145,
+    "velocidad": 38.5,
+    "rumbo": 295.0,
+    "odometer_km": 48230.5,
+    "fecha_hora": "2026-10-15T15:30:00Z",
+    "type": 2
+  }'
+
+- Respuesta Exitosa del Servidor (HTTP 200 OK):
+{
+  "status": "success",
+  "bus_id": "00016",
+  "current_state": "IN_TRANSIT",
+  "progress_percent": 32.4,
+  "deviation_meters": 4.2,
+  "geofence": "En Itinerario",
+  "timestamp": "2026-10-15T15:30:00Z"
+}
+
+--------------------------------------------------------------------------------
+3. OPCIÓN B: TRANSMISIÓN VÍA BROKER MQTT (Mosquitto)
+--------------------------------------------------------------------------------
+Para módems o equipos que reportan de manera nativa por MQTT:
+
+- Host Broker:     187.77.247.23
+- Puerto TCP:      1883 (TCP plano)
+- Puerto WS:       9001 (WebSockets)
+- Usuario:         gps_device
+- Contraseña:      GPS_DEVICE_SECRET_2026
+- Tópico (Topic):  transporte/flota/004B/operacion
+- QoS:             1
+- Formato Mensaje: Mismo JSON de la Opción A o Buffer Protobuf v3 homologado GVMT.
+
+--------------------------------------------------------------------------------
+4. RAMALES OFICIALES HOMOLOGADOS (route_id)
+--------------------------------------------------------------------------------
+- 020c: Ramal Eléctrico 1 (San Lorenzo a Asunción)
+- 020d: Ramal Eléctrico 1 (Asunción a San Lorenzo)
+- 020e: Ramal Eléctrico 2 (San Lorenzo a Asunción Variante)
+- 020f: Ramal Eléctrico 2 (Asunción a San Lorenzo Variante)
+- 0210: Ramal Eléctrico 3 (Luque a Asunción)
+- 0211: Ramal Eléctrico 3 (Asunción a Luque)
+- 0000: En Depósito / Fuera de Servicio / Taller
+================================================================================

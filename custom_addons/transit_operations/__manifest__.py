@@ -37,6 +37,7 @@ Sistema Integral de Transporte de Pasajeros y Flota de Buses:
         'fleet',
         'mail',
         'account',
+        'hr',
     ],
     'data': [
         'security/transit_security.xml',
@@ -48,6 +49,7 @@ Sistema Integral de Transporte de Pasajeros y Flota de Buses:
         'views/transit_holiday_views.xml',
         'views/fleet_vehicle_views.xml',
         'views/res_partner_views.xml',
+        'views/hr_employee_views.xml',
         'views/res_users_views.xml',
         'views/transit_route_views.xml',
         'views/transit_timetable_views.xml',
@@ -63,6 +65,7 @@ Sistema Integral de Transporte de Pasajeros y Flota de Buses:
         'wizards/transit_schedule_generator_views.xml',
         'wizards/transit_gtfs_wizard_views.xml',
         'wizards/transit_simulation_wizard_views.xml',
+        'wizards/transit_company_onboarding_wizard_views.xml',
         'views/transit_dynamic_report_views.xml',
         'views/transit_service_roundtrip_views.xml',
         'views/transit_menus.xml',

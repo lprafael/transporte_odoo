@@ -37,7 +37,7 @@ SERVICE_STANDARDS = {
 class TransitServiceRoundtrip(models.Model):
     _name = 'transit.service.roundtrip'
     _description = 'Registro Unificado de Servicios y Redondos de Tránsito'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _inherit = ['transit.tenant.mixin', 'mail.thread', 'mail.activity.mixin']
     _order = 'date desc, departure_ida asc, id asc'
 
     name = fields.Char(string='Identificador', compute='_compute_name', store=True)

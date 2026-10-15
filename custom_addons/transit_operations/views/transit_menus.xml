@@ -172,6 +172,13 @@
               action="action_transit_concessionaire"
               sequence="5"/>
 
+    <menuitem id="menu_transit_company_onboarding"
+              name="➕ Alta Rápida de Empresa (Nueva Concesión)"
+              parent="menu_transit_fleet_drivers"
+              action="action_transit_company_onboarding_wizard"
+              groups="group_transit_manager"
+              sequence="6"/>
+
     <menuitem id="menu_transit_vehicle"
               name="Buses y Unidades"
               parent="menu_transit_fleet_drivers"
@@ -186,6 +193,12 @@
         <field name="domain">[('is_driver', '=', True)]</field>
         <field name="context">{'default_is_driver': True}</field>
     </record>
+
+    <menuitem id="menu_transit_employees"
+              name="Empleados y Colaboradores"
+              parent="menu_transit_fleet_drivers"
+              action="action_transit_employees"
+              sequence="15"/>
 
     <menuitem id="menu_transit_driver"
               name="Conductores / Choferes"

@@ -67,6 +67,13 @@ class TransitCharger(models.Model):
 
     name = fields.Char(string='Identificador del Dispensador', required=True)
     station_id = fields.Many2one('transit.charging.station', string='Patio / Estación', required=True, ondelete='cascade')
+    concessionaire_id = fields.Many2one(
+        'transit.concessionaire',
+        related='station_id.concessionaire_id',
+        store=True,
+        string='Empresa Concesionaria',
+        index=True
+    )
     ocpp_id = fields.Char(string='ID Protocolo OCPP', required=True, index=True, help='Identificador OCPP 1.6J / 2.0.1')
     
     charger_type = fields.Selection([
@@ -142,6 +149,13 @@ class TransitChargingSession(models.Model):
     _order = 'start_time desc'
 
     station_id = fields.Many2one('transit.charging.station', string='Patio / Estación', required=True)
+    concessionaire_id = fields.Many2one(
+        'transit.concessionaire',
+        related='station_id.concessionaire_id',
+        store=True,
+        string='Empresa Concesionaria',
+        index=True
+    )
     charger_id = fields.Many2one('transit.charger', string='Cargador', required=True)
     vehicle_id = fields.Many2one('fleet.vehicle', string='Unidad / Bus Eléctrico', required=True, ondelete='cascade')
     

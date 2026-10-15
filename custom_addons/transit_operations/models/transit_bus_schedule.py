@@ -48,9 +48,10 @@ class TransitBusSchedule(models.Model):
     concessionaire_id = fields.Many2one(
         'transit.concessionaire',
         string='Empresa Operadora',
-        required=False,
+        required=True,
         index=True,
         tracking=True,
+        default=lambda self: self.env.user.concessionaire_id.id or (self.env.user.concessionaire_ids.ids and self.env.user.concessionaire_ids.ids[0]) or False,
         help='Empresa concesionaria que opera este turno.'
     )
     vehicle_id = fields.Many2one(
@@ -363,6 +364,13 @@ class TransitBusScheduleLine(models.Model):
         string='Hoja de Ruta Padre',
         required=True,
         ondelete='cascade',
+        index=True
+    )
+    concessionaire_id = fields.Many2one(
+        'transit.concessionaire',
+        related='schedule_id.concessionaire_id',
+        store=True,
+        string='Empresa Concesionaria',
         index=True
     )
     sequence = fields.Integer(string='Secuencia', default=10, index=True)

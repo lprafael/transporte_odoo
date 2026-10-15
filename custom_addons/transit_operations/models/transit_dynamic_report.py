@@ -28,7 +28,7 @@ logger = logging.getLogger("transit_dynamic_report")
 class TransitDynamicReport(models.Model):
     _name = 'transit.dynamic.report'
     _description = 'Planilla Principal de Tránsito (Excel Dinámico)'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
+    _inherit = ['transit.tenant.mixin', 'mail.thread', 'mail.activity.mixin']
     _order = 'year desc, month desc, service_id asc'
 
     name = fields.Char(string='Nombre de la Planilla', compute='_compute_name', store=True)

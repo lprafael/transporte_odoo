@@ -530,6 +530,7 @@ class TransitDispatch(models.Model):
             rec.concessionaire_id = (
                 rec.vehicle_id.concessionaire_id or
                 rec.route_id.concessionaire_id or
+                self.env.user.concessionaire_id or
                 False
             )
 

@@ -75,7 +75,8 @@ def _enrich_user_from_db(uid: int, base_user: Dict[str, Any]) -> Dict[str, Any]:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
             SELECT u.id, u.login, p.name, u.active,
-                   c.id as concessionaire_id, c.name as concessionaire_name, c.code as concessionaire_code
+                   c.id as concessionaire_id, c.name as concessionaire_name, 
+                   c.code as concessionaire_code, c.agency_id as concessionaire_agency_id
             FROM res_users u
             LEFT JOIN res_partner p ON u.partner_id = p.id
             LEFT JOIN transit_concessionaire c ON u.concessionaire_id = c.id
@@ -83,6 +84,24 @@ def _enrich_user_from_db(uid: int, base_user: Dict[str, Any]) -> Dict[str, Any]:
             LIMIT 1;
         """, (uid,))
         row = cur.fetchone()
+
+        # Si no tiene concesionaria directa en u.concessionaire_id, buscar en relación M2M
+        if row and not row.get("concessionaire_id"):
+            cur.execute("""
+                SELECT c.id as concessionaire_id, c.name as concessionaire_name,
+                       c.code as concessionaire_code, c.agency_id as concessionaire_agency_id
+                FROM transit_concessionaire_res_users_rel rel
+                JOIN transit_concessionaire c ON rel.concessionaire_id = c.id
+                WHERE rel.user_id = %s
+                LIMIT 1;
+            """, (uid,))
+            m2m_row = cur.fetchone()
+            if m2m_row:
+                row["concessionaire_id"] = m2m_row["concessionaire_id"]
+                row["concessionaire_name"] = m2m_row["concessionaire_name"]
+                row["concessionaire_code"] = m2m_row["concessionaire_code"]
+                row["concessionaire_agency_id"] = m2m_row["concessionaire_agency_id"]
+
         cur.close()
         conn.close()
 
@@ -92,12 +111,17 @@ def _enrich_user_from_db(uid: int, base_user: Dict[str, Any]) -> Dict[str, Any]:
             conc_id = row.get("concessionaire_id")
             conc_name = row.get("concessionaire_name")
             user_info["concessionaire_id"] = conc_id
-            user_info["concessionaire_name"] = conc_name or ("Todas las Empresas (Regulador / GVMT)" if user_info.get("is_admin") else "Consorcio Arapotí")
-            user_info["agency_id"] = row.get("concessionaire_code") or ("004B" if not user_info.get("is_admin") else None)
+            if user_info.get("is_admin") and not conc_id:
+                user_info["concessionaire_name"] = "Todas las Empresas (Regulador / GVMT)"
+                user_info["agency_id"] = None
+            else:
+                user_info["concessionaire_name"] = conc_name or "Sin Empresa Asignada"
+                user_info["agency_id"] = row.get("concessionaire_agency_id") or row.get("concessionaire_code")
     except Exception as e:
         logger.debug(f"Error enriqueciendo usuario desde DB: {e}")
         if user_info.get("is_admin"):
             user_info["concessionaire_name"] = "Todas las Empresas (Regulador / GVMT)"
+            user_info["agency_id"] = None
         else:
             user_info["concessionaire_name"] = "Consorcio Arapotí"
             user_info["agency_id"] = "004B"

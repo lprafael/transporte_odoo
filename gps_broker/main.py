@@ -116,26 +116,66 @@ active_vehicles_memory: Dict[str, Dict[str, Any]] = {}
 event_history_memory: List[Dict[str, Any]] = []
 routes_cache: List[Dict[str, Any]] = []
 
-def get_vehicle_state(bus_id: str) -> Optional[Dict[str, Any]]:
+_last_agencies_cache_time = 0.0
+_cached_valid_agencies: Set[str] = {"004B"}
+
+def get_valid_agencies() -> Set[str]:
+    """Recupera la lista de agencias/concesionarias registradas activas en PostgreSQL con cache de 60s."""
+    global _last_agencies_cache_time, _cached_valid_agencies
+    now = time.time()
+    if now - _last_agencies_cache_time < 60.0 and _cached_valid_agencies:
+        return _cached_valid_agencies
+
+    try:
+        conn = psycopg2.connect(
+            host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=3
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT COALESCE(agency_id, code) FROM transit_concessionaire WHERE active = TRUE;")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        agencies = {r[0].strip() for r in rows if r and r[0]}
+        if not agencies:
+            agencies = {"004B"}
+        _cached_valid_agencies = agencies
+        _last_agencies_cache_time = now
+    except Exception as e:
+        logger.debug(f"Error consultando agencias en BD: {e}")
+        if not _cached_valid_agencies:
+            _cached_valid_agencies = {"004B"}
+    return _cached_valid_agencies
+
+def get_vehicle_state(bus_id: str, agency_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    # Clave multitenant con soporte de fallback
+    key = f"vehicle:{agency_id}:{bus_id}" if agency_id else f"vehicle:{bus_id}"
     if redis_client:
         try:
-            data = redis_client.get(f"vehicle:{bus_id}")
+            data = redis_client.get(key)
+            if not data and agency_id:
+                # Fallback clave simple
+                data = redis_client.get(f"vehicle:{bus_id}")
             if data:
                 res = json.loads(data)
                 res["crossed_checkpoints"] = set(res.get("crossed_checkpoints", []))
                 return res
         except Exception as e:
             logger.debug(f"Redis get error: {e}")
-    return active_vehicles_memory.get(bus_id)
+    return active_vehicles_memory.get(key) or active_vehicles_memory.get(bus_id)
 
-def save_vehicle_state(bus_id: str, state: Dict[str, Any]):
+def save_vehicle_state(bus_id: str, state: Dict[str, Any], agency_id: Optional[str] = None):
+    agency = agency_id or state.get("agency_id") or "004B"
+    key = f"vehicle:{agency}:{bus_id}"
+    active_vehicles_memory[key] = state
     active_vehicles_memory[bus_id] = state
     if redis_client:
         try:
             serializable = dict(state)
             serializable["crossed_checkpoints"] = list(state.get("crossed_checkpoints", []))
+            redis_client.set(key, json.dumps(serializable))
             redis_client.set(f"vehicle:{bus_id}", json.dumps(serializable))
             redis_client.sadd("active_buses_set", bus_id)
+            redis_client.sadd(f"active_buses_{agency}", bus_id)
         except Exception as e:
             logger.debug(f"Redis set error: {e}")
 
@@ -217,14 +257,17 @@ def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
         "crossed_checkpoints": checkpoints
     }
 
-def get_all_active_vehicles() -> List[Dict[str, Any]]:
+def get_all_active_vehicles(agency_filter: Optional[str] = None) -> List[Dict[str, Any]]:
     vehicles = []
+    valid_agencies = get_valid_agencies()
+    target_agencies = {agency_filter.strip()} if agency_filter else valid_agencies
+
     if redis_client:
         try:
             bus_ids = redis_client.smembers("active_buses_set")
             for b_id in bus_ids:
                 v = get_vehicle_state(b_id)
-                if v and (v.get("agency_id") in (VMT_AGENCY_ID, "004B")):
+                if v and (v.get("agency_id") in target_agencies or not agency_filter):
                     vehicles.append(format_vehicle_for_client(v))
             if vehicles:
                 return vehicles
@@ -232,7 +275,7 @@ def get_all_active_vehicles() -> List[Dict[str, Any]]:
             logger.debug(f"Redis smembers error: {e}")
     out = []
     for v in active_vehicles_memory.values():
-        if v and (v.get("agency_id") in (VMT_AGENCY_ID, "004B")):
+        if v and (v.get("agency_id") in target_agencies or not agency_filter):
             out.append(format_vehicle_for_client(v))
     return out
 
@@ -833,10 +876,11 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     heading = ping.effective_heading
     plate = ping.effective_license_plate
 
-    # Filtrar estrictamente por empresa Consorcio Arapotí (004B)
+    # Filtrar por empresas registradas en la plataforma
     agency = (ping.agency_id or VMT_AGENCY_ID).strip()
-    if agency not in (VMT_AGENCY_ID, "004B"):
-        return {"status": "ignored", "reason": "agency_mismatch", "bus_id": bus_key}
+    valid_agencies = get_valid_agencies()
+    if agency not in valid_agencies and agency not in (VMT_AGENCY_ID, "004B"):
+        return {"status": "ignored", "reason": "agency_mismatch", "bus_id": bus_key, "agency_id": agency}
 
     # Validación de desfase de reloj del GPS (desfase severo >24 horas => alinear a tiempo real actual)
     now_dt = datetime.now(timezone.utc)
@@ -1360,11 +1404,13 @@ async def websocket_live_radar(websocket: WebSocket):
         ws_manager.disconnect(websocket)
 
 @app.get("/api/v1/live")
-async def get_live_fleet():
-    vehicles = get_all_active_vehicles()
+async def get_live_fleet(request: Request):
+    user = get_current_user_from_request(request)
+    agency_filter = user.get("agency_id") if (user and not user.get("is_admin")) else request.query_params.get("agency_id")
+    vehicles = get_all_active_vehicles(agency_filter=agency_filter)
     if not vehicles:
         hydrate_active_fleet_from_postgis(force=True)
-        vehicles = get_all_active_vehicles()
+        vehicles = get_all_active_vehicles(agency_filter=agency_filter)
     return {
         "status": "success",
         "count": len(vehicles),
@@ -1506,11 +1552,12 @@ async def api_headway_data(request: Request):
     if not user and not is_device_or_internal_token(request):
         raise HTTPException(status_code=401, detail="Sesión no iniciada. Inicie sesión en Odoo ERP.")
 
-    hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory)
+    agency_id = user.get("agency_id") if (user and not user.get("is_admin")) else request.query_params.get("agency_id")
+    hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory, agency_id=agency_id)
     if hw_data.get("total_active_buses", 0) == 0:
         logger.info("Headway solicitó datos pero encontró 0 buses. Ejecutando auto-hidratación desde PostgreSQL...")
         hydrate_active_fleet_from_postgis(force=True)
-        hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory)
+        hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory, agency_id=agency_id)
     return hw_data
 
 @app.get("/headway", response_class=HTMLResponse)

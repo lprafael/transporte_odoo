@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Extensión de Vista Formulario de Empleados para Transporte -->
+    <record id="view_hr_employee_transit_form" model="ir.ui.view">
+        <field name="name">hr.employee.transit.form</field>
+        <field name="model">hr.employee</field>
+        <field name="inherit_id" ref="hr.view_employee_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='work_email']" position="after">
+                <field name="concessionaire_id" options="{'no_create': True}"/>
+                <field name="transit_role" widget="badge"/>
+            </xpath>
+            <xpath expr="//notebook" position="inside">
+                <page string="Transporte y Licencia de Chofer" name="transit_driver_info"
+                      invisible="transit_role != 'driver'">
+                    <group>
+                        <group string="Identificación de Chofer">
+                            <field name="driver_code"/>
+                        </group>
+                        <group string="Habilitación / Licencia">
+                            <field name="driver_license_number"/>
+                            <field name="driver_license_category"/>
+                            <field name="driver_license_expiry"/>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Extensión de Vista Lista de Empleados -->
+    <record id="view_hr_employee_transit_tree" model="ir.ui.view">
+        <field name="name">hr.employee.transit.tree</field>
+        <field name="model">hr.employee</field>
+        <field name="inherit_id" ref="hr.view_employee_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='work_email']" position="after">
+                <field name="concessionaire_id" optional="show"/>
+                <field name="transit_role" widget="badge" optional="show"/>
+                <field name="driver_license_expiry" optional="hide"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana para Empleados de Transporte -->
+    <record id="action_transit_employees" model="ir.actions.act_window">
+        <field name="name">Colaboradores y Choferes</field>
+        <field name="res_model">hr.employee</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'default_transit_role': 'driver'}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Registre chóferes, mecánicos y colaboradores de la empresa de transporte.
+            </p>
+        </field>
+    </record>
+</odoo>

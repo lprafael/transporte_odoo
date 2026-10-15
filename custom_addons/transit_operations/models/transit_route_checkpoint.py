@@ -7,6 +7,13 @@ class TransitRouteCheckpoint(models.Model):
     _order = 'route_id, sequence asc, id asc'
 
     route_id = fields.Many2one('transit.route', string='Ruta / Ramal', required=True, ondelete='cascade')
+    concessionaire_id = fields.Many2one(
+        'transit.concessionaire',
+        related='route_id.concessionaire_id',
+        store=True,
+        string='Empresa Concesionaria',
+        index=True
+    )
     sequence = fields.Integer(string='Orden / Secuencia', default=10)
     name = fields.Char(string='Nombre de Parada / Geocerca', required=True)
     checkpoint_type = fields.Selection([

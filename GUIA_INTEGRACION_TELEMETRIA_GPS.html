@@ -665,7 +665,7 @@
         </div>
       </div>
       <div class="ip-input-group">
-        <input type="text" id="input-host" class="ip-input" value="192.168.1.100" placeholder="Ej: 192.168.1.100" oninput="updateHost(this.value)">
+        <input type="text" id="input-host" class="ip-input" value="187.77.247.23" placeholder="Ej: 187.77.247.23" oninput="updateHost(this.value)">
       </div>
     </div>
 
@@ -733,7 +733,7 @@
           <tbody>
             <tr>
               <td><strong>URL Endpoint Principal</strong></td>
-              <td><code class="dynamic-url-rest">http://192.168.1.100:8088/api/v1/telemetry</code></td>
+              <td><code class="dynamic-url-rest">http://187.77.247.23:8088/api/v1/telemetry</code></td>
               <td>Alias admitido: <code>/telemetry/gps</code></td>
             </tr>
             <tr>
@@ -790,7 +790,7 @@
           <span>bash / curl</span>
           <button class="btn-copy" onclick="copyCode('code-curl')">📋 Copiar cURL</button>
         </div>
-        <pre id="code-curl">curl -X POST "<span class="dynamic-url-rest">http://192.168.1.100:8088/api/v1/telemetry</span>" \
+        <pre id="code-curl">curl -X POST "<span class="dynamic-url-rest">http://187.77.247.23:8088/api/v1/telemetry</span>" \
   -H "Content-Type: application/json" \
   -H "X-Device-Token: GPS_DEVICE_SECRET_2026" \
   -d '{
@@ -849,7 +849,7 @@
           <tbody>
             <tr>
               <td><strong>Host / Broker</strong></td>
-              <td><code class="dynamic-host">192.168.1.100</code></td>
+              <td><code class="dynamic-host">187.77.247.23</code></td>
               <td>IP o dominio del servidor de telemetría</td>
             </tr>
             <tr>
@@ -910,7 +910,7 @@ import time
 import json
 import paho.mqtt.client as mqtt
 
-BROKER_HOST = "<span class="dynamic-host">192.168.1.100</span>"
+BROKER_HOST = "<span class="dynamic-host">187.77.247.23</span>"
 BROKER_PORT = 1883
 USERNAME = "gps_device"
 PASSWORD = "GPS_DEVICE_SECRET_2026"
@@ -1132,7 +1132,7 @@ message Operation {
             <div class="step-title">Radar Satelital GPS en Vivo (WebSockets 0ms)</div>
             <p>
               Muestra el mapa cartográfico con los buses moviéndose en vivo. Al hacer clic sobre cualquier bus, se muestra su velocidad, odómetro, kilometraje recorrido sobre el trazado oficial y el nombre de la calle actual.<br>
-              <strong>Acceso directo:</strong> <a class="dynamic-link-map" href="http://192.168.1.100:8088/map" target="_blank"><code>http://192.168.1.100:8088/map</code></a>
+              <strong>Acceso directo:</strong> <a class="dynamic-link-map" href="http://187.77.247.23:8088/map" target="_blank"><code>http://187.77.247.23:8088/map</code></a>
             </p>
           </div>
         </li>
@@ -1143,7 +1143,7 @@ message Operation {
             <div class="step-title">Tablero Lineal de Frecuencias e Intervalos (Headway)</div>
             <p>
               Representa cada ramal como una línea recta de 0 km al final del recorrido. Detecta la distancia en kilómetros y minutos entre cada bus consecutivo y activa alerta de pegonamiento (bunching) si dos buses están a menos de 800m.<br>
-              <strong>Acceso directo:</strong> <a class="dynamic-link-headway" href="http://192.168.1.100:8088/headway" target="_blank"><code>http://192.168.1.100:8088/headway</code></a>
+              <strong>Acceso directo:</strong> <a class="dynamic-link-headway" href="http://187.77.247.23:8088/headway" target="_blank"><code>http://187.77.247.23:8088/headway</code></a>
             </p>
           </div>
         </li>
@@ -1154,7 +1154,7 @@ message Operation {
             <div class="step-title">Tablero de Cumplimiento Regulatorio e ICF (Decreto 710/2023)</div>
             <p>
               Auditoría en tiempo real del cumplimiento de cuotas de salidas diarias por servicio (E1, E2, E3), discriminado por franja horaria pico/pos-pico.<br>
-              <strong>Acceso directo:</strong> <a class="dynamic-link-compliance" href="http://192.168.1.100:8088/compliance" target="_blank"><code>http://192.168.1.100:8088/compliance</code></a>
+              <strong>Acceso directo:</strong> <a class="dynamic-link-compliance" href="http://187.77.247.23:8088/compliance" target="_blank"><code>http://187.77.247.23:8088/compliance</code></a>
             </p>
           </div>
         </li>
@@ -1165,7 +1165,7 @@ message Operation {
             <div class="step-title">Consola Interactiva Swagger / OpenAPI</div>
             <p>
               Permite a los ingenieros del proveedor enviar paquetes de prueba con 1 solo clic desde el navegador usando el botón <em>"Try it out"</em>.<br>
-              <strong>Acceso directo:</strong> <a class="dynamic-link-docs" href="http://192.168.1.100:8088/docs" target="_blank"><code>http://192.168.1.100:8088/docs</code></a>
+              <strong>Acceso directo:</strong> <a class="dynamic-link-docs" href="http://187.77.247.23:8088/docs" target="_blank"><code>http://187.77.247.23:8088/docs</code></a>
             </p>
           </div>
         </li>
@@ -1176,7 +1176,7 @@ message Operation {
             <div class="step-title">Sistema ERP Odoo 18 (Despachos y Semáforos)</div>
             <p>
               En el menú <strong>Operaciones de Transporte &rarr; Operaciones Diarias &rarr; Despachos Diarios</strong>, la salida programada del bus cambia automáticamente a estado <strong>"En Tránsito"</strong> con semáforo 🟢 Verde (a tiempo), 🟡 Amarillo (retraso) o 🔵 Azul (reserva técnica).<br>
-              <strong>Acceso ERP:</strong> <a class="dynamic-link-odoo" href="http://192.168.1.100:8069" target="_blank"><code>http://192.168.1.100:8069</code></a>
+              <strong>Acceso ERP:</strong> <a class="dynamic-link-odoo" href="http://187.77.247.23:8069" target="_blank"><code>http://187.77.247.23:8069</code></a>
             </p>
           </div>
         </li>
@@ -1207,7 +1207,7 @@ message Operation {
           </tr>
           <tr>
             <td><strong>Paso 3</strong></td>
-            <td>Abrir el Radar en <code class="dynamic-url-map">http://192.168.1.100:8088/map</code>.</td>
+            <td>Abrir el Radar en <code class="dynamic-url-map">http://187.77.247.23:8088/map</code>.</td>
             <td>El colectivo aparece posicionado en el mapa con su velocidad y rumbo.</td>
           </tr>
           <tr>
@@ -1247,7 +1247,7 @@ message Operation {
 
     // Actualizador Dinámico de IP / Host
     function updateHost(host) {
-      const cleanHost = host.trim() || '192.168.1.100';
+      const cleanHost = host.trim() || '187.77.247.23';
 
       // Textos y Códigos
       document.querySelectorAll('.dynamic-host').forEach(el => el.textContent = cleanHost);

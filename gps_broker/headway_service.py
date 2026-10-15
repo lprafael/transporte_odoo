@@ -21,8 +21,8 @@ PG_DB = os.getenv("PG_DB", "flota_db")
 PG_USER = os.getenv("PG_USER", "odoo")
 PG_PASS = os.getenv("PG_PASS", "odoo_password")
 
-def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str, Any]:
-    """Recopila rutas activas y calcula distancias relativas e intervalos entre buses."""
+def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: Optional[str] = None) -> Dict[str, Any]:
+    """Recopila rutas activas y calcula distancias relativas e intervalos entre buses con soporte multi-tenant."""
     routes_dict = {}
     
     # 1. Obtener catálogo oficial de ramales desde PostgreSQL
@@ -31,22 +31,40 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
             host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2
         )
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("""
-            SELECT r.code, r.name, r.direction, r.origin, r.destination,
-                   COALESCE(s.total_km, r.distance_km, 18.0) as distance_km
-            FROM transit_route r
-            LEFT JOIN LATERAL (
-                SELECT total_km
-                FROM transit_route_shape
-                WHERE route_id = r.id
-                  AND valid_from <= CURRENT_DATE
-                  AND (valid_until IS NULL OR valid_until > CURRENT_DATE)
-                ORDER BY version DESC
-                LIMIT 1
-            ) s ON TRUE
-            WHERE r.code IN ('020c', '020d', '020e', '020f', '0210', '0211')
-            ORDER BY r.code;
-        """)
+        if agency_id:
+            cur.execute("""
+                SELECT r.code, r.name, r.direction, r.origin, r.destination,
+                       COALESCE(s.total_km, r.distance_km, 18.0) as distance_km
+                FROM transit_route r
+                JOIN transit_concessionaire c ON r.concessionaire_id = c.id
+                LEFT JOIN LATERAL (
+                    SELECT total_km
+                    FROM transit_route_shape
+                    WHERE route_id = r.id
+                      AND valid_from <= CURRENT_DATE
+                      AND (valid_until IS NULL OR valid_until > CURRENT_DATE)
+                    ORDER BY version DESC
+                    LIMIT 1
+                ) s ON TRUE
+                WHERE (c.agency_id = %s OR c.code = %s)
+                ORDER BY r.code;
+            """, (agency_id, agency_id))
+        else:
+            cur.execute("""
+                SELECT r.code, r.name, r.direction, r.origin, r.destination,
+                       COALESCE(s.total_km, r.distance_km, 18.0) as distance_km
+                FROM transit_route r
+                LEFT JOIN LATERAL (
+                    SELECT total_km
+                    FROM transit_route_shape
+                    WHERE route_id = r.id
+                      AND valid_from <= CURRENT_DATE
+                      AND (valid_until IS NULL OR valid_until > CURRENT_DATE)
+                    ORDER BY version DESC
+                    LIMIT 1
+                ) s ON TRUE
+                ORDER BY r.code;
+            """)
         for r in cur.fetchall():
             routes_dict[r['code']] = {
                 "route_id": r['code'],
@@ -89,7 +107,7 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
                 "status": "NO_BUSES"
             }
 
-    # 2. Obtener vehículos activos de Redis o Memoria
+    # 2. Obtener vehículos activos de Redis o Memoria filtrados por agency_id
     active_buses = []
     if redis_client:
         try:
@@ -98,13 +116,14 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
                 val = redis_client.get(k)
                 if val:
                     data = json.loads(val)
-                    if (data.get("agency_id") or "004B") == "004B":
+                    bus_agency = data.get("agency_id")
+                    if not agency_id or bus_agency == agency_id:
                         active_buses.append(data)
         except Exception as e:
             logger.debug(f"Error Redis headway: {e}")
 
     if not active_buses and active_vehicles_memory:
-        active_buses = [b for b in active_vehicles_memory.values() if (b.get("agency_id") or "004B") == "004B"]
+        active_buses = [b for b in active_vehicles_memory.values() if (not agency_id or b.get("agency_id") == agency_id)]
 
     if not active_buses:
         try:
@@ -112,22 +131,37 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None) -> Dict[str
                 host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2
             )
             cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("""
-                SELECT DISTINCT ON (bus_internal_code)
-                    bus_internal_code as bus_id,
-                    license_plate,
-                    route_id,
-                    agency_id,
-                    latitude,
-                    longitude,
-                    speed_kmh as last_speed_kmh,
-                    odometer_km,
-                    recorded_at as last_ping_time
-                FROM telemetry_ping
-                WHERE agency_id = '004B'
-                  AND route_id IN ('020c', '020d', '020e', '020f', '0210', '0211')
-                ORDER BY bus_internal_code, recorded_at DESC;
-            """)
+            if agency_id:
+                cur.execute("""
+                    SELECT DISTINCT ON (bus_internal_code)
+                        bus_internal_code as bus_id,
+                        license_plate,
+                        route_id,
+                        agency_id,
+                        latitude,
+                        longitude,
+                        speed_kmh as last_speed_kmh,
+                        odometer_km,
+                        recorded_at as last_ping_time
+                    FROM telemetry_ping
+                    WHERE agency_id = %s
+                    ORDER BY bus_internal_code, recorded_at DESC;
+                """, (agency_id,))
+            else:
+                cur.execute("""
+                    SELECT DISTINCT ON (bus_internal_code)
+                        bus_internal_code as bus_id,
+                        license_plate,
+                        route_id,
+                        agency_id,
+                        latitude,
+                        longitude,
+                        speed_kmh as last_speed_kmh,
+                        odometer_km,
+                        recorded_at as last_ping_time
+                    FROM telemetry_ping
+                    ORDER BY bus_internal_code, recorded_at DESC;
+                """)
             for row in cur.fetchall():
                 active_buses.append(dict(row))
             cur.close()

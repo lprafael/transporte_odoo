@@ -7,6 +7,13 @@ class TransitRouteShape(models.Model):
     _order = 'route_id asc, valid_from desc, version desc'
 
     route_id = fields.Many2one('transit.route', string='Ruta / Ramal', required=True, ondelete='cascade')
+    concessionaire_id = fields.Many2one(
+        'transit.concessionaire',
+        related='route_id.concessionaire_id',
+        store=True,
+        string='Empresa Concesionaria',
+        index=True
+    )
     version = fields.Integer(string='Versión', default=1, required=True)
     valid_from = fields.Date(string='Válido Desde', required=True)
     valid_until = fields.Date(string='Válido Hasta', help='Vacío indica que es el trazado vigente actualmente')
