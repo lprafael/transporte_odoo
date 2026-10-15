@@ -46,16 +46,28 @@ class HrEmployee(models.Model):
     def create(self, vals_list):
         employees = super(HrEmployee, self).create(vals_list)
         for emp in employees:
-            if emp.transit_role == 'driver' and emp.work_contact_id:
-                # Sincronizar automáticamente con el partner para que aparezca en despachos
-                emp.work_contact_id.sudo().write({
-                    'is_driver': True,
-                    'concessionaire_id': emp.concessionaire_id.id,
-                    'driver_code': emp.driver_code,
-                    'driver_license_number': emp.driver_license_number,
-                    'driver_license_category': emp.driver_license_category,
-                    'driver_license_expiry': emp.driver_license_expiry,
-                })
+            if emp.transit_role == 'driver':
+                partner = emp.work_contact_id
+                if not partner:
+                    partner = self.env['res.partner'].sudo().create({
+                        'name': emp.name,
+                        'is_driver': True,
+                        'concessionaire_id': emp.concessionaire_id.id,
+                        'driver_code': emp.driver_code,
+                        'driver_license_number': emp.driver_license_number,
+                        'driver_license_category': emp.driver_license_category,
+                        'driver_license_expiry': emp.driver_license_expiry,
+                    })
+                    emp.sudo().write({'work_contact_id': partner.id})
+                else:
+                    partner.sudo().write({
+                        'is_driver': True,
+                        'concessionaire_id': emp.concessionaire_id.id,
+                        'driver_code': emp.driver_code,
+                        'driver_license_number': emp.driver_license_number,
+                        'driver_license_category': emp.driver_license_category,
+                        'driver_license_expiry': emp.driver_license_expiry,
+                    })
         return employees
 
     def write(self, vals):
