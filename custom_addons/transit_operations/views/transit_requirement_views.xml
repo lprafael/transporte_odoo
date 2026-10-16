@@ -135,12 +135,10 @@
                 <field name="date_submitted" string="Fecha Envío"/>
                 <field name="date_resolved" string="Fecha Resuelto" optional="hide"/>
                 <field name="stage" widget="badge"
-                       decoration-secondary="stage == 'draft'"
-                       decoration-primary="stage == 'submitted'"
+                       decoration-muted="stage == 'draft' or stage == 'cancelled'"
+                       decoration-info="stage == 'submitted' or stage == 'in_progress'"
                        decoration-warning="stage == 'evaluating'"
-                       decoration-info="stage == 'in_progress'"
-                       decoration-success="stage == 'done'"
-                       decoration-dark="stage == 'cancelled'"/>
+                       decoration-success="stage == 'done'"/>
             </list>
         </field>
     </record>
