@@ -1881,7 +1881,7 @@ async def live_map_view(request: Request):
         .val-badge { font-weight: 800; padding: 1px 6px; border-radius: 4px; font-size: 11px; min-width: 42px; text-align: center; }
         
         #app-layout { display: flex; flex: 1; position: relative; overflow: hidden; }
-        #map { flex: 1; height: 100%; z-index: 1; }
+        #map { flex: 1; height: 100%; z-index: 1; background: #ffffff; }
         #sidebar { width: 380px; background: #111827; border-left: 1px solid #1f2937; display: flex; flex-direction: column; z-index: 10; }
         .sidebar-header { padding: 10px 16px; border-bottom: 1px solid #1f2937; font-weight: 700; font-size: 11px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items: center; }
         
@@ -2098,11 +2098,37 @@ async def live_map_view(request: Request):
     <script>
         const map = L.map('map').setView([-25.3250, -57.5300], 12);
         const cartoKey = 'cb1_3skd_1_b01311b843bcb7fb316c4384';
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=' + cartoKey, {
+        
+        // Capa predeterminada: Fondo Blanco / Claro (CartoDB Positron)
+        const lightTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=' + cartoKey, {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>',
             subdomains: 'abcd',
             maxZoom: 19
         }).addTo(map);
+
+        const osmTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>',
+            maxZoom: 19
+        });
+
+        const darkTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=' + cartoKey, {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 19
+        });
+
+        const esriSatLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '&copy; <a href="https://www.esri.com/" target="_blank">Esri</a>',
+            maxZoom: 19
+        });
+
+        const baseMaps = {
+            "🗺️ Mapa Claro (Blanco)": lightTileLayer,
+            "🌐 OpenStreetMap": osmTileLayer,
+            "🛰️ Satelital Esri": esriSatLayer,
+            "🌙 Modo Oscuro": darkTileLayer
+        };
+        L.control.layers(baseMaps, null, { position: 'topright' }).addTo(map);
 
         const markers = {};
         const busCircles = {};
@@ -2273,7 +2299,7 @@ async def live_map_view(request: Request):
         /* -------------------------------------------------------------
            Punto 3: Interpolación Cinemática Suave a 60 FPS (animateMarker)
         ------------------------------------------------------------- */
-        function animateMarker(busId, marker, startLatLng, endLatLng, durationMs = 1800) {
+        function animateMarker(busId, marker, startLatLng, endLatLng, durationMs = 15000) {
             if (markerAnimations[busId]) {
                 cancelAnimationFrame(markerAnimations[busId]);
                 delete markerAnimations[busId];
@@ -2293,12 +2319,11 @@ async def live_map_view(request: Request):
             }
 
             const startTime = performance.now();
-            const easeOutQuad = t => t * (2 - t);
 
             function step(currentTime) {
                 const elapsed = currentTime - startTime;
                 const progress = Math.min(elapsed / durationMs, 1.0);
-                const ease = easeOutQuad(progress);
+                const ease = progress; // Desplazamiento lineal uniforme a lo largo de los 15 segundos
 
                 const curLat = startLat + dLat * ease;
                 const curLng = startLng + dLng * ease;
@@ -2453,7 +2478,7 @@ async def live_map_view(request: Request):
 
                 if (animate) {
                     const oldLatLng = marker.getLatLng();
-                    animateMarker(busId, marker, oldLatLng, newLatLng, 1800);
+                    animateMarker(busId, marker, oldLatLng, newLatLng, 15000);
                 } else {
                     marker.setLatLng(newLatLng);
                     if (busCircles[busId]) busCircles[busId].setLatLng(newLatLng);
@@ -2780,7 +2805,7 @@ async def live_map_view(request: Request):
                     if (busVisibility[v.bus_id] === undefined) busVisibility[v.bus_id] = true;
                 });
                 eventHistory = data.events || [];
-                updateUI(false);
+                updateUI(true);
             } catch (err) {
                 console.debug("HTTP fallback error:", err);
             }
@@ -2788,7 +2813,7 @@ async def live_map_view(request: Request):
 
         function startPollingFallback() {
             if (!pollingInterval) {
-                pollingInterval = setInterval(fetchHttpLive, 3000);
+                pollingInterval = setInterval(fetchHttpLive, 15000);
                 fetchHttpLive();
             }
         }

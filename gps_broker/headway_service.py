@@ -169,6 +169,20 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
         except Exception as e:
             logger.debug(f"Error fallback DB headway: {e}")
 
+    # 🛑 Deduplicar buses para evitar evaluar clones o claves duplicadas de Redis
+    dedup_buses = {}
+    for b in active_buses:
+        b_id = str(b.get("bus_id") or "")
+        if b_id:
+            if b_id not in dedup_buses:
+                dedup_buses[b_id] = b
+            else:
+                existing_ping = str(dedup_buses[b_id].get("last_ping_time") or "")
+                new_ping = str(b.get("last_ping_time") or "")
+                if new_ping > existing_ping:
+                    dedup_buses[b_id] = b
+    active_buses = list(dedup_buses.values())
+
     total_active_buses = 0
     total_bunching_alerts = 0
 
@@ -280,6 +294,10 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
         for i in range(n - 1):
             b_leader = buses[i + 1]  # Bus más adelantado
             b_trailer = buses[i]     # Bus que viene detrás
+            
+            # 🛑 NUNCA comparar un bus consigo mismo
+            if str(b_leader.get("bus_id")) == str(b_trailer.get("bus_id")):
+                continue
             
             gap_km = round(b_leader["distance_traveled_km"] - b_trailer["distance_traveled_km"], 2)
             
@@ -893,7 +911,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             align-items: center;
             cursor: pointer;
             z-index: 25;
-            transition: left 0.6s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s ease;
+            transition: left 15s linear, transform 0.2s ease;
         }
 
         .bus-marker:hover {
@@ -981,6 +999,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             align-items: center;
             justify-content: center;
             z-index: 10;
+            transition: left 15s linear, width 15s linear;
         }
 
         .headway-segment.critical {
@@ -1920,9 +1939,9 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             if (e.key === 'Escape') closeBusModal();
         });
 
-        // Refresco automático cada 3 segundos
+        // Refresco automático cada 15 segundos
         fetchHeadwayData();
-        setInterval(fetchHeadwayData, 3000);
+        setInterval(fetchHeadwayData, 15000);
     </script>
 </body>
 </html>
