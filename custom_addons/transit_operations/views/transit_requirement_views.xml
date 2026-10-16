@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ================================================================== -->
+    <!-- VISTA BÚSQUEDA Y FILTROS                                           -->
+    <!-- ================================================================== -->
+    <record id="view_transit_requirement_search" model="ir.ui.view">
+        <field name="name">transit.requirement.search</field>
+        <field name="model">transit.requirement</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Solicitudes y Requerimientos">
+                <field name="name" string="Título o Asunto"/>
+                <field name="code" string="Código (REQ-...)"/>
+                <field name="concessionaire_id" string="Empresa Concesionaria"/>
+                <field name="user_id" string="Usuario Solicitante"/>
+                <field name="assigned_id" string="Técnico Asignado"/>
+
+                <separator/>
+                <!-- Filtros Rápidos -->
+                <filter string="📌 Mis Solicitudes" name="filter_my_requests" domain="[('user_id', '=', uid)]"/>
+                <filter string="⏳ Pendientes de Atención" name="filter_pending" domain="[('stage', 'in', ['submitted', 'evaluating', 'in_progress'])]"/>
+                <filter string="⚙️ En Desarrollo" name="filter_in_progress" domain="[('stage', '=', 'in_progress')]"/>
+                <filter string="🚀 Resueltos / Desplegados" name="filter_resolved" domain="[('stage', '=', 'done')]"/>
+                <filter string="🔥 Urgentes / Críticos" name="filter_urgent" domain="[('priority', '=', '3')]"/>
+
+                <separator/>
+                <!-- Filtros por Categoría -->
+                <filter string="🛠️ Ajustes Operativos" name="filter_cat_adjustment" domain="[('category', '=', 'adjustment')]"/>
+                <filter string="✨ Nuevas Funcionalidades" name="filter_cat_feature" domain="[('category', '=', 'feature')]"/>
+                <filter string="🚨 Reportes de Falla" name="filter_cat_bug" domain="[('category', '=', 'bug')]"/>
+                <filter string="📡 Telemetría GPS" name="filter_cat_telemetry" domain="[('category', '=', 'telemetry')]"/>
+
+                <!-- Agrupadores -->
+                <group expand="1" string="Agrupar Por">
+                    <filter string="Estado / Etapa" name="group_by_stage" context="{'group_by': 'stage'}"/>
+                    <filter string="Empresa Concesionaria" name="group_by_concessionaire" context="{'group_by': 'concessionaire_id'}"/>
+                    <filter string="Tipo de Solicitud" name="group_by_category" context="{'group_by': 'category'}"/>
+                    <filter string="Módulo Afectado" name="group_by_module" context="{'group_by': 'module_affected'}"/>
+                    <filter string="Prioridad" name="group_by_priority" context="{'group_by': 'priority'}"/>
+                    <filter string="Técnico Asignado" name="group_by_assigned" context="{'group_by': 'assigned_id'}"/>
+                    <filter string="Fecha de Envío (Mes)" name="group_by_date_month" context="{'group_by': 'date_submitted:month'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- VISTA KANBAN (TABLERO DE ATENCIÓN TÉCNICA)                         -->
+    <!-- ================================================================== -->
+    <record id="view_transit_requirement_kanban" model="ir.ui.view">
+        <field name="name">transit.requirement.kanban</field>
+        <field name="model">transit.requirement</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="stage" class="o_kanban_small_column" quick_create="false" records_draggable="true">
+                <field name="name"/>
+                <field name="code"/>
+                <field name="stage"/>
+                <field name="priority"/>
+                <field name="category"/>
+                <field name="module_affected"/>
+                <field name="concessionaire_id"/>
+                <field name="user_id"/>
+                <field name="assigned_id"/>
+                <field name="date_submitted"/>
+                <field name="color"/>
+                <templates>
+                    <t t-name="card">
+                        <div class="oe_kanban_global_click p-2">
+                            <!-- Cabecera de Tarjeta: Código, Prioridad y Empresa -->
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="badge bg-secondary font-monospace" style="font-size: 10px;">
+                                    <field name="code"/>
+                                </span>
+                                <field name="priority" widget="priority"/>
+                            </div>
+
+                            <!-- Título Principal -->
+                            <div class="fw-bold text-dark fs-6 mb-1" style="line-height: 1.25;">
+                                <field name="name"/>
+                            </div>
+
+                            <!-- Empresa Solicitante -->
+                            <div class="text-muted small mb-2 d-flex align-items-center gap-1">
+                                <span>🏢</span>
+                                <strong><field name="concessionaire_id"/></strong>
+                            </div>
+
+                            <!-- Tags de Módulo y Categoría -->
+                            <div class="d-flex flex-wrap gap-1 mb-2">
+                                <span class="badge bg-info text-dark" style="font-size: 10px;">
+                                    <field name="module_affected"/>
+                                </span>
+                                <span class="badge bg-light text-secondary border" style="font-size: 10px;">
+                                    <field name="category"/>
+                                </span>
+                            </div>
+
+                            <!-- Pie de Tarjeta: Solicitante y Fecha -->
+                            <div class="d-flex justify-content-between align-items-center border-top pt-2 mt-2 small text-muted">
+                                <div class="d-flex align-items-center gap-1">
+                                    <field name="user_id" widget="many2one_avatar_user"/>
+                                    <span style="font-size: 11px;"><field name="user_id"/></span>
+                                </div>
+                                <span style="font-size: 10px;">
+                                    <field name="date_submitted" widget="date"/>
+                                </span>
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- VISTA LISTA (LIST / TREE)                                          -->
+    <!-- ================================================================== -->
+    <record id="view_transit_requirement_list" model="ir.ui.view">
+        <field name="name">transit.requirement.list</field>
+        <field name="model">transit.requirement</field>
+        <field name="arch" type="xml">
+            <list string="Bandeja de Requerimientos y Soporte"
+                  decoration-success="stage == 'done'"
+                  decoration-danger="priority == '3' and stage != 'done'"
+                  decoration-warning="stage == 'evaluating'"
+                  decoration-info="stage == 'in_progress'"
+                  decoration-muted="stage == 'cancelled'">
+                <field name="priority" widget="priority" optional="show"/>
+                <field name="code" string="Código" class="fw-bold font-monospace"/>
+                <field name="name" string="Título de la Solicitud"/>
+                <field name="concessionaire_id" string="Empresa"/>
+                <field name="category" string="Tipo"/>
+                <field name="module_affected" string="Módulo Afectado"/>
+                <field name="user_id" string="Solicitante" widget="many2one_avatar_user"/>
+                <field name="assigned_id" string="Técnico Asignado" optional="show"/>
+                <field name="date_submitted" string="Fecha Envío"/>
+                <field name="date_resolved" string="Fecha Resuelto" optional="hide"/>
+                <field name="stage" widget="badge"
+                       decoration-secondary="stage == 'draft'"
+                       decoration-primary="stage == 'submitted'"
+                       decoration-warning="stage == 'evaluating'"
+                       decoration-info="stage == 'in_progress'"
+                       decoration-success="stage == 'done'"
+                       decoration-dark="stage == 'cancelled'"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- VISTA FORMULARIO DETALLADA CON CHATTER                              -->
+    <!-- ================================================================== -->
+    <record id="view_transit_requirement_form" model="ir.ui.view">
+        <field name="name">transit.requirement.form</field>
+        <field name="model">transit.requirement</field>
+        <field name="arch" type="xml">
+            <form string="Solicitud de Ajuste / Requerimiento Técnico">
+                <header>
+                    <button name="action_submit" string="📨 Enviar a Soporte" type="object" class="btn-primary" invisible="stage != 'draft'"/>
+                    <button name="action_evaluate" string="🔍 Iniciar Análisis" type="object" class="btn-secondary" invisible="stage != 'submitted'" groups="transit_operations.group_transit_manager"/>
+                    <button name="action_in_progress" string="⚙️ En Desarrollo" type="object" class="btn-primary" invisible="stage not in ['submitted', 'evaluating']" groups="transit_operations.group_transit_manager"/>
+                    <button name="action_resolve" string="🚀 Marcar Resuelto / Desplegado" type="object" class="btn-success" invisible="stage not in ['in_progress', 'evaluating', 'submitted']" groups="transit_operations.group_transit_manager"/>
+                    <button name="action_reopen" string="🔄 Reabrir Requerimiento" type="object" invisible="stage not in ['done', 'cancelled']"/>
+                    <button name="action_cancel" string="❌ Cancelar" type="object" invisible="stage in ['done', 'cancelled']"/>
+                    <field name="stage" widget="statusbar" statusbar_visible="submitted,evaluating,in_progress,done"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <span class="badge bg-secondary font-monospace mb-1" style="font-size: 12px;">
+                            <field name="code"/>
+                        </span>
+                        <label for="name" string="Título de la Solicitud"/>
+                        <h1>
+                            <field name="name" placeholder="Ej: Ajustar trazado del ramal 020C o agregar alerta de batería en radar..."/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Datos del Requerimiento">
+                            <field name="concessionaire_id" options="{'no_create': True}"/>
+                            <field name="category"/>
+                            <field name="module_affected"/>
+                            <field name="priority" widget="priority"/>
+                        </group>
+                        <group string="Seguimiento y Responsables">
+                            <field name="user_id" options="{'no_create': True}"/>
+                            <field name="assigned_id" options="{'no_create': True}" groups="transit_operations.group_transit_manager"/>
+                            <field name="date_submitted"/>
+                            <field name="date_resolved" invisible="not date_resolved"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="📝 Detalle de la Solicitud" name="page_description">
+                            <div class="alert alert-info py-2 px-3 mb-2 small" role="alert">
+                                💡 <strong>Consejo:</strong> Indique claramente qué ramal, coche o sección del sistema requiere cambios, o copie el mensaje de error en caso de falla.
+                            </div>
+                            <field name="description" placeholder="Describa aquí con la mayor claridad posible su solicitud o requerimiento..."/>
+                        </page>
+                        <page string="📎 Archivos y Capturas de Pantalla" name="page_attachments">
+                            <field name="attachment_ids" widget="many2many_binary" string="Adjuntar Capturas de Pantalla o Excels"/>
+                        </page>
+                        <page string="🛠️ Respuesta Técnica / Notas de Solución" name="page_solution">
+                            <field name="solution_notes" placeholder="El equipo de administración y desarrollo detallará aquí la solución implementada, commits o configuraciones realizadas..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <!-- Chatter de Conversación Directa -->
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- ACCIÓN DE VENTANA                                                  -->
+    <!-- ================================================================== -->
+    <record id="action_transit_requirement" model="ir.actions.act_window">
+        <field name="name">Solicitudes y Requerimientos al Sistema</field>
+        <field name="res_model">transit.requirement</field>
+        <field name="view_mode">kanban,list,form</field>
+        <field name="search_view_id" ref="view_transit_requirement_search"/>
+        <field name="context">{
+            'search_default_group_by_stage': 1,
+            'default_category': 'adjustment'
+        }</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                ¡Canal de Solicitudes y Mejoras del Sistema!
+            </p>
+            <p>
+                Desde aquí cada empresa o usuario puede solicitar ajustes a sus rutas, altas de coches,
+                nuevas funciones o reportar novedades en el Radar GPS y Tablero de Frecuencias.
+                El equipo técnico atenderá cada pedido de forma priorizada y con seguimiento en vivo.
+            </p>
+        </field>
+    </record>
+</odoo>

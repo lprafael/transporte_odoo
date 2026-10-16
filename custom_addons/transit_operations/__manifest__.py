@@ -68,6 +68,7 @@ Sistema Integral de Transporte de Pasajeros y Flota de Buses:
         'wizards/transit_company_onboarding_wizard_views.xml',
         'views/transit_dynamic_report_views.xml',
         'views/transit_service_roundtrip_views.xml',
+        'views/transit_requirement_views.xml',
         'views/transit_menus.xml',
     ],
     'installable': True,

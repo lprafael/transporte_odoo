@@ -979,16 +979,16 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     if calculated_speed is not None:
         speed = calculated_speed
 
-    # 2.2 Punto 2: Rumbo cinemático por gran círculo de respaldo
-    # Si dist_m < 3.0 m (vehículo detenido o jitter GPS): Preservar último rumbo conocido para evitar giros falsos
-    # Si dist_m >= 3.0 m (en movimiento): Si módem envía 0 o nulo, calcular azimut geodésico
+    # 2.2 Punto 2: Rumbo cinemático por gran círculo de respaldo y corrección de inversión
+    # Si dist_m < 4.0 m (vehículo detenido o jitter GPS): Preservar último rumbo conocido para evitar giros falsos
+    # Si dist_m >= 4.0 m (en movimiento): Calcular SIEMPRE el rumbo cinemático real a partir de las coordenadas
+    # geodésicas consecutivas. Esto corrige de raíz módems GPS instalados al revés o con rumbo invertido (180°).
     if prev_lat is not None and prev_lon is not None:
-        if dist_m < 3.0:
+        if dist_m < 4.0:
             if prev_heading is not None and float(prev_heading) > 0:
                 heading = float(prev_heading)
-        elif dist_m >= 3.0:
-            if heading is None or heading == 0.0 or heading == 0:
-                heading = calculate_bearing_degrees(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
+        elif dist_m >= 4.0:
+            heading = calculate_bearing_degrees(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
 
     # Asignar rumbo final corregido al objeto ping para guardado en DB
     ping.heading_deg = heading
@@ -1994,6 +1994,7 @@ async def live_map_view(request: Request):
                 </div>
             </div>
             <a href="/headway" style="background: linear-gradient(135deg, #0284c7, #6366f1); color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);">📊 Tablero Lineal</a>
+            <a href="http://187.77.247.23:8069/web#action=transit_operations.action_transit_requirement" target="_blank" style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;" title="Enviar requerimiento o sugerencia de ajuste técnico">🛠️ Solicitar Ajuste</a>
         </div>
     </header>
 
@@ -2265,6 +2266,19 @@ async def live_map_view(request: Request):
         }
 
         /* -------------------------------------------------------------
+           Cálculo de Rumbo Cinemático Geodésico según Vector de Movimiento
+        ------------------------------------------------------------- */
+        function getMovementBearing(startLat, startLng, endLat, endLng) {
+            const dLng = (endLng - startLng) * Math.PI / 180;
+            const lat1 = startLat * Math.PI / 180;
+            const lat2 = endLat * Math.PI / 180;
+            const y = Math.sin(dLng) * Math.cos(lat2);
+            const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+            const brng = Math.atan2(y, x) * 180 / Math.PI;
+            return Math.round((brng + 360) % 360);
+        }
+
+        /* -------------------------------------------------------------
            Punto 3: Icono SVG Direccional Rotativo + Badge de Velocidad
         ------------------------------------------------------------- */
         function createBusDivIcon(v, markerColor, heading, speed) {
@@ -2423,8 +2437,22 @@ async def live_map_view(request: Request):
             };
 
             const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
-            const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
-            const heading = isFault ? 0.0 : (v.heading_deg || v.heading_degrees || v.rumbo || 0.0);
+            let heading = isFault ? 0.0 : (v.heading_deg || v.heading_degrees || v.rumbo || 0.0);
+
+            // Corrección de Rumbo Físico: Si el móvil ya existe en mapa y hay desplazamiento real (>= 3m),
+            // derivar el rumbo directamente del vector de movimiento geodésico en pantalla.
+            if (markers[busId]) {
+                const oldLatLng = markers[busId].getLatLng();
+                const dLatM = (lat - oldLatLng.lat) * 111000;
+                const dLngM = (lon - oldLatLng.lng) * 111000 * Math.cos(lat * Math.PI / 180);
+                const moveDist = Math.sqrt(dLatM * dLatM + dLngM * dLngM);
+                if (moveDist >= 3.0) {
+                    heading = getMovementBearing(oldLatLng.lat, oldLatLng.lng, lat, lon);
+                    markers[busId]._lastHeading = heading;
+                } else if (markers[busId]._lastHeading !== undefined) {
+                    heading = markers[busId]._lastHeading;
+                }
+            }
 
             let popupContent = '';
             if (isFault) {
@@ -2461,6 +2489,7 @@ async def live_map_view(request: Request):
 
             if (!markers[busId]) {
                 markers[busId] = L.marker(newLatLng, { icon: icon }).addTo(map).bindPopup(popupContent);
+                markers[busId]._lastHeading = heading;
                 busCircles[busId] = L.circle(newLatLng, {
                     radius: circleRadius,
                     color: circleColor,

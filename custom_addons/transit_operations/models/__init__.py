@@ -25,3 +25,4 @@ from . import transit_dynamic_report_service
 from . import transit_dynamic_report
 from . import transit_service_roundtrip
 from . import hr_employee
+from . import transit_requirement

@@ -140,4 +140,13 @@
         <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
+
+    <!-- 12. Solicitudes de Ajustes y Requerimientos: transit.requirement -->
+    <record id="transit_requirement_concessionaire_rule" model="ir.rule">
+        <field name="name">Solicitudes: Aislamiento Multi-Tenant Estricto</field>
+        <field name="model_id" ref="model_transit_requirement"/>
+        <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+    </record>
 </odoo>

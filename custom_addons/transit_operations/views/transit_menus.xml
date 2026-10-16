@@ -286,4 +286,25 @@
               action="action_transit_config_settings"
               sequence="20"
               groups="group_transit_manager"/>
+
+    <!-- ================================================================== -->
+    <!-- 7. Solicitudes de Ajustes y Soporte Técnico                        -->
+    <!-- ================================================================== -->
+    <menuitem id="menu_transit_requirement_root"
+              name="🛠️ Solicitudes y Soporte"
+              parent="menu_transit_root"
+              sequence="55"/>
+
+    <menuitem id="menu_transit_requirement"
+              name="Bandeja de Requerimientos"
+              parent="menu_transit_requirement_root"
+              action="action_transit_requirement"
+              sequence="10"/>
+
+    <!-- Menú Superior Directo en Barra Principal de Apps -->
+    <menuitem id="menu_transit_requirement_top"
+              name="🛠️ Solicitudes y Soporte"
+              action="action_transit_requirement"
+              sequence="16"
+              groups="group_transit_user"/>
 </odoo>

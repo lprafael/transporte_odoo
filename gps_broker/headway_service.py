@@ -1346,6 +1346,9 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             <a id="odoo-erp-nav-btn" href="http://187.77.247.23:8069" target="_blank" class="nav-btn">
                 <span>⚡ Odoo ERP</span>
             </a>
+            <a href="http://187.77.247.23:8069/web#action=transit_operations.action_transit_requirement" target="_blank" class="nav-btn" style="background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #34d399;" title="Enviar requerimiento o sugerencia de ajuste técnico">
+                <span>🛠️ Solicitar Ajuste / Soporte</span>
+            </a>
             {user_badge_html}
         </div>
     </header>
