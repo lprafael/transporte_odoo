@@ -1,5 +1,78 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
+    <!-- Vista Lista Especializada para Choferes y Conductores -->
+    <record id="view_partner_tree_inherit_driver" model="ir.ui.view">
+        <field name="name">res.partner.list.transit.driver</field>
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <list string="Conductores y Choferes" decoration-danger="driver_license_status == 'expired'" decoration-warning="driver_license_status == 'warning'">
+                <field name="driver_code" string="Ficha / Código"/>
+                <field name="name" string="Nombre y Apellidos"/>
+                <field name="vat" string="C.I. Nº"/>
+                <field name="driver_ci_expiry" optional="show" string="Venc. C.I."/>
+                <field name="driver_license_number" optional="show" string="Nº Registro"/>
+                <field name="driver_license_category" optional="hide"/>
+                <field name="driver_license_expiry" string="Venc. Registro"/>
+                <field name="driver_license_status" widget="badge"
+                       decoration-success="driver_license_status == 'valid'"
+                       decoration-warning="driver_license_status == 'warning'"
+                       decoration-danger="driver_license_status == 'expired'"/>
+                <field name="mtess_date" optional="show" string="Fecha MTESS"/>
+                <field name="ips_date" optional="show" string="Fecha IPS"/>
+                <field name="concessionaire_id" optional="show" string="Empresa"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista Kanban Especializada para Choferes y Conductores -->
+    <record id="view_partner_kanban_transit_driver" model="ir.ui.view">
+        <field name="name">res.partner.kanban.transit.driver</field>
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <kanban class="o_res_partner_kanban" sample="1">
+                <field name="id"/>
+                <field name="name"/>
+                <field name="driver_code"/>
+                <field name="vat"/>
+                <field name="concessionaire_id"/>
+                <field name="driver_license_number"/>
+                <field name="driver_license_expiry"/>
+                <field name="driver_license_status"/>
+                <field name="avatar_128"/>
+                <templates>
+                    <t t-name="card" class="flex-row p-3 border-start border-4"
+                       t-attf-class="{{ record.driver_license_status.raw_value == 'expired' ? 'border-danger' : (record.driver_license_status.raw_value == 'warning' ? 'border-warning' : 'border-success') }}">
+                        <aside class="o_kanban_aside_full me-3">
+                            <img t-att-src="kanban_image('res.partner', 'avatar_128', record.id.raw_value)" class="o_kanban_image_fill rounded-circle shadow-sm" alt="Foto Chofer" style="width: 55px; height: 55px; object-fit: cover;"/>
+                        </aside>
+                        <main class="d-flex flex-column justify-content-between w-100">
+                            <div>
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="badge bg-primary text-white fw-bold px-2 py-1">Ficha: <t t-esc="record.driver_code.value or 'S/F'"/></span>
+                                    <field name="driver_license_status" widget="badge"
+                                           decoration-success="driver_license_status == 'valid'"
+                                           decoration-warning="driver_license_status == 'warning'"
+                                           decoration-danger="driver_license_status == 'expired'"/>
+                                </div>
+                                <strong class="fs-6 text-dark d-block mb-1"><field name="name"/></strong>
+                                <div class="text-muted small">
+                                    <i class="fa fa-id-card me-1 text-secondary"/> CI: <span class="fw-semibold text-dark"><field name="vat"/></span>
+                                </div>
+                                <div class="text-muted small">
+                                    <i class="fa fa-building-o me-1 text-secondary"/> <field name="concessionaire_id"/>
+                                </div>
+                            </div>
+                            <div class="mt-2 pt-1 border-top small text-muted d-flex justify-content-between">
+                                <span><i class="fa fa-calendar me-1"/> Venc. Reg: <b><field name="driver_license_expiry"/></b></span>
+                            </div>
+                        </main>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- Vista Formulario para Transporte y Cumplimiento Laboral MTESS/IPS -->
     <record id="view_partner_form_inherit_transit" model="ir.ui.view">
         <field name="name">res.partner.form.inherit.transit</field>
         <field name="model">res.partner</field>
@@ -8,7 +81,7 @@
             <xpath expr="//notebook" position="inside">
                 <page string="Datos de Transporte y Conductor">
                     <group>
-                        <group string="Habilitación de Chofer">
+                        <group string="Habilitación de Chofer y Licencia">
                             <field name="is_driver"/>
                             <field name="driver_code" invisible="not is_driver"/>
                             <field name="concessionaire_id" invisible="not is_driver"/>
@@ -20,8 +93,12 @@
                                    decoration-warning="driver_license_status == 'warning'"
                                    decoration-danger="driver_license_status == 'expired'"/>
                         </group>
-                        <group string="Datos Fiscales SIFEN (Paraguay)">
+                        <group string="Cédula, MTESS e IPS (Paraguay)">
                             <field name="sifen_doc_type"/>
+                            <field name="vat" string="Nº Cédula de Identidad"/>
+                            <field name="driver_ci_expiry"/>
+                            <field name="mtess_date"/>
+                            <field name="ips_date"/>
                             <field name="vat_ruc" placeholder="Ej: 80012345"/>
                             <field name="vat_dv" placeholder="6"/>
                         </group>

@@ -29,6 +29,9 @@ class ResPartner(models.Model):
         ('warning', 'Por Vencer (30 días)'),
         ('expired', 'Vencida / Inhabilitado'),
     ], string='Estado de Licencia', compute='_compute_license_status')
+    driver_ci_expiry = fields.Date(string='Vencimiento Cédula')
+    mtess_date = fields.Date(string='Fecha Registro MTESS')
+    ips_date = fields.Date(string='Fecha Registro IPS')
 
     # Campos Fiscales Paraguay (SIFEN / DNIT)
     vat_ruc = fields.Char(string='RUC Base', help='RUC sin dígito verificador')

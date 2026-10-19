@@ -32,6 +32,9 @@ class HrEmployee(models.Model):
         ('particular', 'Particular'),
     ], string='Categoría de Licencia')
     driver_license_expiry = fields.Date(string='Vencimiento Licencia', tracking=True)
+    driver_ci_expiry = fields.Date(string='Vencimiento Cédula', tracking=True)
+    mtess_date = fields.Date(string='Fecha Registro MTESS', tracking=True)
+    ips_date = fields.Date(string='Fecha Registro IPS', tracking=True)
 
     @api.model
     def _default_concessionaire_id(self):
@@ -57,6 +60,9 @@ class HrEmployee(models.Model):
                         'driver_license_number': emp.driver_license_number,
                         'driver_license_category': emp.driver_license_category,
                         'driver_license_expiry': emp.driver_license_expiry,
+                        'driver_ci_expiry': emp.driver_ci_expiry,
+                        'mtess_date': emp.mtess_date,
+                        'ips_date': emp.ips_date,
                     })
                     emp.sudo().write({'work_contact_id': partner.id})
                 else:
@@ -67,6 +73,9 @@ class HrEmployee(models.Model):
                         'driver_license_number': emp.driver_license_number,
                         'driver_license_category': emp.driver_license_category,
                         'driver_license_expiry': emp.driver_license_expiry,
+                        'driver_ci_expiry': emp.driver_ci_expiry,
+                        'mtess_date': emp.mtess_date,
+                        'ips_date': emp.ips_date,
                     })
         return employees
 
@@ -85,6 +94,12 @@ class HrEmployee(models.Model):
                     update_vals['driver_license_category'] = emp.driver_license_category
                 if 'driver_license_expiry' in vals:
                     update_vals['driver_license_expiry'] = emp.driver_license_expiry
+                if 'driver_ci_expiry' in vals:
+                    update_vals['driver_ci_expiry'] = emp.driver_ci_expiry
+                if 'mtess_date' in vals:
+                    update_vals['mtess_date'] = emp.mtess_date
+                if 'ips_date' in vals:
+                    update_vals['ips_date'] = emp.ips_date
                 if update_vals:
                     update_vals['is_driver'] = True
                     emp.work_contact_id.sudo().write(update_vals)

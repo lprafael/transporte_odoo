@@ -79,6 +79,7 @@ services:
       - db
       - redis
       - mosquitto
+    restart: unless-stopped
   # vmt_sync: (DESHABILITADO: El sistema opera 100% desconectado y autonomo del VMT)
   #   build:
   #     context: ./gps_broker

@@ -49,6 +49,7 @@ from auth import (
     invalidate_session,
     render_login_page,
     is_device_or_internal_token,
+    validate_odoo_session,
 )
 
 # Configuración de Logging
@@ -147,35 +148,42 @@ def get_valid_agencies() -> Set[str]:
     return _cached_valid_agencies
 
 def get_vehicle_state(bus_id: str, agency_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    # Clave multitenant con soporte de fallback
-    key = f"vehicle:{agency_id}:{bus_id}" if agency_id else f"vehicle:{bus_id}"
+    keys_to_try = []
+    if agency_id:
+        keys_to_try.append(f"vehicle:{agency_id}:{bus_id}")
+    else:
+        for ag in ("004B", "002A", "0008"):
+            keys_to_try.append(f"vehicle:{ag}:{bus_id}")
+        keys_to_try.append(f"vehicle:{bus_id}")
+
     if redis_client:
         try:
-            data = redis_client.get(key)
-            if not data and agency_id:
-                # Fallback clave simple
-                data = redis_client.get(f"vehicle:{bus_id}")
-            if data:
-                res = json.loads(data)
-                res["crossed_checkpoints"] = set(res.get("crossed_checkpoints", []))
-                return res
+            for k in keys_to_try:
+                data = redis_client.get(k)
+                if data:
+                    res = json.loads(data)
+                    res["crossed_checkpoints"] = set(res.get("crossed_checkpoints", []))
+                    return res
         except Exception as e:
             logger.debug(f"Redis get error: {e}")
-    return active_vehicles_memory.get(key) or active_vehicles_memory.get(bus_id)
+
+    for k in keys_to_try:
+        if k in active_vehicles_memory:
+            return active_vehicles_memory[k]
+    return active_vehicles_memory.get(bus_id)
 
 def save_vehicle_state(bus_id: str, state: Dict[str, Any], agency_id: Optional[str] = None):
     agency = agency_id or state.get("agency_id") or "004B"
+    state["agency_id"] = agency
     key = f"vehicle:{agency}:{bus_id}"
     active_vehicles_memory[key] = state
-    active_vehicles_memory[bus_id] = state
     if redis_client:
         try:
             serializable = dict(state)
             serializable["crossed_checkpoints"] = list(state.get("crossed_checkpoints", []))
             redis_client.set(key, json.dumps(serializable))
-            redis_client.set(f"vehicle:{bus_id}", json.dumps(serializable))
-            redis_client.sadd("active_buses_set", bus_id)
             redis_client.sadd(f"active_buses_{agency}", bus_id)
+            redis_client.sadd("active_buses_all", f"{agency}:{bus_id}")
         except Exception as e:
             logger.debug(f"Redis set error: {e}")
 
@@ -224,6 +232,7 @@ def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(checkpoints, set):
         checkpoints = list(checkpoints)
     return {
+        "vehicle_key": f"{v.get('agency_id', '004B')}_{v.get('bus_id')}",
         "bus_id": v.get("bus_id"),
         "license_plate": v.get("license_plate") or f"COCHE-{v.get('bus_id')}",
         "agency_id": v.get("agency_id", "004B"),
@@ -264,19 +273,32 @@ def get_all_active_vehicles(agency_filter: Optional[str] = None) -> List[Dict[st
 
     if redis_client:
         try:
-            bus_ids = redis_client.smembers("active_buses_set")
-            for b_id in bus_ids:
-                v = get_vehicle_state(b_id)
-                if v and (v.get("agency_id") in target_agencies or not agency_filter):
-                    vehicles.append(format_vehicle_for_client(v))
+            if agency_filter:
+                bus_ids = redis_client.smembers(f"active_buses_{agency_filter.strip()}")
+                for b_id in bus_ids:
+                    v = get_vehicle_state(b_id, agency_id=agency_filter.strip())
+                    if v:
+                        vehicles.append(format_vehicle_for_client(v))
+            else:
+                entries = redis_client.smembers("active_buses_all")
+                for entry in entries:
+                    if ":" in entry:
+                        ag, b_id = entry.split(":", 1)
+                        if ag in target_agencies:
+                            v = get_vehicle_state(b_id, agency_id=ag)
+                            if v:
+                                vehicles.append(format_vehicle_for_client(v))
             if vehicles:
                 return vehicles
         except Exception as e:
-            logger.debug(f"Redis smembers error: {e}")
+            logger.debug(f"Redis get_all_active_vehicles error: {e}")
+
     out = []
-    for v in active_vehicles_memory.values():
-        if v and (v.get("agency_id") in target_agencies or not agency_filter):
-            out.append(format_vehicle_for_client(v))
+    for k, v in active_vehicles_memory.items():
+        if ":" in k:
+            ag = v.get("agency_id")
+            if ag in target_agencies:
+                out.append(format_vehicle_for_client(v))
     return out
 
 def record_event_history(event: Dict[str, Any]):
@@ -295,28 +317,34 @@ def record_event_history(event: Dict[str, Any]):
 # ------------------------------------------------------------------------------
 class WebSocketManager:
     def __init__(self):
-        self.active_connections: Set[WebSocket] = set()
+        self.active_connections: Dict[WebSocket, Optional[str]] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, agency_filter: Optional[str] = None):
         await websocket.accept()
-        self.active_connections.add(websocket)
-        logger.info(f"Nuevo cliente WebSocket conectado. Total activos: {len(self.active_connections)}")
+        self.active_connections[websocket] = agency_filter
+        logger.info(f"Nuevo cliente WebSocket conectado (filtro: {agency_filter}). Total activos: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.discard(websocket)
+        self.active_connections.pop(websocket, None)
         logger.info(f"Cliente WebSocket desconectado. Total activos: {len(self.active_connections)}")
 
     async def broadcast(self, message: Dict[str, Any]):
         if not self.active_connections:
             return
         dead_connections = set()
-        for conn in self.active_connections:
+        vehicle_agency = None
+        if message.get("type") == "vehicle_update" and message.get("vehicle"):
+            vehicle_agency = message["vehicle"].get("agency_id")
+
+        for conn, agency_filter in list(self.active_connections.items()):
+            if agency_filter and vehicle_agency and agency_filter != vehicle_agency:
+                continue
             try:
                 await conn.send_json(message)
             except Exception:
                 dead_connections.add(conn)
         for dead in dead_connections:
-            self.active_connections.discard(dead)
+            self.active_connections.pop(dead, None)
 
     def broadcast_sync(self, message: Dict[str, Any]):
         if not self.active_connections:
@@ -482,14 +510,13 @@ def insert_telemetry_to_pg(ping: TelemetryPing):
 # ------------------------------------------------------------------------------
 # Consultas GeoJSON de Shapes y Paradas con Vigencia
 # ------------------------------------------------------------------------------
-def get_active_shapes_geojson() -> Dict[str, Any]:
+def get_active_shapes_geojson(agency_id: Optional[str] = None) -> Dict[str, Any]:
     try:
         conn = psycopg2.connect(
             host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2
         )
         cur = conn.cursor()
-        cur.execute(
-            """
+        query = """
             SELECT json_build_object(
                 'type', 'FeatureCollection',
                 'features', COALESCE(json_agg(ST_AsGeoJSON(t.*)::json), '[]'::json)
@@ -498,7 +525,9 @@ def get_active_shapes_geojson() -> Dict[str, Any]:
                 SELECT 
                     s.id AS shape_id,
                     r.code AS route_code,
+                    r.code AS route_id,
                     r.name AS route_name,
+                    r.name AS name,
                     r.agency_id,
                     r.direction,
                     s.version,
@@ -510,9 +539,13 @@ def get_active_shapes_geojson() -> Dict[str, Any]:
                 JOIN transit_route_shape s ON s.route_id = r.id
                 WHERE s.valid_from <= CURRENT_DATE
                   AND (s.valid_until IS NULL OR s.valid_until > CURRENT_DATE)
-            ) t;
-            """
-        )
+        """
+        params = []
+        if agency_id:
+            query += " AND (r.agency_id = %s OR r.concessionaire_id IN (SELECT id FROM transit_concessionaire WHERE agency_id = %s))"
+            params.extend([agency_id, agency_id])
+        query += " ) t;"
+        cur.execute(query, params)
         geojson = cur.fetchone()[0]
         cur.close()
         conn.close()
@@ -555,14 +588,13 @@ def get_historical_shape_geojson(route_code: str, agency_id: str, target_date: s
         logger.error(f"Error cargando historical shape GeoJSON: {e}")
         return {"type": "FeatureCollection", "features": []}
 
-def get_active_stops_geojson() -> Dict[str, Any]:
+def get_active_stops_geojson(agency_id: Optional[str] = None) -> Dict[str, Any]:
     try:
         conn = psycopg2.connect(
             host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2
         )
         cur = conn.cursor()
-        cur.execute(
-            """
+        query = """
             SELECT json_build_object(
                 'type', 'FeatureCollection',
                 'features', COALESCE(json_agg(ST_AsGeoJSON(t.*)::json), '[]'::json)
@@ -580,9 +612,13 @@ def get_active_stops_geojson() -> Dict[str, Any]:
                 FROM transit_stop
                 WHERE valid_from <= CURRENT_DATE
                   AND (valid_until IS NULL OR valid_until > CURRENT_DATE)
-            ) t;
-            """
-        )
+        """
+        params = []
+        if agency_id:
+            query += " AND (agency_id = %s OR agency_id IS NULL)"
+            params.append(agency_id)
+        query += " ) t;"
+        cur.execute(query, params)
         geojson = cur.fetchone()[0]
         cur.close()
         conn.close()
@@ -590,6 +626,7 @@ def get_active_stops_geojson() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error cargando active stops GeoJSON: {e}")
         return {"type": "FeatureCollection", "features": []}
+
 
 # ------------------------------------------------------------------------------
 # Cola de Reintentos con Exponential Backoff para Odoo Webhook
@@ -715,14 +752,16 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
         if redis_client:
             try:
                 old_ids = list(redis_client.smembers("active_buses_set"))
+                valid_ags = get_valid_agencies()
                 for old_id in old_ids:
                     st = get_vehicle_state(old_id)
-                    if st and st.get("agency_id") not in (VMT_AGENCY_ID, "004B"):
+                    if st and st.get("agency_id") and st.get("agency_id") not in valid_ags:
                         redis_client.delete(f"vehicle:{old_id}")
                         redis_client.srem("active_buses_set", old_id)
             except Exception as e:
                 logger.debug(f"Redis cleanup error: {e}")
 
+        valid_agencies_list = list(get_valid_agencies())
         cur.execute("""
             SELECT DISTINCT ON (bus_internal_code)
                 bus_internal_code as mean_id,
@@ -736,10 +775,10 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
                 odometer_km,
                 recorded_at as fecha_hora
             FROM telemetry_ping
-            WHERE (agency_id = %s OR agency_id = '004B')
-              AND route_id IN ('020c', '020d', '020e', '020f', '0210', '0211')
+            WHERE (agency_id = ANY(%s) OR agency_id IS NOT NULL)
             ORDER BY bus_internal_code, recorded_at DESC;
-        """, (VMT_AGENCY_ID,))
+        """, (valid_agencies_list,))
+
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -900,15 +939,15 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
         logger.warning(f"Coordenadas descartadas (inválidas o 0,0): ({ping.latitude}, {ping.longitude}) para móvil {bus_key}")
         return {"status": "ignored", "reason": "invalid_coordinates", "bus_id": bus_key}
 
-    # 2. Recuperar o Inicializar Estado
-    v_state = get_vehicle_state(bus_key)
+    # 2. Recuperar o Inicializar Estado (aislado por empresa)
+    v_state = get_vehicle_state(bus_key, agency_id=agency)
     raw_ping_time = str(ping.fecha_hora_procesamiento or ping.fecha_hora or ping.timestamp or now_iso).strip()
 
     if not v_state:
         v_state = {
             "bus_id": bus_key,
             "license_plate": plate,
-            "agency_id": ping.agency_id or "004B",
+            "agency_id": agency,
             "route_id": ping.route_id or "020f",
             "current_state": "AT_ORIGIN",
             "state": "AT_ORIGIN",
@@ -938,7 +977,7 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     prev_raw_time = v_state.get("raw_ping_time")
     prev_heading = v_state.get("heading_deg")
 
-    # 2.0 Deduplicación (Punto 1): Si coordenadas y timestamp son idénticos al último ping procesado, omitir inserción en BD
+    # 2.0 Deduplicación: Si coordenadas y timestamp son idénticos al último ping procesado, omitir
     if prev_lat is not None and prev_lon is not None:
         is_same_coords = (
             abs(float(prev_lat) - float(ping.latitude)) < 1e-7 and
@@ -956,47 +995,23 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
                 "timestamp": now_iso
             }
 
-    # 2.1 Cálculo Diferencial de Velocidad con los dos últimos puntos GPS
-    calculated_speed = None
-    dist_m = 0.0
+    # 2.1 Velocidad y Rumbo Nativos de la Telemetría Central (VMT)
+    # VMT app_monitoreo_mensajeoperativo provee 'velocidad' y 'rumbo' medidos directamente por el módem AVL
+    if speed is None or speed < 0:
+        speed = 0.0
+    if heading is None or heading < 0:
+        heading = float(prev_heading or 0.0)
 
-    if prev_lat is not None and prev_lon is not None and prev_time:
-        try:
-            dt_prev = datetime.fromisoformat(str(prev_time).replace("Z", "+00:00"))
-            dt_curr = datetime.fromisoformat(str(now_iso).replace("Z", "+00:00"))
-            delta_sec = (dt_curr - dt_prev).total_seconds()
-            dist_m = haversine_meters(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
-            if 0.5 <= delta_sec <= 600:
-                if dist_m < 3.0:
-                    calculated_speed = 0.0
-                else:
-                    calc_kmh = round((dist_m / delta_sec) * 3.6, 1)
-                    if calc_kmh <= 120.0:
-                        calculated_speed = calc_kmh
-        except Exception as e:
-            logger.debug(f"Error cálculo velocidad 2 últimos puntos: {e}")
+    # Si el vehículo está detenido (< 1 km/h), preservar el último rumbo para evitar giros erráticos
+    if speed < 1.0 and prev_heading is not None and float(prev_heading) > 0:
+        heading = float(prev_heading)
 
-    if calculated_speed is not None:
-        speed = calculated_speed
-
-    # 2.2 Punto 2: Rumbo cinemático por gran círculo de respaldo y corrección de inversión
-    # Si dist_m < 4.0 m (vehículo detenido o jitter GPS): Preservar último rumbo conocido para evitar giros falsos
-    # Si dist_m >= 4.0 m (en movimiento): Calcular SIEMPRE el rumbo cinemático real a partir de las coordenadas
-    # geodésicas consecutivas. Esto corrige de raíz módems GPS instalados al revés o con rumbo invertido (180°).
-    if prev_lat is not None and prev_lon is not None:
-        if dist_m < 4.0:
-            if prev_heading is not None and float(prev_heading) > 0:
-                heading = float(prev_heading)
-        elif dist_m >= 4.0:
-            heading = calculate_bearing_degrees(float(prev_lat), float(prev_lon), ping.latitude, ping.longitude)
-
-    # Asignar rumbo final corregido al objeto ping para guardado en DB
     ping.heading_deg = heading
 
     v_state["prev_latitude"] = prev_lat
     v_state["prev_longitude"] = prev_lon
     v_state["prev_ping_time"] = prev_time
-    v_state["calculated_speed_kmh"] = calculated_speed
+    v_state["calculated_speed_kmh"] = speed
     v_state["latitude"] = ping.latitude
     v_state["longitude"] = ping.longitude
     v_state["last_latitude"] = ping.latitude
@@ -1113,8 +1128,8 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     else:
         v_state["status_display"] = "En Circulación" if v_state["current_state"] == "IN_TRANSIT" else v_state["current_state"]
 
-    # 6. Guardar Estado en Redis
-    save_vehicle_state(bus_key, v_state)
+    # 6. Guardar Estado en Redis (con aislamiento por agencia)
+    save_vehicle_state(bus_key, v_state, agency_id=agency)
 
     # 7. Difusión WebSocket
     ws_payload = {
@@ -1156,9 +1171,13 @@ def vmt_continuous_sync_worker():
                 )
                 logger.info(f"✅ Conexión establecida con VMT Monitoreo Central ({VMT_DB_HOST}). Flota en sincronía.")
 
+            target_agencies = list(get_valid_agencies())
+            if not target_agencies:
+                target_agencies = ["004B", "002A", "0008"]
+
             cur = conn.cursor(cursor_factory=RealDictCursor)
             query = """
-                SELECT DISTINCT ON (mean_id) 
+                SELECT DISTINCT ON (agency_id, mean_id) 
                     id,
                     agency_id,
                     mean_id,
@@ -1184,13 +1203,13 @@ def vmt_continuous_sync_worker():
                         fecha_hora,
                         fecha_hora_procesamiento
                     FROM app_monitoreo_mensajeoperativo
-                    WHERE agency_id = %s
+                    WHERE agency_id = ANY(%s)
                     ORDER BY id DESC
-                    LIMIT 2000
+                    LIMIT 8000
                 ) sub
-                ORDER BY mean_id, id DESC;
+                ORDER BY agency_id, mean_id, id DESC;
             """
-            cur.execute(query, (VMT_AGENCY_ID,))
+            cur.execute(query, (target_agencies,))
             rows = cur.fetchall()
             cur.close()
 
@@ -1205,17 +1224,30 @@ def vmt_continuous_sync_worker():
                 lon = float(r["longitude"])
                 row_id = r.get("id")
 
-                # Punto 1: Deduplicación incremental en memoria para evitar re-procesar registros VMT idénticos
+                ping_agency = r.get("agency_id") or VMT_AGENCY_ID
+
+                # Punto 1: Deduplicación incremental en memoria por agencia y bus
+                cache_key = f"{ping_agency}_{bus_key}"
                 cache_sig = (row_id, round(lat, 6), round(lon, 6), rec_iso)
-                if _last_seen_vmt_pings.get(bus_key) == cache_sig:
+                if _last_seen_vmt_pings.get(cache_key) == cache_sig:
                     continue
-                _last_seen_vmt_pings[bus_key] = cache_sig
+                _last_seen_vmt_pings[cache_key] = cache_sig
+
+                ping_agency = r.get("agency_id") or VMT_AGENCY_ID
+                ping_route = r.get("route_id")
+                if not ping_route or ping_route == "None":
+                    if ping_agency == "002A":
+                        ping_route = "0138"
+                    elif ping_agency == "0008":
+                        ping_route = "004a"
+                    else:
+                        ping_route = "020f"
 
                 ping_obj = TelemetryPing(
                     bus_id=bus_key,
                     mean_id=bus_key,
-                    agency_id=r.get("agency_id") or VMT_AGENCY_ID,
-                    route_id=r.get("route_id") or "020f",
+                    agency_id=ping_agency,
+                    route_id=ping_route,
                     driver_id=r.get("driver_id") or "",
                     latitude=lat,
                     longitude=lon,
@@ -1224,6 +1256,7 @@ def vmt_continuous_sync_worker():
                     fecha_hora=rec_iso,
                     fecha_hora_procesamiento=rec_iso
                 )
+
                 process_telemetry_ping_internal(ping_obj)
 
         except Exception as e:
@@ -1282,9 +1315,13 @@ async def receive_telemetry(
 # Endpoints REST de Shapes, Paradas y Rutas
 # ------------------------------------------------------------------------------
 @app.get("/api/v1/shapes/active")
-async def api_get_active_shapes():
-    """Retorna las geometrías (LineString) de todas las rutas vigentes hoy en formato GeoJSON."""
-    return get_active_shapes_geojson()
+async def api_get_active_shapes(request: Request, agency_id: Optional[str] = Query(None)):
+    """Retorna las geometrías (LineString) de las rutas vigentes hoy en formato GeoJSON, filtradas por empresa."""
+    user = get_current_user_from_request(request)
+    target_agency = agency_id
+    if user and not user.get("is_admin") and user.get("agency_id"):
+        target_agency = user.get("agency_id")
+    return get_active_shapes_geojson(agency_id=target_agency)
 
 @app.get("/api/v1/shapes/history")
 async def api_get_historical_shape(
@@ -1296,35 +1333,47 @@ async def api_get_historical_shape(
     return get_historical_shape_geojson(route_code, agency_id, date)
 
 @app.get("/api/v1/stops/active")
-async def api_get_active_stops():
-    """Retorna todas las paradas y cabeceras activas en formato GeoJSON."""
-    return get_active_stops_geojson()
+async def api_get_active_stops(request: Request, agency_id: Optional[str] = Query(None)):
+    """Retorna todas las paradas y cabeceras activas en formato GeoJSON, filtradas por empresa."""
+    user = get_current_user_from_request(request)
+    target_agency = agency_id
+    if user and not user.get("is_admin") and user.get("agency_id"):
+        target_agency = user.get("agency_id")
+    return get_active_stops_geojson(agency_id=target_agency)
+
 
 @app.get("/api/v1/routes")
-async def api_get_routes():
-    """Catálogo maestro de líneas y ramales."""
+async def api_get_routes(request: Request, agency_id: Optional[str] = Query(None)):
+    """Catálogo maestro de líneas y ramales filtrado por empresa / concesionaria."""
+    user = get_current_user_from_request(request)
+    target_agency = agency_id
+    if user and not user.get("is_admin") and user.get("agency_id"):
+        target_agency = user.get("agency_id")
     try:
         conn = psycopg2.connect(
             host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2
         )
         cur = conn.cursor()
-        cur.execute(
-            """
+        query = """
             SELECT r.id, r.code, r.name, r.agency_id, r.direction, r.origin, r.destination,
                    s.version AS active_version, s.valid_from, s.valid_until, s.total_km
             FROM transit_route r
             LEFT JOIN transit_route_shape s ON s.route_id = r.id 
                  AND s.valid_from <= CURRENT_DATE 
                  AND (s.valid_until IS NULL OR s.valid_until > CURRENT_DATE)
-            ORDER BY r.code;
-            """
-        )
+        """
+        params = []
+        if target_agency:
+            query += " WHERE (r.agency_id = %s OR r.concessionaire_id IN (SELECT id FROM transit_concessionaire WHERE agency_id = %s))"
+            params.extend([target_agency, target_agency])
+        query += " ORDER BY r.code;"
+        cur.execute(query, params)
         rows = cur.fetchall()
         cur.close()
         conn.close()
         return [
             {
-                "id": r[0], "code": r[1], "name": r[2], "agency_id": r[3], "direction": r[4],
+                "id": r[0], "code": r[1], "route_id": r[1], "name": r[2], "agency_id": r[3], "direction": r[4],
                 "origin": r[5], "destination": r[6], "active_version": r[7],
                 "valid_from": str(r[8]) if r[8] else None,
                 "valid_until": str(r[9]) if r[9] else "Actualidad",
@@ -1382,14 +1431,17 @@ async def test_mqtt_ping(
 # ------------------------------------------------------------------------------
 @app.websocket("/ws/live")
 async def websocket_live_radar(websocket: WebSocket):
-    await ws_manager.connect(websocket)
+    session_id = websocket.cookies.get("session_id") or websocket.query_params.get("session_id")
+    user = validate_odoo_session(session_id) if session_id else None
+    agency_filter = user.get("agency_id") if (user and not user.get("is_admin")) else websocket.query_params.get("agency_id")
+    await ws_manager.connect(websocket, agency_filter=agency_filter)
     try:
         initial_data = {
             "type": "init",
-            "vehicles": get_all_active_vehicles(),
+            "vehicles": get_all_active_vehicles(agency_filter=agency_filter),
             "events": event_history_memory[-10:],
-            "shapes": get_active_shapes_geojson(),
-            "stops": get_active_stops_geojson()
+            "shapes": get_active_shapes_geojson(agency_id=agency_filter),
+            "stops": get_active_stops_geojson(agency_id=agency_filter)
         }
         await websocket.send_json(initial_data)
 
@@ -1416,9 +1468,10 @@ async def get_live_fleet(request: Request):
         "count": len(vehicles),
         "vehicles": vehicles,
         "events": event_history_memory[-10:],
-        "shapes": get_active_shapes_geojson(),
-        "stops": get_active_stops_geojson()
+        "shapes": get_active_shapes_geojson(agency_id=agency_filter),
+        "stops": get_active_stops_geojson(agency_id=agency_filter)
     }
+
 
 @app.get("/health")
 async def health_check():
@@ -1639,53 +1692,78 @@ async def stop_page(stop_code: str, request: Request):
 # ------------------------------------------------------------------------------
 # Dashboard de Cumplimiento VMT (Res. GVMT 065/2024)
 # ------------------------------------------------------------------------------
-from compliance_service import get_today_compliance, get_compliance_alerts, get_compliance_html, get_available_services
+from compliance_service import get_today_compliance, get_compliance_alerts, get_compliance_html, get_available_services, get_available_companies
 
 @app.get("/compliance", response_class=HTMLResponse)
 async def compliance_dashboard(request: Request):
     """
     Dashboard interactivo de cumplimiento regulatorio (Res. GVMT 065/2024 & Dec. 710/2023)
-    con soporte multilínea (Línea 20 E1, E2, E3, Búhos, etc.), cálculo de ICF Provisorio
-    y clasificación en 5 estados de despacho.
+    con soporte multilínea (Línea 20 E1, E2, E3, Línea 187, Línea 15/47, etc.),
+    control de CBD, ICCBDM, IFO y cálculo de cuotas de despacho.
     """
     user = get_current_user_from_request(request)
     if not user:
         return RedirectResponse(url="/login?redirect=/compliance", status_code=303)
-    return get_compliance_html()
+    is_admin = bool(user.get("is_admin"))
+    user_agency = user.get("agency_id") or "004B"
+    user_company = user.get("company_name") or "Consorcio Arapotí"
+    return HTMLResponse(get_compliance_html(default_agency=user_agency, default_company=user_company, is_admin=is_admin))
+
+@app.get("/api/v1/compliance/companies")
+async def api_compliance_companies(request: Request):
+    """Lista de empresas/concesionarias registradas en el sistema."""
+    user = get_current_user_from_request(request)
+    companies = get_available_companies()
+    if user and not user.get("is_admin") and user.get("agency_id"):
+        companies = [c for c in companies if c.get("agency_id") == user.get("agency_id")]
+    return companies
 
 @app.get("/api/v1/compliance/services")
-async def api_compliance_services(request: Request):
+async def api_compliance_services(request: Request, agency_id: Optional[str] = Query(None)):
     """Lista de servicios operativos activos parametrizados en el sistema."""
     user = get_current_user_from_request(request)
     if not user and not is_device_or_internal_token(request):
         raise HTTPException(status_code=401, detail="Sesión no iniciada. Inicie sesión en Odoo ERP.")
-    return get_available_services()
+    target_agency = agency_id
+    if user and not user.get("is_admin") and user.get("agency_id"):
+        target_agency = user.get("agency_id")
+    return get_available_services(agency_id=target_agency)
 
 @app.get("/api/v1/compliance/today")
 async def api_compliance_today(
     request: Request,
-    service: Optional[str] = Query(None, description="Filtrar por código de servicio (ej: ALL, E1, E2, E3)"),
-    date: Optional[str] = Query(None, description="Fecha de evaluación (YYYY-MM-DD)")
+    service: Optional[str] = Query(None, description="Filtrar por código de servicio (ej: ALL, E1, E2, E3, 187-R1)"),
+    date: Optional[str] = Query(None, description="Fecha de evaluación (YYYY-MM-DD)"),
+    agency_id: Optional[str] = Query(None, description="Código de empresa (ej: 004B, 0008, 002A)")
 ):
     """
     Datos JSON de cumplimiento del día actual o fecha evaluada.
-    Incluye: despachos ejecutados, programados, % cumplimiento, proyecciones,
-    desglose por ramales, cálculo de ICF Provisorio por franjas y auditoría en 5 estados.
+    Incluye: CBD en itinerario, CBD_hora, CBD_franja, ICCBDM (0.7/0.3), IFO hora y franja,
+    CBD objetivo (100% IFO), despachos ejecutados, auditoría de 4 semanas históricas y 5 estados.
     """
     user = get_current_user_from_request(request)
     if not user and not is_device_or_internal_token(request):
         raise HTTPException(status_code=401, detail="Sesión no iniciada. Inicie sesión en Odoo ERP.")
-    return get_today_compliance(redis_client, service_code=service, target_date=date)
+    target_agency = agency_id
+    if user and not user.get("is_admin") and user.get("agency_id"):
+        target_agency = user.get("agency_id")
+    return get_today_compliance(redis_client, service_code=service, target_date=date, agency_id=target_agency)
 
 @app.get("/api/v1/compliance/alerts")
 async def api_compliance_alerts(
-    service: Optional[str] = Query(None, description="Filtrar alertas por código de servicio")
+    request: Request,
+    service: Optional[str] = Query(None, description="Filtrar alertas por código de servicio"),
+    agency_id: Optional[str] = Query(None, description="Código de empresa")
 ):
     """
     Lista de alertas activas de déficit de cumplimiento.
     Se integra con notificaciones Odoo y MQTT.
     """
-    alerts = get_compliance_alerts(redis_client, service_code=service)
+    user = get_current_user_from_request(request)
+    target_agency = agency_id
+    if user and not user.get("is_admin") and user.get("agency_id"):
+        target_agency = user.get("agency_id")
+    alerts = get_compliance_alerts(redis_client, service_code=service, agency_id=target_agency)
     return {
         "total": len(alerts),
         "has_alerts": len(alerts) > 0,
@@ -1694,14 +1772,21 @@ async def api_compliance_alerts(
 
 @app.get("/api/v1/compliance/history")
 async def api_compliance_history(
-    service: Optional[str] = Query(None, description="Filtrar historial por código de servicio")
+    request: Request,
+    service: Optional[str] = Query(None, description="Filtrar historial por código de servicio"),
+    agency_id: Optional[str] = Query(None, description="Código de empresa")
 ):
     """Historial de cumplimiento de los últimos 30 días."""
-    data = get_today_compliance(redis_client, service_code=service)
+    user = get_current_user_from_request(request)
+    target_agency = agency_id
+    if user and not user.get("is_admin") and user.get("agency_id"):
+        target_agency = user.get("agency_id")
+    data = get_today_compliance(redis_client, service_code=service, agency_id=target_agency)
     return {
         "daily_quota": data.get("daily_quota", 692),
         "history": data.get("history_30d", [])
     }
+
 
 # ------------------------------------------------------------------------------
 # Hojas de Ruta y Encadenamiento Diario de Buses (Vehicle Duty API)
@@ -1848,7 +1933,11 @@ async def live_map_view(request: Request):
     user = get_current_user_from_request(request)
     if not user:
         return RedirectResponse(url="/login?redirect=/map", status_code=303)
-    return """<!DOCTYPE html>
+    user_agency = user.get("agency_id") or ""
+    user_company = user.get("concessionaire_name") or ("Todas las Empresas (Regulador GVMT)" if user.get("is_admin") else "Consorcio Arapotí")
+    company_badge = f"{user_company} ({user_agency})" if user_agency else user_company
+    html = """<!DOCTYPE html>
+
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -1975,7 +2064,7 @@ async def live_map_view(request: Request):
         <div class="logo-group">
             <h2 style="font-size: 16px; font-weight: 800; letter-spacing: -0.02em;">🚍 Poliverso Transit Radar</h2>
             <span id="conn-badge" class="badge badge-poll">Iniciando...</span>
-            <span class="badge badge-info">Consorcio Arapotí (004B)</span>
+            <span class="badge badge-info" id="company-badge">__COMPANY_BADGE__</span>
         </div>
         <div class="controls-bar">
             <div class="date-picker-box">
@@ -2033,9 +2122,7 @@ async def live_map_view(request: Request):
         <div id="map"></div>
         <div class="legend-box" id="legend">
             <strong style="color: #e5e7eb; display:block; margin-bottom: 6px;">Trazados & Geocercas (PostGIS)</strong>
-            <div class="legend-item"><div class="legend-line" style="background: #38bdf8;"></div><span>Ramal 020F (Asunción - San Lorenzo)</span></div>
-            <div class="legend-item"><div class="legend-line" style="background: #a855f7;"></div><span>Ramal 020C (San Lorenzo - Asunción)</span></div>
-            <div class="legend-item"><div class="legend-line" style="background: #f59e0b;"></div><span>Ramal 020D (Asunción - San Lorenzo)</span></div>
+            <div id="legend-routes-list" style="max-height: 140px; overflow-y: auto; margin-bottom: 4px;"></div>
             <div class="legend-item"><div class="legend-line" style="background: #ef4444; border-top: 2px dashed #fff;"></div><span id="hist-label">Histórico Anterior</span></div>
             <div style="border-top: 1px solid #374151; margin-top: 6px; padding-top: 6px;">
                 <div class="legend-item"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#10b981; box-shadow:0 0 6px #10b981;"></span><span>En Itinerario (Verde + Flecha SVG)</span></div>
@@ -2062,24 +2149,19 @@ async def live_map_view(request: Request):
 
         <div id="sidebar">
             <div class="sidebar-header">
-                <span>Flota Consorcio Arapotí</span>
-                <span id="route-count" style="font-size: 11px; color: #38bdf8;">Línea 20 (004B)</span>
+                <span>Flota <span id="sidebar-company-name">__COMPANY_NAME__</span></span>
+                <span id="route-count" style="font-size: 11px; color: #38bdf8;">__AGENCY_ID__</span>
             </div>
 
-            <!-- Punto 4: Controles de Filtro de Ramal y Visibilidad Rápida -->
+            <!-- Controles de Filtro de Ramal y Visibilidad Rápida -->
             <div class="sidebar-filters">
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                     <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Ramal:</span>
                     <select id="sel-route-filter" onchange="onRouteFilterChange()" style="background: #1e293b; color: #f8fafc; border: 1px solid #334155; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; outline: none; cursor: pointer; flex: 1; max-width: 240px;">
                         <option value="ALL">Todos los Ramales</option>
-                        <option value="020C">020C (San Lorenzo - Asunción)</option>
-                        <option value="020D">020D (Asunción - San Lorenzo)</option>
-                        <option value="020E">020E</option>
-                        <option value="020F">020F (Asunción - San Lorenzo)</option>
-                        <option value="0210">0210</option>
-                        <option value="0211">0211</option>
                     </select>
                 </div>
+
                 <div style="display: flex; align-items: center; justify-content: space-between;">
                     <span style="font-size: 11px; color: #cbd5e1;">Buses Visibles: <strong id="lbl-visible-count" style="color: #38bdf8;">0</strong> / <span id="lbl-total-count">0</span></span>
                     <div style="display: flex; gap: 6px;">
@@ -2144,6 +2226,9 @@ async def live_map_view(request: Request):
         let ws = null;
         let pollingInterval = null;
 
+        const CURRENT_AGENCY = "__CURRENT_AGENCY__";
+        let hasFittedMap = false;
+
         const routeColors = {
             '020f': '#38bdf8',
             '020c': '#a855f7',
@@ -2151,8 +2236,73 @@ async def live_map_view(request: Request):
             '020e': '#14b8a6',
             '0210': '#10b981',
             '0211': '#ec4899',
+            '0138': '#10b981',
+            '0139': '#06b6d4',
+            '013a': '#f59e0b',
+            '013b': '#ec4899',
+            '004a': '#3b82f6',
+            '004b': '#6366f1',
+            '004c': '#8b5cf6',
+            '004d': '#a855f7',
+            '004e': '#d946ef',
+            '004f': '#ec4899',
+            '0050': '#f43f5e',
+            '0051': '#f97316',
+            '0052': '#eab308',
+            '0053': '#84cc16',
             'default': '#64748b'
         };
+
+        function getRouteColor(code) {
+            if (!code) return '#64748b';
+            const c = code.toLowerCase();
+            if (routeColors[c]) return routeColors[c];
+            let hash = 0;
+            for (let i = 0; i < c.length; i++) hash = c.charCodeAt(i) + ((hash << 5) - hash);
+            const h = Math.abs(hash % 360);
+            return `hsl(${h}, 85%, 55%)`;
+        }
+
+        function populateRouteDropdown(features) {
+            const sel = document.getElementById('sel-route-filter');
+            if (!sel || !features) return;
+            const currentVal = sel.value;
+            sel.innerHTML = '<option value="ALL">Todos los Ramales</option>';
+            const seen = new Set();
+            features.forEach(f => {
+                const code = f.properties.route_code;
+                const name = f.properties.route_name || code;
+                if (code && !seen.has(code.toLowerCase())) {
+                    seen.add(code.toLowerCase());
+                    const opt = document.createElement('option');
+                    opt.value = code.toUpperCase();
+                    opt.textContent = `${code.toUpperCase()} (${name})`;
+                    sel.appendChild(opt);
+                }
+            });
+            if (currentVal && seen.has(currentVal.toLowerCase())) {
+                sel.value = currentVal;
+            }
+        }
+
+        function updateLegendRoutes(features) {
+            const leg = document.getElementById('legend-routes-list');
+            if (!leg || !features) return;
+            leg.innerHTML = '';
+            const seen = new Set();
+            features.forEach(f => {
+                const p = f.properties;
+                const code = (p.route_code || '').toLowerCase();
+                if (code && !seen.has(code)) {
+                    seen.add(code);
+                    const color = getRouteColor(code);
+                    const item = document.createElement('div');
+                    item.className = 'legend-item';
+                    item.innerHTML = `<div class="legend-line" style="background: ${color};"></div><span>${p.route_name || p.route_code}</span>`;
+                    leg.appendChild(item);
+                }
+            });
+        }
 
         function updateGeofenceRadii() {
             const itinR = parseInt(document.getElementById('range-itin-geofence').value, 10);
@@ -2175,7 +2325,7 @@ async def live_map_view(request: Request):
             const layer = L.geoJSON(geojson, {
                 style: (feature) => {
                     const code = (feature.properties.route_code || '').toLowerCase();
-                    const color = isHistorical ? '#ef4444' : (routeColors[code] || routeColors['default']);
+                    const color = isHistorical ? '#ef4444' : getRouteColor(code);
                     return {
                         color: color,
                         weight: isHistorical ? 5 : 4,
@@ -2194,6 +2344,17 @@ async def live_map_view(request: Request):
                 }
             }).addTo(map);
             shapeLayers.push(layer);
+
+            if (!isHistorical && geojson.features.length > 0) {
+                populateRouteDropdown(geojson.features);
+                updateLegendRoutes(geojson.features);
+                if (!hasFittedMap) {
+                    try {
+                        map.fitBounds(layer.getBounds(), { padding: [40, 40], maxZoom: 14 });
+                        hasFittedMap = true;
+                    } catch (e) {}
+                }
+            }
         }
 
         function renderStopsGeoJSON(geojson) {
@@ -2244,11 +2405,14 @@ async def live_map_view(request: Request):
         async function loadHistoricalShape() {
             const dateVal = document.getElementById('hist-date').value;
             if (!dateVal) return;
+            const selRoute = document.getElementById('sel-route-filter').value;
+            const rCode = (selRoute && selRoute !== 'ALL') ? selRoute.toLowerCase() : (window.firstRouteCode || '0138');
+            const agId = CURRENT_AGENCY || '002A';
             try {
-                const res = await fetch(`/api/v1/shapes/history?route_code=020f&agency_id=004B&date=${dateVal}`);
+                const res = await fetch(`/api/v1/shapes/history?route_code=${rCode}&agency_id=${agId}&date=${dateVal}`);
                 const data = await res.json();
                 renderShapesGeoJSON(data, true);
-                document.getElementById('hist-label').textContent = `Vigente al ${dateVal}`;
+                document.getElementById('hist-label').textContent = `Vigente al ${dateVal} (${rCode.toUpperCase()})`;
             } catch (err) {
                 console.error("Error cargando histórico:", err);
             }
@@ -2256,7 +2420,8 @@ async def live_map_view(request: Request):
 
         async function resetToActiveShapes() {
             try {
-                const res = await fetch('/api/v1/shapes/active');
+                const url = CURRENT_AGENCY ? `/api/v1/shapes/active?agency_id=${CURRENT_AGENCY}` : '/api/v1/shapes/active';
+                const res = await fetch(url);
                 const data = await res.json();
                 renderShapesGeoJSON(data, false);
                 document.getElementById('hist-label').textContent = `Histórico Anterior`;
@@ -2264,6 +2429,7 @@ async def live_map_view(request: Request):
                 console.error("Error reseteando shapes:", err);
             }
         }
+
 
         /* -------------------------------------------------------------
            Cálculo de Rumbo Cinemático Geodésico según Vector de Movimiento
@@ -2310,13 +2476,18 @@ async def live_map_view(request: Request):
             });
         }
 
+        function getBusKey(v) {
+            if (!v) return '';
+            return v.vehicle_key || `${v.agency_id || '004B'}_${v.bus_id}`;
+        }
+
         /* -------------------------------------------------------------
            Punto 3: Interpolación Cinemática Suave a 60 FPS (animateMarker)
         ------------------------------------------------------------- */
-        function animateMarker(busId, marker, startLatLng, endLatLng, durationMs = 15000) {
-            if (markerAnimations[busId]) {
-                cancelAnimationFrame(markerAnimations[busId]);
-                delete markerAnimations[busId];
+        function animateMarker(busKey, marker, startLatLng, endLatLng, durationMs = 15000) {
+            if (markerAnimations[busKey]) {
+                cancelAnimationFrame(markerAnimations[busKey]);
+                delete markerAnimations[busKey];
             }
 
             const startLat = startLatLng.lat !== undefined ? startLatLng.lat : startLatLng[0];
@@ -2326,9 +2497,11 @@ async def live_map_view(request: Request):
 
             const dLat = endLat - startLat;
             const dLng = endLng - startLng;
-            if (Math.abs(dLat) < 0.000005 && Math.abs(dLng) < 0.000005) {
+
+            // Si el salto es mayor a 2 km (~0.02 grados) o infinitesimal, ajustar de inmediato sin animar trazos erráticos
+            if (Math.abs(dLat) > 0.02 || Math.abs(dLng) > 0.02 || (Math.abs(dLat) < 0.000005 && Math.abs(dLng) < 0.000005)) {
                 marker.setLatLng([endLat, endLng]);
-                if (busCircles[busId]) busCircles[busId].setLatLng([endLat, endLng]);
+                if (busCircles[busKey]) busCircles[busKey].setLatLng([endLat, endLng]);
                 return;
             }
 
@@ -2344,18 +2517,18 @@ async def live_map_view(request: Request):
                 const curPos = [curLat, curLng];
 
                 marker.setLatLng(curPos);
-                if (busCircles[busId]) busCircles[busId].setLatLng(curPos);
+                if (busCircles[busKey]) busCircles[busKey].setLatLng(curPos);
 
                 if (progress < 1.0) {
-                    markerAnimations[busId] = requestAnimationFrame(step);
+                    markerAnimations[busKey] = requestAnimationFrame(step);
                 } else {
                     marker.setLatLng([endLat, endLng]);
-                    if (busCircles[busId]) busCircles[busId].setLatLng([endLat, endLng]);
-                    delete markerAnimations[busId];
+                    if (busCircles[busKey]) busCircles[busKey].setLatLng([endLat, endLng]);
+                    delete markerAnimations[busKey];
                 }
             }
 
-            markerAnimations[busId] = requestAnimationFrame(step);
+            markerAnimations[busKey] = requestAnimationFrame(step);
         }
 
         /* -------------------------------------------------------------
@@ -2371,7 +2544,8 @@ async def live_map_view(request: Request):
                 if (!busRoute.includes(selectedRoute.toUpperCase())) return false;
             }
 
-            if (busVisibility[v.bus_id] === false) return false;
+            const busKey = getBusKey(v);
+            if (busVisibility[busKey] === false) return false;
 
             return true;
         }
@@ -2380,7 +2554,7 @@ async def live_map_view(request: Request):
            Punto 3: Actualización Reactiva de Marcador en Mapa
         ------------------------------------------------------------- */
         function renderOrUpdateVehicleMarker(v, animate = true) {
-            const busId = v.bus_id;
+            const busKey = getBusKey(v);
             const lat = (v.last_latitude !== undefined && v.last_latitude !== null) ? v.last_latitude : v.latitude;
             const lon = (v.last_longitude !== undefined && v.last_longitude !== null) ? v.last_longitude : v.longitude;
             if (lat === undefined || lon === undefined || lat === null || lon === null || isNaN(lat) || isNaN(lon)) {
@@ -2390,8 +2564,8 @@ async def live_map_view(request: Request):
             const isVisible = isBusVisibleByFilter(v);
 
             if (!isVisible) {
-                if (markers[busId]) map.removeLayer(markers[busId]);
-                if (busCircles[busId]) map.removeLayer(busCircles[busId]);
+                if (markers[busKey]) map.removeLayer(markers[busKey]);
+                if (busCircles[busKey]) map.removeLayer(busCircles[busKey]);
                 return;
             }
 
@@ -2437,22 +2611,10 @@ async def live_map_view(request: Request):
             };
 
             const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
+            // Rumbo y Velocidad directos de telemetría nativa VMT (sin cálculo artificial entre puntos)
             let heading = isFault ? 0.0 : (v.heading_deg || v.heading_degrees || v.rumbo || 0.0);
-
-            // Corrección de Rumbo Físico: Si el móvil ya existe en mapa y hay desplazamiento real (>= 3m),
-            // derivar el rumbo directamente del vector de movimiento geodésico en pantalla.
-            if (markers[busId]) {
-                const oldLatLng = markers[busId].getLatLng();
-                const dLatM = (lat - oldLatLng.lat) * 111000;
-                const dLngM = (lon - oldLatLng.lng) * 111000 * Math.cos(lat * Math.PI / 180);
-                const moveDist = Math.sqrt(dLatM * dLatM + dLngM * dLngM);
-                if (moveDist >= 3.0) {
-                    heading = getMovementBearing(oldLatLng.lat, oldLatLng.lng, lat, lon);
-                    markers[busId]._lastHeading = heading;
-                } else if (markers[busId]._lastHeading !== undefined) {
-                    heading = markers[busId]._lastHeading;
-                }
-            }
+            let speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? Number(v.speed_kmh) : ((v.last_speed_kmh !== undefined && v.last_speed_kmh !== null) ? Number(v.last_speed_kmh) : ((v.velocidad !== undefined && v.velocidad !== null) ? Number(v.velocidad) : 0.0)));
+            if (isNaN(speed)) speed = 0.0;
 
             let popupContent = '';
             if (isFault) {
@@ -2477,7 +2639,7 @@ async def live_map_view(request: Request):
                         <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
                         Ramal: <b>${v.route_id}</b> (${v.agency_id})<br>
                         Estado: <b style="color: ${markerColor};">${estadoEsp}</b><br>
-                        Rumbo: <b>${Math.round(heading)}°</b> | Velocidad: <b>${speed} km/h</b><br>
+                        Rumbo: <b>${Math.round(heading)}°</b> | Velocidad: <b>${speed.toFixed(1)} km/h</b><br>
                         Progreso: <b>${v.progress_percent || 0}%</b> (${v.distance_traveled_km || 0} / ${v.route_total_km || 0} km)<br>
                         Desvío Traza: <b>${Math.round(v.deviation_meters || 0)}m</b><br>
                         Geocerca Activa: <b style="color: ${circleColor};">${geofenceLabel}</b>
@@ -2487,10 +2649,10 @@ async def live_map_view(request: Request):
 
             const icon = createBusDivIcon(v, markerColor, heading, speed);
 
-            if (!markers[busId]) {
-                markers[busId] = L.marker(newLatLng, { icon: icon }).addTo(map).bindPopup(popupContent);
-                markers[busId]._lastHeading = heading;
-                busCircles[busId] = L.circle(newLatLng, {
+            if (!markers[busKey]) {
+                markers[busKey] = L.marker(newLatLng, { icon: icon }).addTo(map).bindPopup(popupContent);
+                markers[busKey]._lastHeading = heading;
+                busCircles[busKey] = L.circle(newLatLng, {
                     radius: circleRadius,
                     color: circleColor,
                     fillColor: circleColor,
@@ -2499,23 +2661,23 @@ async def live_map_view(request: Request):
                     dashArray: circleDash
                 }).addTo(map);
             } else {
-                const marker = markers[busId];
+                const marker = markers[busKey];
                 if (!map.hasLayer(marker)) marker.addTo(map);
-                if (busCircles[busId] && !map.hasLayer(busCircles[busId])) busCircles[busId].addTo(map);
+                if (busCircles[busKey] && !map.hasLayer(busCircles[busKey])) busCircles[busKey].addTo(map);
 
                 marker.setIcon(icon).setPopupContent(popupContent);
 
                 if (animate) {
                     const oldLatLng = marker.getLatLng();
-                    animateMarker(busId, marker, oldLatLng, newLatLng, 15000);
+                    animateMarker(busKey, marker, oldLatLng, newLatLng, 15000);
                 } else {
                     marker.setLatLng(newLatLng);
-                    if (busCircles[busId]) busCircles[busId].setLatLng(newLatLng);
+                    if (busCircles[busKey]) busCircles[busKey].setLatLng(newLatLng);
                 }
 
-                if (busCircles[busId]) {
-                    busCircles[busId].setRadius(circleRadius);
-                    busCircles[busId].setStyle({
+                if (busCircles[busKey]) {
+                    busCircles[busKey].setRadius(circleRadius);
+                    busCircles[busKey].setStyle({
                         color: circleColor,
                         fillColor: circleColor,
                         fillOpacity: isFault ? 0.05 : 0.12,
@@ -2529,7 +2691,8 @@ async def live_map_view(request: Request):
            Punto 4: Actualización Reactiva de Tarjetas en Sidebar
         ------------------------------------------------------------- */
         function updateVehicleCardInSidebar(v) {
-            const card = document.getElementById(`card-bus-${v.bus_id}`);
+            const busKey = getBusKey(v);
+            const card = document.getElementById(`card-bus-${busKey}`);
             if (!card) {
                 renderFullSidebarList();
                 return;
@@ -2538,8 +2701,8 @@ async def live_map_view(request: Request):
             const isVisible = isBusVisibleByFilter(v);
             card.style.display = isVisible ? 'block' : 'none';
 
-            const isChecked = busVisibility[v.bus_id] !== false;
-            const chk = document.getElementById(`chk-bus-${v.bus_id}`);
+            const isChecked = busVisibility[busKey] !== false;
+            const chk = document.getElementById(`chk-bus-${busKey}`);
             if (chk) chk.checked = isChecked;
             card.style.opacity = isChecked ? '1' : '0.5';
 
@@ -2556,28 +2719,28 @@ async def live_map_view(request: Request):
             const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
             const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
 
-            const statusEl = document.getElementById(`card-status-text-${v.bus_id}`);
+            const statusEl = document.getElementById(`card-status-text-${busKey}`);
             if (statusEl) statusEl.textContent = estadoEsp;
 
-            const speedEl = document.getElementById(`card-speed-${v.bus_id}`);
+            const speedEl = document.getElementById(`card-speed-${busKey}`);
             if (speedEl) speedEl.textContent = `${speed} km/h`;
 
-            const devEl = document.getElementById(`card-dev-${v.bus_id}`);
+            const devEl = document.getElementById(`card-dev-${busKey}`);
             if (devEl) {
                 devEl.textContent = `${Math.round(v.deviation_meters || 0)}m`;
                 devEl.style.color = v.deviation_alert ? '#ef4444' : '#34d399';
             }
 
-            const pingEl = document.getElementById(`card-ping-${v.bus_id}`);
+            const pingEl = document.getElementById(`card-ping-${busKey}`);
             if (pingEl) pingEl.textContent = v.last_ping_time ? v.last_ping_time.slice(11, 19) : '--';
 
-            const progPctEl = document.getElementById(`card-prog-pct-${v.bus_id}`);
+            const progPctEl = document.getElementById(`card-prog-pct-${busKey}`);
             if (progPctEl) progPctEl.textContent = `${v.progress_percent || 0}%`;
 
-            const progKmEl = document.getElementById(`card-prog-km-${v.bus_id}`);
+            const progKmEl = document.getElementById(`card-prog-km-${busKey}`);
             if (progKmEl) progKmEl.textContent = `${v.distance_traveled_km || 0}`;
 
-            const progBarEl = document.getElementById(`card-prog-bar-${v.bus_id}`);
+            const progBarEl = document.getElementById(`card-prog-bar-${busKey}`);
             if (progBarEl) progBarEl.style.width = `${Math.min(v.progress_percent || 0, 100)}%`;
         }
 
@@ -2600,6 +2763,7 @@ async def live_map_view(request: Request):
             const gpsTimeoutMin = parseInt(document.getElementById('sel-gps-timeout')?.value || 30, 10);
 
             listEl.innerHTML = vehicles.map(v => {
+                const busKey = getBusKey(v);
                 const isFault = v._isFault;
                 const state = isFault ? 'GPS_FAULT' : (v.state || v.current_state || 'IN_TRANSIT');
                 const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
@@ -2607,37 +2771,37 @@ async def live_map_view(request: Request):
                 const pillLabel = isFault ? 'Falla GPS' : (stateLabels[state] || state);
                 const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
                 const isVisible = isBusVisibleByFilter(v);
-                const isChecked = busVisibility[v.bus_id] !== false;
+                const isChecked = busVisibility[busKey] !== false;
 
                 return `
-                    <div class="bus-card ${isFault ? 'card-fault' : ''}" id="card-bus-${v.bus_id}" style="display: ${isVisible ? 'block' : 'none'}; opacity: ${isChecked ? '1' : '0.5'};" onclick="focusBus('${v.bus_id}')" title="Clic para centrar en radar">
+                    <div class="bus-card ${isFault ? 'card-fault' : ''}" id="card-bus-${busKey}" style="display: ${isVisible ? 'block' : 'none'}; opacity: ${isChecked ? '1' : '0.5'};" onclick="focusBus('${busKey}')" title="Clic para centrar en radar">
                         <div class="bus-header">
                             <div style="display: flex; align-items: center; gap: 8px;">
-                                <input type="checkbox" id="chk-bus-${v.bus_id}" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleBusVisibility('${v.bus_id}')" style="cursor: pointer; accent-color: #38bdf8; width: 14px; height: 14px;">
+                                <input type="checkbox" id="chk-bus-${busKey}" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleBusVisibility('${busKey}')" style="cursor: pointer; accent-color: #38bdf8; width: 14px; height: 14px;">
                                 <span class="bus-title">🚍 Coche #${v.bus_id} (${v.license_plate})</span>
                             </div>
                             <span class="status-pill ${pillClass}">${pillLabel}</span>
                         </div>
                         <div style="font-size: 11px; color: ${isFault ? '#ef4444' : '#38bdf8'}; margin: 4px 0 6px 0; font-weight: 500; display: flex; align-items: center; gap: 4px;">
                             <span>${isFault ? '⚠️' : '📍'}</span>
-                            <span id="card-status-text-${v.bus_id}">${estadoEsp}</span>
+                            <span id="card-status-text-${busKey}">${estadoEsp}</span>
                         </div>
                         ${!isFault ? `
                         <div class="progress-container">
                             <div class="progress-labels">
                                 <span>Progreso Itinerario</span>
-                                <span><strong id="card-prog-pct-${v.bus_id}">${v.progress_percent || 0}%</strong> (<span id="card-prog-km-${v.bus_id}">${v.distance_traveled_km || 0}</span> km)</span>
+                                <span><strong id="card-prog-pct-${busKey}">${v.progress_percent || 0}%</strong> (<span id="card-prog-km-${busKey}">${v.distance_traveled_km || 0}</span> km)</span>
                             </div>
                             <div class="progress-bar-bg">
-                                <div class="progress-bar-fill" id="card-prog-bar-${v.bus_id}" style="width: ${Math.min(v.progress_percent || 0, 100)}%;"></div>
+                                <div class="progress-bar-fill" id="card-prog-bar-${busKey}" style="width: ${Math.min(v.progress_percent || 0, 100)}%;"></div>
                             </div>
                         </div>
                         ` : ''}
                         <div class="bus-meta">
-                            <div>Ramal: <strong style="color:#f8fafc;" id="card-route-${v.bus_id}">${v.route_id || '--'}</strong></div>
-                            <div>Velocidad: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};" id="card-speed-${v.bus_id}">${speed} km/h</strong></div>
-                            <div>Desvío Traza: <strong style="color:${v.deviation_alert ? '#ef4444':'#34d399'};" id="card-dev-${v.bus_id}">${Math.round(v.deviation_meters || 0)}m</strong></div>
-                            <div>Último Ping: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};" id="card-ping-${v.bus_id}">${v.last_ping_time ? v.last_ping_time.slice(11, 19) : '--'}</strong></div>
+                            <div>Ramal: <strong style="color:#f8fafc;" id="card-route-${busKey}">${v.route_id || '--'}</strong></div>
+                            <div>Velocidad: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};" id="card-speed-${busKey}">${speed} km/h</strong></div>
+                            <div>Desvío Traza: <strong style="color:${v.deviation_alert ? '#ef4444':'#34d399'};" id="card-dev-${busKey}">${Math.round(v.deviation_meters || 0)}m</strong></div>
+                            <div>Último Ping: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};" id="card-ping-${busKey}">${v.last_ping_time ? v.last_ping_time.slice(11, 19) : '--'}</strong></div>
                         </div>
                         ${isFault ? `<div class="alert-box">📡 Alerta: Sin reporte GPS hace ${Math.round(v._minsAgo)} min (> ${gpsTimeoutMin}m)</div>` : ''}
                         ${v.speed_alert && !isFault ? '<div class="alert-box">⚠️ ¡EXCESO DE VELOCIDAD (>70 km/h)!</div>' : ''}
@@ -2650,13 +2814,13 @@ async def live_map_view(request: Request):
         /* -------------------------------------------------------------
            Punto 4: Manejo de Visibilidad, Checkboxes y Botones Rápidos
         ------------------------------------------------------------- */
-        function toggleBusVisibility(busId) {
-            busVisibility[busId] = busVisibility[busId] === false ? true : false;
-            const v = activeVehicles[busId];
+        function toggleBusVisibility(busKey) {
+            busVisibility[busKey] = busVisibility[busKey] === false ? true : false;
+            const v = activeVehicles[busKey];
             if (v) renderOrUpdateVehicleMarker(v, false);
-            const card = document.getElementById(`card-bus-${busId}`);
+            const card = document.getElementById(`card-bus-${busKey}`);
             if (card) {
-                card.style.opacity = busVisibility[busId] !== false ? '1' : '0.5';
+                card.style.opacity = busVisibility[busKey] !== false ? '1' : '0.5';
             }
             updateHeaderMetrics();
         }
@@ -2665,7 +2829,7 @@ async def live_map_view(request: Request):
             const selectedRoute = document.getElementById('sel-route-filter')?.value || 'ALL';
             Object.values(activeVehicles).forEach(v => {
                 if (selectedRoute === 'ALL' || (v.route_id || '').toUpperCase().includes(selectedRoute.toUpperCase())) {
-                    busVisibility[v.bus_id] = val;
+                    busVisibility[getBusKey(v)] = val;
                 }
             });
             applyRouteAndVisibilityFilters();
@@ -2738,11 +2902,14 @@ async def live_map_view(request: Request):
             // Auto-enfocar si viene en query ?bus=...
             const urlParams = new URLSearchParams(window.location.search);
             const targetBus = urlParams.get('bus');
-            if (targetBus && markers[targetBus] && !window._hasAutoFocusedBus) {
-                window._hasAutoFocusedBus = true;
-                const m = markers[targetBus];
-                map.setView(m.getLatLng(), 16, { animate: true });
-                setTimeout(() => m.openPopup(), 400);
+            if (targetBus && !window._hasAutoFocusedBus) {
+                const matchKey = Object.keys(markers).find(k => k === targetBus || k.endsWith(`_${targetBus}`));
+                if (matchKey && markers[matchKey]) {
+                    window._hasAutoFocusedBus = true;
+                    const m = markers[matchKey];
+                    map.setView(m.getLatLng(), 16, { animate: true });
+                    setTimeout(() => m.openPopup(), 400);
+                }
             }
 
             const feedEl = document.getElementById('event-feed');
@@ -2755,9 +2922,9 @@ async def live_map_view(request: Request):
             }
         }
 
-        function focusBus(busId) {
-            if (markers[busId]) {
-                const m = markers[busId];
+        function focusBus(busKey) {
+            if (markers[busKey]) {
+                const m = markers[busKey];
                 map.setView(m.getLatLng(), 16, { animate: true });
                 m.openPopup();
             }
@@ -2790,15 +2957,17 @@ async def live_map_view(request: Request):
                             if (msg.shapes) renderShapesGeoJSON(msg.shapes);
                             if (msg.stops) renderStopsGeoJSON(msg.stops);
                             (msg.vehicles || []).forEach(v => {
-                                activeVehicles[v.bus_id] = v;
-                                if (busVisibility[v.bus_id] === undefined) busVisibility[v.bus_id] = true;
+                                const bKey = getBusKey(v);
+                                activeVehicles[bKey] = v;
+                                if (busVisibility[bKey] === undefined) busVisibility[bKey] = true;
                             });
                             eventHistory = msg.events || [];
                             updateUI(false);
                         } else if (msg.type === 'vehicle_update' && msg.vehicle) {
                             const v = msg.vehicle;
-                            activeVehicles[v.bus_id] = v;
-                            if (busVisibility[v.bus_id] === undefined) busVisibility[v.bus_id] = true;
+                            const bKey = getBusKey(v);
+                            activeVehicles[bKey] = v;
+                            if (busVisibility[bKey] === undefined) busVisibility[bKey] = true;
 
                             // Actualización reactiva por bus con animación sin redibujar todo
                             renderOrUpdateVehicleMarker(v, true);
@@ -2830,8 +2999,9 @@ async def live_map_view(request: Request):
                 if (data.shapes && shapeLayers.length === 0) renderShapesGeoJSON(data.shapes);
                 if (data.stops && stopLayers.length === 0) renderStopsGeoJSON(data.stops);
                 (data.vehicles || []).forEach(v => {
-                    activeVehicles[v.bus_id] = v;
-                    if (busVisibility[v.bus_id] === undefined) busVisibility[v.bus_id] = true;
+                    const bKey = getBusKey(v);
+                    activeVehicles[bKey] = v;
+                    if (busVisibility[bKey] === undefined) busVisibility[bKey] = true;
                 });
                 eventHistory = data.events || [];
                 updateUI(true);
@@ -2961,3 +3131,9 @@ async def live_map_view(request: Request):
 </body>
 </html>
 """
+    html = html.replace("__COMPANY_BADGE__", company_badge)
+    html = html.replace("__COMPANY_NAME__", user_company)
+    html = html.replace("__AGENCY_ID__", user_agency or "Todas las Líneas")
+    html = html.replace("__CURRENT_AGENCY__", user_agency)
+    return html
+

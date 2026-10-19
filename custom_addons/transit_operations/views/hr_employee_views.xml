@@ -14,10 +14,14 @@
                 <page string="Transporte y Licencia de Chofer" name="transit_driver_info"
                       invisible="transit_role != 'driver'">
                     <group>
-                        <group string="Identificación de Chofer">
+                        <group string="Identificación de Chofer y Registros Laborales">
                             <field name="driver_code"/>
+                            <field name="identification_id" string="Cédula de Identidad"/>
+                            <field name="driver_ci_expiry" string="Vencimiento Cédula"/>
+                            <field name="mtess_date" string="Fecha Ingreso MTESS"/>
+                            <field name="ips_date" string="Fecha Ingreso IPS"/>
                         </group>
-                        <group string="Habilitación / Licencia">
+                        <group string="Habilitación / Licencia de Conducir">
                             <field name="driver_license_number"/>
                             <field name="driver_license_category"/>
                             <field name="driver_license_expiry"/>
@@ -37,7 +41,10 @@
             <xpath expr="//field[@name='work_email']" position="after">
                 <field name="concessionaire_id" optional="show"/>
                 <field name="transit_role" widget="badge" optional="show"/>
-                <field name="driver_license_expiry" optional="hide"/>
+                <field name="identification_id" optional="show" string="C.I."/>
+                <field name="driver_license_expiry" optional="show" string="Venc. Licencia"/>
+                <field name="ips_date" optional="hide" string="Fecha IPS"/>
+                <field name="mtess_date" optional="hide" string="Fecha MTESS"/>
             </xpath>
         </field>
     </record>

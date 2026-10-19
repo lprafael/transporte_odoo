@@ -192,6 +192,10 @@
         <field name="view_mode">kanban,list,form</field>
         <field name="domain">[('is_driver', '=', True)]</field>
         <field name="context">{'default_is_driver': True}</field>
+        <field name="view_ids" eval="[(5, 0, 0),
+            (0, 0, {'view_mode': 'kanban', 'view_id': ref('view_partner_kanban_transit_driver')}),
+            (0, 0, {'view_mode': 'list', 'view_id': ref('view_partner_tree_inherit_driver')})
+        ]"/>
     </record>
 
     <menuitem id="menu_transit_employees"

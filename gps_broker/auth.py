@@ -19,6 +19,8 @@ from psycopg2.extras import RealDictCursor
 from fastapi import Request, HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse
 
+import redis
+
 logger = logging.getLogger("gps_auth")
 
 # Configuración de Odoo y Base de Datos
@@ -32,22 +34,39 @@ PG_DB = os.getenv("PG_DB", "flota_db")
 PG_USER = os.getenv("PG_USER", "odoo")
 PG_PASS = os.getenv("PG_PASS", "odoo_password")
 
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+_redis_client = None
+try:
+    _redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=True)
+except Exception as e:
+    logger.debug(f"Aviso conectando a Redis en auth.py: {e}")
+
 DEVICE_API_TOKEN = os.getenv("DEVICE_API_TOKEN", "GPS_DEVICE_SECRET_2026")
 ODOO_API_TOKEN = os.getenv("ODOO_API_TOKEN", "GPS_SECRET_KEY_2026")
 
-# Caché local en memoria de sesiones verificadas (TTL 45 segundos)
-# Formato: {session_id: {"user": dict, "expires_at": float}}
+# Caché local en memoria y en Redis de sesiones verificadas (TTL 300 segundos)
 _SESSION_CACHE: Dict[str, Dict[str, Any]] = {}
-CACHE_TTL_SECONDS = 45
+CACHE_TTL_SECONDS = 300
 
 
 def _get_cached_user(session_id: str) -> Optional[Dict[str, Any]]:
-    """Recupera el usuario de la caché si la sesión no ha expirado."""
+    """Recupera el usuario de la caché (memoria o Redis) si la sesión no ha expirado."""
     cached = _SESSION_CACHE.get(session_id)
     if cached and cached.get("expires_at", 0) > time.time():
         return cached["user"]
     if cached:
         _SESSION_CACHE.pop(session_id, None)
+
+    if _redis_client:
+        try:
+            val = _redis_client.get(f"auth:session:{session_id}")
+            if val:
+                u = json.loads(val)
+                _SESSION_CACHE[session_id] = {"user": u, "expires_at": time.time() + 60}
+                return u
+        except Exception:
+            pass
     return None
 
 
@@ -57,12 +76,22 @@ def _set_cached_user(session_id: str, user_dict: Dict[str, Any]):
         "user": user_dict,
         "expires_at": time.time() + CACHE_TTL_SECONDS
     }
+    if _redis_client:
+        try:
+            _redis_client.set(f"auth:session:{session_id}", json.dumps(user_dict), ex=CACHE_TTL_SECONDS)
+        except Exception:
+            pass
 
 
 def invalidate_session(session_id: Optional[str]):
-    """Invalida la sesión local en caché."""
-    if session_id and session_id in _SESSION_CACHE:
+    """Invalida la sesión local y en Redis."""
+    if session_id:
         _SESSION_CACHE.pop(session_id, None)
+        if _redis_client:
+            try:
+                _redis_client.delete(f"auth:session:{session_id}")
+            except Exception:
+                pass
 
 
 def _enrich_user_from_db(uid: int, base_user: Dict[str, Any]) -> Dict[str, Any]:
