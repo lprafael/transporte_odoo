@@ -71,6 +71,12 @@ Sistema Integral de Transporte de Pasajeros y Flota de Buses:
         'views/transit_requirement_views.xml',
         'views/transit_menus.xml',
     ],
+    'assets': {
+        'web.assets_backend': [
+            'transit_operations/static/src/css/timetable_column_filters.css',
+            'transit_operations/static/src/js/timetable_column_filters.js',
+        ],
+    },
     'installable': True,
     'application': True,
     'auto_install': False,

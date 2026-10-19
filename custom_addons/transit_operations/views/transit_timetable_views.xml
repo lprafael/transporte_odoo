@@ -4,7 +4,7 @@
         <field name="name">transit.timetable.list</field>
         <field name="model">transit.timetable</field>
         <field name="arch" type="xml">
-            <list string="Horarios Programados (Cuadro de Marcha)">
+            <list string="Horarios Programados (Cuadro de Marcha)" class="o_transit_timetable_list">
                 <field name="service_id"/>
                 <field name="route_id"/>
                 <field name="direction"/>
@@ -68,7 +68,12 @@
                 <field name="service_id"/>
                 <field name="route_id"/>
                 <field name="service_code"/>
+                <field name="service_number"/>
                 <field name="direction"/>
+                <field name="tipo_dia"/>
+                <field name="franja_horaria"/>
+                <field name="tipo_franja_icf"/>
+                <field name="cid_programacion_id"/>
                 <filter string="Ida" name="filter_ida" domain="[('direction', '=', 'ida')]"/>
                 <filter string="Vuelta" name="filter_vuelta" domain="[('direction', '=', 'vuelta')]"/>
                 <separator/>
@@ -85,6 +90,13 @@
                     <filter string="Sentido" name="group_direction" context="{'group_by': 'direction'}"/>
                     <filter string="Franja Horaria ICF" name="group_franja" context="{'group_by': 'franja_horaria'}"/>
                 </group>
+                <searchpanel>
+                    <field name="service_id" icon="fa-bus" enable_counters="1" select="multi"/>
+                    <field name="route_id" icon="fa-road" enable_counters="1" select="multi"/>
+                    <field name="tipo_dia" icon="fa-calendar" enable_counters="1"/>
+                    <field name="direction" icon="fa-arrows-h" enable_counters="1"/>
+                    <field name="tipo_franja_icf" icon="fa-clock-o" enable_counters="1"/>
+                </searchpanel>
             </search>
         </field>
     </record>

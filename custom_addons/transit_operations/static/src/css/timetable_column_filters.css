@@ -1,0 +1,107 @@
+/* ==========================================================================
+   Filtros en Cabecera de Tablas (Column Filters) - Estilo Excel / DataTables
+   Módulo: transit_operations (Odoo 18)
+   ========================================================================== */
+
+.o_transit_header_filters {
+    background-color: #f8f9fa !important;
+    border-bottom: 2px solid #dee2e6 !important;
+}
+
+.o_transit_header_filters th {
+    padding: 4px 6px !important;
+    vertical-align: middle !important;
+    background-color: #f1f3f5 !important;
+    border-top: none !important;
+    font-weight: normal !important;
+}
+
+.o_transit_col_filter_wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.o_transit_col_filter_input {
+    width: 100% !important;
+    min-width: 60px !important;
+    height: 24px !important;
+    padding: 2px 20px 2px 6px !important;
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    color: #495057 !important;
+    background-color: #ffffff !important;
+    border: 1px solid #ced4da !important;
+    border-radius: 4px !important;
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out, background-color 0.15s ease;
+}
+
+.o_transit_col_filter_input:focus {
+    border-color: #0d6efd !important;
+    background-color: #ffffff !important;
+    outline: 0 !important;
+    box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.2) !important;
+}
+
+.o_transit_col_filter_input.has_value {
+    background-color: #e7f1ff !important;
+    border-color: #86b7fe !important;
+    font-weight: 600 !important;
+    color: #0d6efd !important;
+}
+
+.o_transit_clear_col_btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: #adb5bd;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+}
+
+.o_transit_col_filter_input.has_value + .o_transit_clear_col_btn {
+    display: inline-block;
+}
+
+.o_transit_clear_col_btn:hover {
+    color: #dc3545;
+}
+
+.o_transit_reset_all_btn {
+    padding: 2px 6px !important;
+    font-size: 11px !important;
+    color: #6c757d !important;
+    background: #e9ecef !important;
+    border: 1px solid #ced4da !important;
+    border-radius: 4px !important;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.o_transit_reset_all_btn:hover {
+    background: #dc3545 !important;
+    border-color: #dc3545 !important;
+    color: #ffffff !important;
+}
+
+.o_transit_filter_counter_badge {
+    display: inline-block;
+    margin-left: 8px;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background-color: #e3f2fd;
+    color: #0d47a1;
+    font-weight: 500;
+}
