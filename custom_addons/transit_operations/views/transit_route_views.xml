@@ -68,7 +68,7 @@
                             </field>
                         </page>
                         <page string="Geocercas y Puntos de Control GPS">
-                            <group string="Geocercas de Cabeceras y Retorno (Resolución GVMT / CID)">
+                            <group string="Geocercas de Cabeceras y Retorno Operativo">
                                 <group string="Cabecera Origen (G1)">
                                     <field name="origin_latitude"/>
                                     <field name="origin_longitude"/>
@@ -99,7 +99,7 @@
                                 </list>
                             </field>
                         </page>
-                        <page string="Historial de Trazados y Vigencias (Shapes CID/VMT)">
+                        <page string="Historial de Trazados y Vigencias (Shapes Oficiales)">
                             <field name="shape_ids">
                                 <list default_order="valid_from desc, version desc">
                                     <field name="version"/>
@@ -158,7 +158,7 @@
         <field name="name">transit.route.shape.list</field>
         <field name="model">transit.route.shape</field>
         <field name="arch" type="xml">
-            <list string="Historial de Trazados y Shapes (CID/VMT)" default_order="route_id asc, valid_from desc">
+            <list string="Historial de Trazados y Shapes Oficiales" default_order="route_id asc, valid_from desc">
                 <field name="route_id"/>
                 <field name="version"/>
                 <field name="valid_from"/>
@@ -206,7 +206,7 @@
         <field name="view_mode">list,form</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
-                Historial Bi-temporal de Itinerarios oficiales VMT
+                Historial Bi-temporal de Itinerarios Oficiales
             </p>
             <p>
                 Permite auditar los trazados vigentes y desvíos históricos para cada ramal de la flota.

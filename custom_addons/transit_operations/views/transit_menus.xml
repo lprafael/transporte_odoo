@@ -53,7 +53,7 @@
     </record>
 
     <record id="action_transit_compliance_dashboard" model="ir.actions.act_url">
-        <field name="name">Tablero de Cumplimiento VMT e ICF Provisorio</field>
+        <field name="name">Tablero de Cumplimiento e ICF Provisorio</field>
         <field name="url">/transit/redirect/compliance</field>
         <field name="target">new</field>
     </record>
@@ -111,7 +111,7 @@
               sequence="5"/>
 
     <menuitem id="menu_transit_holiday"
-              name="Calendario de Feriados (Régimen GVMT)"
+              name="Calendario de Feriados Oficiales"
               parent="menu_transit_planning"
               action="action_transit_holiday"
               sequence="8"/>
@@ -123,7 +123,7 @@
               sequence="10"/>
 
     <menuitem id="menu_transit_route_shapes"
-              name="Historial de Trazados (Shapes CID)"
+              name="Historial de Trazados y Shapes"
               parent="menu_transit_planning"
               action="action_transit_route_shape"
               sequence="15"/>

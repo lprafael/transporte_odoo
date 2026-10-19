@@ -1,5 +1,5 @@
 # Guía de Especificaciones Técnicas
-## Sistema Integral de Control de Flota de Buses, Despacho Operativo, Facturación Electrónica SIFEN, Telemetría MQTT/Protobuf (Res. GVMT 065/2024), Motor Geoespacial PostGIS, ETA Predictivo por Parada, Dashboard de Cumplimiento VMT y Detector de Pegonamiento
+## Sistema Integral de Control de Flota de Buses, Despacho Operativo, Facturación Electrónica SIFEN, Telemetría MQTT/Protobuf de Alta Frecuencia, Motor Geoespacial PostGIS, ETA Predictivo por Parada, Dashboard de Cumplimiento Operativo y Detector de Pegonamiento
 
 > **Versión:** 3.0.0 | **Última actualización:** Septiembre 2026 | **Alcance:** Línea 20 Eléctrica (6 ramales: 020c, 020d, 020e, 020f, 0210, 0211 — 692 despachos diarios)
 
@@ -7,7 +7,7 @@
 
 ### 1. Resumen Ejecutivo y Alcance del Sistema
 
-El sistema implementado en **Odoo 18.0** junto con el **Microservicio Broker de Telemetría GPS** y el broker **Mosquitto MQTT** constituye una plataforma de gestión 360° para empresas de transporte público de pasajeros y flotas comerciales, alineada plenamente a las normativas de la República del Paraguay (DNIT e-Kuatia y Viceministerio de Transporte - GVMT).
+El sistema implementado en **Odoo 18.0** junto con el **Microservicio Broker de Telemetría GPS** y el broker **Mosquitto MQTT** constituye una plataforma de gestión 360° para empresas de transporte público de pasajeros y flotas comerciales, alineada plenamente a las normativas de la República del Paraguay (DNIT e-Kuatia y Estándares de Transporte Metropolitano).
 
 El sistema resuelve **once grandes capas** de negocio y tecnología:
 
@@ -17,7 +17,7 @@ El sistema resuelve **once grandes capas** de negocio y tecnología:
    Definición de ramales e itinerarios, cuadros de marcha (frecuencias y horarios teóricos), órdenes de despacho diario, inspección pre-operativa obligatoria de seguridad (checklist mecánico de 5 puntos), control de desvíos y puntualidad con tablero Kanban en tiempo real.
 3. **Capa Fiscal - Facturación Electrónica SIFEN (DNIT Paraguay / e-Kuatia):**  
    Liquidación y facturación electrónica periódica mensual consolidada por el monto global recaudado (evitando la inviable emisión individual por cada pasaje masivo). Cálculo estricto del **CDC de 44 dígitos con Módulo 11 ponderado**, generación de URL pública y código QR oficial para consulta en e-Kuatia, y conector listo para Denarius.
-4. **Capa de Telemetría GPS, MQTT y Protocol Buffers (Res. GVMT N° 065/2024):**  
+4. **Capa de Telemetría GPS, MQTT y Protocol Buffers (Normativa de Regularidad y Frecuencias):**  
    Ingesta dual de alta frecuencia:
    - **MQTT sobre Mosquitto (QoS 1)** con soporte para tramas binarias compactas **Protocol Buffers v3** (`transit.proto`), según la especificación obligatoria para empresas de transporte y proveedores homologados (EPAS, Sitrack, etc.).
    - **REST HTTP** autenticado con `X-Device-Token` para módems y validadores convencionales.
@@ -26,17 +26,17 @@ El sistema resuelve **once grandes capas** de negocio y tecnología:
 6. **Capa de Supervisión de Regularidad y Detector de Pegonamiento (Headway & Bunching):**  
    Tablero lineal interactivo (`/headway`) con proyección horizontal de cada ramal (0.0 km a total km), cálculo dinámico de la brecha métrica ($\Delta \text{km}$) y tiempo estimado de separación entre coches consecutivos, con alertas semafóricas automáticas ante pegonamiento crítico ($< 800\text{ m}$). API REST dedicada `/api/v1/bunching/alerts` para integración con paneles externos y notificaciones Odoo.
 7. **Capa de Contextualización Urbana e Intersección Próxima:**  
-   Motor de geocodificación en memoria y Redis (`street_service.py`) que resuelve en $< 1\text{ ms}$ la arteria exacta y la próxima esquina transversal hacia la que se dirige el bus: `Circulando (Calle X aproximándose a Calle Y)`, alimentado por las **340 paradas oficiales del CID/VMT** indexadas por kilometraje PostGIS.
+   Motor de geocodificación en memoria y Redis (`street_service.py`) que resuelve en $< 1\text{ ms}$ la arteria exacta y la próxima esquina transversal hacia la que se dirige el bus: `Circulando (Calle X aproximándose a Calle Y)`, alimentado por las **340 paradas oficiales homologadas** indexadas por kilometraje PostGIS.
 8. **Capa de ETA Predictivo por Parada (Tiempo de Espera en Tiempo Real):**  
    Sistema de cálculo de tiempo de espera para pasajeros, sin aplicación nativa, accesible desde cualquier celular vía QR en la parada física. Calcula cuánto falta para que llegue el próximo eléctrico usando `ST_LineLocatePoint` PostGIS + velocidad media histórica de `telemetry_ping` (last 4h). Cache Redis de 20 segundos. Página móvil-first con auto-refresh cada 15s y código QR embebido.
-9. **Capa de Cumplimiento Regulatorio VMT (Res. GVMT 065/2024):**  
-   Dashboard interactivo en tiempo real (`/compliance`) que monitorea el cumplimiento de la cuota de **692 despachos diarios** exigida por la Resolución GVMT N° 065/2024. Muestra: % de cumplimiento actual, proyección al cierre del día, detalle por los 6 ramales, historial de 30 días, alertas automáticas de déficit crítico. Integrable vía API REST `/api/v1/compliance/today` y `/api/v1/compliance/alerts`.
+9. **Capa de Cumplimiento Regulatorio Transporte (Normativa Operativa):**  
+   Dashboard interactivo en tiempo real (`/compliance`) que monitorea el cumplimiento de la cuota de **692 despachos diarios** exigida por la Normativa Operativa de Frecuencias. Muestra: % de cumplimiento actual, proyección al cierre del día, detalle por los 6 ramales, historial de 30 días, alertas automáticas de déficit crítico. Integrable vía API REST `/api/v1/compliance/today` y `/api/v1/compliance/alerts`.
 10. **Capa de Programación Operativa Soberana (Línea 20 Eléctrica):**  
     Administración y control directo en Odoo (`transit.timetable`) de los **692 despachos diarios oficiales** de los 6 ramales eléctricos (020c, 020d, 020e, 020f, 0210, 0211), con flexibilidad total para adecuar cuadros de marcha, frecuencias e intervalos sin depender de aprobaciones ni enlaces informáticos externos.
 11. **Capa de Autonomía Operativa y Soberanía Tecnológica (100% Desconectado / Offline-Ready):**  
-    Arquitectura autosuficiente con **cero dependencia operativa** de servidores o bases de datos del Viceministerio de Transporte (VMT). La telemetría ingresa directamente desde las unidades en calle hacia el broker interno vía MQTT (Protobuf v3) o REST; los trazados PostGIS, paradas y cuadros de marcha residen localmente en Odoo y PostgreSQL. La extracción inicial desde el CID se realizó exclusivamente como estrategia de migración/siembra rápida (data bootstrapping) por única vez, garantizando inmunidad ante caídas de servicios gubernamentales.
+    Arquitectura autosuficiente con **cero dependencia operativa** de servidores o bases de datos del Entidad Central. La telemetría ingresa directamente desde las unidades en calle hacia el broker interno vía MQTT (Protobuf v3) o REST; los trazados PostGIS, paradas y cuadros de marcha residen localmente en Odoo y PostgreSQL. La extracción inicial desde el repositorio oficial de itinerarios se realizó exclusivamente como estrategia de migración/siembra rápida (data bootstrapping) por única vez, garantizando inmunidad ante caídas de servicios gubernamentales.
 12. **Capa Multi-Tenant y Gobernanza por Concesionaria (`ir.rule` Security Isolation):**  
-    Arquitectura multi-empresa sobre una sola base de datos PostgreSQL/PostGIS. Cada empresa concesionaria (`transit.concessionaire`) cuenta con aislamiento lógico estricto: sus usuarios (despachadores, jefes de tráfico) solo pueden ver, despachar y auditar sus propios buses, rutas, horarios, choferes y boletos. El perfil de Administrador Global / Regulador (VMT) cuenta con visión 360° no restrictiva para fiscalizar la totalidad de la red metropolitana.
+    Arquitectura multi-empresa sobre una sola base de datos PostgreSQL/PostGIS. Cada empresa concesionaria (`transit.concessionaire`) cuenta con aislamiento lógico estricto: sus usuarios (despachadores, jefes de tráfico) solo pueden ver, despachar y auditar sus propios buses, rutas, horarios, choferes y boletos. El perfil de Administrador Global / Auditor Global cuenta con visión 360° no restrictiva para fiscalizar la totalidad de la red metropolitana.
 
 
 ---
@@ -50,7 +50,7 @@ El sistema resuelve **once grandes capas** de negocio y tecnología:
                                +---------------------------------------------+
                                            |                           |
                                            | Tramas Protobuf v3        | Pings HTTP POST
-                                           | Topic MQTT GVMT           | (X-Device-Token)
+                                           | Topic MQTT           | (X-Device-Token)
                                            v                           v
                                +-------------------------+     +-------------------------+
                                |  MOSQUITTO MQTT BROKER  |     |     REST API INGESTA    |
@@ -97,7 +97,7 @@ El sistema resuelve **once grandes capas** de negocio y tecnología:
 * **Procesamiento en Redis:** El Broker almacena el estado instantáneo de la flota en Redis con latencia de sub-milisegundo.
 * **Event-Driven:** A Odoo solo viaja la información de valor comercial: `"El bus 104 salió de terminal"`, `"Cruzó la parada Multiplaza"`, `"Excedió los 70 km/h"` o `"Finalizó el viaje con Odómetro 154218 km"`.
 * **Cómputo Espacial en PostGIS:** El cálculo geométrico de si el bus se desvió del trazado o qué porcentaje del itinerario completó se delega al motor geoespacial nativo (`ST_LineLocatePoint`, `ST_Distance`), liberando a la CPU del servidor de aplicaciones.
-* **Autonomía Operativa Total (Offline-Ready):** El sistema opera con soberanía técnica absoluta y no depende de enlaces de red hacia el Viceministerio ni de servidores estatales. Si internet o los servicios del VMT se interrumpen, la empresa sigue despachando, fiscalizando, facturando vía SIFEN y controlando frecuencias en su red local/privada sin ninguna interrupción.
+* **Autonomía Operativa Total (Offline-Ready):** El sistema opera con soberanía técnica absoluta y no depende de enlaces de red hacia el Autoridad Reguladora ni de servidores estatales. Si internet o los servicios oficial se interrumpen, la empresa sigue despachando, fiscalizando, facturando vía SIFEN y controlando frecuencias en su red local/privada sin ninguna interrupción.
 
 ---
 
@@ -111,8 +111,8 @@ Extiende el módulo oficial `fleet` de Odoo 18:
   1. `Master Bus MB120NSE - 12m Piso Bajo Urbano (LTO Carga Rápida)`: 45 asientos, 25 parados (70 pasajeros totales), rampa de accesibilidad para movilidad reducida, batería LTO de 350 kWh y autonomía estimada de 280 km.
   2. `Master Bus MB90NSE - 9m Piso Bajo Urbano (LTO Carga Rápida)`: 32 asientos, 18 parados (50 pasajeros totales), rampa para sillas de ruedas, batería LTO de 260 kWh y autonomía estimada de 240 km.
   3. `Master Bus MB120Inter - 12m Interurbano (LTO Carga Rápida)`: 49 asientos reclinables, 10 parados (59 pasajeros totales), batería LTO de 380 kWh y autonomía de 320 km.
-* **Electrificación y Tecnología de Baterías:** Tecnología de **Baterías LTO (Lithium Titanate Oxide / Titanato de Litio)** de carga ultra-rápida (15-20 minutos en cabecera/patio), conector estándar **GB/T** (Res. GVMT 065/2024), telemetría de estado de carga (`current_soc`), estado de salud (`current_soh` ~99.5%) y validación de pre-acondicionamiento térmico de cabina.
-* **Flota Activa Vinculada (Sincronización CID / VMT):** 30 unidades 100% eléctricas (Coches 1 al 30) adjudicadas al Consorcio Arapoti (Agencia `004B` / Línea 20 Eléctrica), con chapas oficiales RUA (`IOT093` a `IOT129`), números de chasis (`RHVALCLE...`), IDSAM de validador de billetaje electrónico y certificados de Inspección Técnica Vehicular (ITV Ivesur) y seguros vigentes.
+* **Electrificación y Tecnología de Baterías:** Tecnología de **Baterías LTO (Lithium Titanate Oxide / Titanato de Litio)** de carga ultra-rápida (15-20 minutos en cabecera/patio), conector estándar **GB/T** (Normativa Operativa), telemetría de estado de carga (`current_soc`), estado de salud (`current_soh` ~99.5%) y validación de pre-acondicionamiento térmico de cabina.
+* **Flota Activa Vinculada (Sincronización Itinerarios Oficiales):** 30 unidades 100% eléctricas (Coches 1 al 30) adjudicadas al Consorcio Arapoti (Agencia `004B` / Línea 20 Eléctrica), con chapas oficiales RUA (`IOT093` a `IOT129`), números de chasis (`RHVALCLE...`), IDSAM de validador de billetaje electrónico y certificados de Inspección Técnica Vehicular (ITV Ivesur) y seguros vigentes.
 * **Equipamiento Operativo:** Aire Acondicionado de alta capacidad (`has_air_conditioning`), Rampa para sillas de ruedas / Movilidad Reducida (`has_wheelchair_ramp`), e Identificador del Validador de Billetaje (`validator_terminal_id`).
 * **Control Legal y Vencimientos:** Fechas de expiración de **Inspección Técnica Vehicular (ITV)** y **Póliza de Seguros**, con semáforo dinámico de alerta:
   * `vigente` (Verde)
@@ -193,7 +193,7 @@ Vincula: Unidad (`fleet.vehicle`) + Chofer (`res.partner`) + Horario Programado 
   Debido a la naturaleza del transporte público masivo (miles de transacciones diarias a tarifas fijas de 3.400 Gs o 4.000 Gs), emitir un comprobante fiscal SIFEN por cada pasajero individual es operativamente inviable y saturaría los servicios fiscales. En su lugar, el sistema implementa la **Facturación Periódica Consolidada**:
   1. El área contable selecciona los boletos confirmados del mes o período mediante el filtro predefinido *"Pendientes de Facturar"*.
   2. Ejecuta la acción masiva **"Generar Factura Electrónica Mensual Consolidada SIFEN"**.
-  3. Odoo consolida el monto total acumulado, desglosa las líneas contables por ramal/itinerario, genera una única factura en `account.move` por el monto global a nombre de *Consumidor Final / Recaudación Mensual* (o a nombre de la empresa liquidadora de billetaje / VMT), calcula el **CDC de 44 dígitos** y genera el **código QR oficial**.
+  3. Odoo consolida el monto total acumulado, desglosa las líneas contables por ramal/itinerario, genera una única factura en `account.move` por el monto global a nombre de *Consumidor Final / Recaudación Mensual* (o a nombre de la empresa liquidadora de billetaje / Transporte), calcula el **CDC de 44 dígitos** y genera el **código QR oficial**.
   4. Todos los boletos incluidos quedan enlazados a la factura mensual (`invoice_id`) y cambian automáticamente su estado a `invoiced`.
 
 ---
@@ -214,15 +214,15 @@ $$\text{CDC} = \text{TipoDoc (2)} + \text{RUC (8)} + \text{DV (1)} + \text{Estab
 * Generación de imagen QR en base64 para impresión en el boleto / factura electrónica (KUDE).
 
 #### 4.3. Modelo de Facturación Consolidada de Pasajes (Monto Global Periódico)
-* **Receptor Fiscal:** Emitida a nombre de *Consumidor Final (Recaudación Mensual Consolidada)* con RUC innominado (`44444401-7`), o a nombre de la entidad liquidadora del sistema de billetaje electrónico (ej: Pronet / TDP / Jaha / Más) o subsidio estatal VMT.
+* **Receptor Fiscal:** Emitida a nombre de *Consumidor Final (Recaudación Mensual Consolidada)* con RUC innominado (`44444401-7`), o a nombre de la entidad liquidadora del sistema de billetaje electrónico (ej: Pronet / TDP / Jaha / Más) o subsidio estatal ente regulador.
 * **Cuentas Contables Integradas:** Imputación automática a la cuenta de ingresos *4.1.01.01 Ingresos por Venta de Pasajes* contra *1.1.02.01 Clientes por Pasajes a Cobrar*.
 * **Trazabilidad Total:** Cada boleto individual emitido por los buses o terminales mantiene la referencia exacta a la factura electrónica mensual en la que fue consolidado.
 
 ---
 
-### 5. Especificación del Protocolo MQTT, Protobuf y Microservicio Receptor (Res. GVMT N° 065/2024)
+### 5. Especificación del Protocolo MQTT, Protobuf y Microservicio Receptor (Normativa de Regularidad y Frecuencias)
 
-El sistema incorpora la arquitectura de mensajería y el estándar regulatorio exigido por el Viceministerio de Transporte (Paraguay) mediante la **Resolución GVMT N° 065/2024**:
+El sistema incorpora la arquitectura de mensajería y el estándar regulatorio exigido por el Autoridad Reguladora mediante la **Normativa Operativa de Frecuencias**:
 
 #### 5.1. Broker Mosquitto MQTT y Transporte de Red
 * **Contenedor:** `odoo_transporte_mosquitto` (Eclipse Mosquitto 2.1.2).
@@ -302,7 +302,7 @@ El ingestor únicamente emite peticiones HTTP hacia Odoo (`POST /api/v1/transit/
 La persistencia histórica se apoya en PostgreSQL 15 con PostGIS 3.4 y particionado mensual para evitar el *table bloat*:
 
 ```sql
--- 1. Tabla de telemetría GPS particionada por mes (Resolución GVMT 065/2024 Sección 4.1)
+-- 1. Tabla de telemetría GPS particionada por mes (Normativa de Frecuencias Sección 4.1)
 CREATE EXTENSION IF NOT EXISTS postgis;
 
 CREATE TABLE telemetry_ping (
@@ -379,11 +379,11 @@ CREATE TABLE transit_stop (
    - Construye el punto PostGIS: `geom = ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)`.
    - Busca y vincula la clave foránea `route_shape_id` correspondiente a la versión vigente en el momento en que se emitió el ping.
 
-#### 6.3. Trazados y Paradas Oficiales Homologadas (Base CID / VMT)
+#### 6.3. Trazados y Paradas Oficiales Homologadas (Base Itinerarios Oficiales)
 
-Mediante el script [`scripts/sync_cid_shapes_to_flota.py`](file:///c:/Users/lpraf/OneDrive/Documentos/Poliverso/transporte_odoo/scripts/sync_cid_shapes_to_flota.py) y [`scripts/sync_cid_stops_to_flota.py`](file:///c:/Users/lpraf/OneDrive/Documentos/Poliverso/transporte_odoo/scripts/sync_cid_stops_to_flota.py) se sincronizaron directamente desde la base central CID (`bbdd-monitoreo-cid`) los 6 ramales operativos oficiales de la Empresa La Limpeña SRL (Línea 20 - Agencia 004B) con sus respectivas geometrías, fechas de vigencia y **340 paradas oficiales**:
+Mediante el script [`scripts/sync_shapes_to_flota.py`](file:///c:/Users/lpraf/OneDrive/Documentos/Poliverso/transporte_odoo/scripts/sync_shapes_to_flota.py) y [`scripts/sync_stops_to_flota.py`](file:///c:/Users/lpraf/OneDrive/Documentos/Poliverso/transporte_odoo/scripts/sync_stops_to_flota.py) se sincronizaron directamente desde la base central sistema de itinerarios (`bbdd-itinerarios-central`) los 6 ramales operativos oficiales de la Empresa La Limpeña SRL (Línea 20 - Agencia 004B) con sus respectivas geometrías, fechas de vigencia y **340 paradas oficiales**:
 
-| Ramal | Sentido | Origen Oficial | Destino Oficial | Longitud | Paradas CID |
+| Ramal | Sentido | Origen Oficial | Destino Oficial | Longitud | Paradas Oficiales |
 | :---: | :---: | :--- | :--- | :---: | :---: |
 | **020c** | `inbound` (Ida) | San Lorenzo (Azara) | Asunción Centro (Puerto) | 18.28 km | 37 paradas |
 | **020d** | `outbound` (Vuelta) | Asunción Centro (Puerto) | San Lorenzo (Azara) | 18.02 km | 45 paradas |
@@ -458,7 +458,7 @@ El servicio incluye expresiones regulares optimizadas para abreviar y formalizar
 * `General / Coronel / Mariscal` &rarr; `Gral. / Cnel. / Mcal.`
 
 #### 8.3. Detección de Intersección por Paradas Homologadas
-El cruce transversal próximo no requiere consultar cartografía pesada: el motor compara el kilometraje lineal actual del bus ($d_{\text{bus}}$) contra el vector en memoria de las 340 paradas oficiales del ramal, seleccionando la primera parada ubicada adelante ($d_{\text{stop}} \ge d_{\text{bus}} - 0.02\text{ km}$) y extrayendo el nombre de la calle que cruza (*source_name* oficial del CID).
+El cruce transversal próximo no requiere consultar cartografía pesada: el motor compara el kilometraje lineal actual del bus ($d_{\text{bus}}$) contra el vector en memoria de las 340 paradas oficiales del ramal, seleccionando la primera parada ubicada adelante ($d_{\text{stop}} \ge d_{\text{bus}} - 0.02\text{ km}$) y extrayendo el nombre de la calle que cruza (*source_name* oficial de itinerarios).
 
 ---
 
@@ -468,10 +468,10 @@ El sistema está diseñado bajo el principio fundamental de **autonomía operati
 
 #### 9.1. Principio de No Dependencia de Servidores Externos
 * **Operación Soberana:** Todos los procesos operacionales (despacho en terminales, inspección pre-operativa, control de headway en calle, facturación mensual consolidada SIFEN y cálculo de ETA) se ejecutan de manera 100% autosuficiente en los servidores propios de la empresa.
-* **Cero Puntos Únicos de Fallo Gubernamentales:** Si la base central del VMT o los enlaces del Estado experimentan caídas, bloqueos de firewall, mantenimientos o lentitud, las operaciones de la Línea 20 no se ven afectadas en lo más mínimo.
-* **Estrategia de Carga Inicial (Data Bootstrapping):** La interacción previa con las bases del CID (`bbdd-monitoreo-cid`) fue concebida exclusivamente como un **mecanismo de migración e importación por única vez (onboarding acelerado)**. Esto permitió cargar los 692 despachos oficiales y las 340 paradas homologadas con precisión métrica sin requerir semanas de digitación manual.
+* **Cero Puntos Únicos de Fallo Gubernamentales:** Si la servidores externos o los enlaces del Estado experimentan caídas, bloqueos de firewall, mantenimientos o lentitud, las operaciones de la Línea 20 no se ven afectadas en lo más mínimo.
+* **Estrategia de Carga Inicial (Data Bootstrapping):** La interacción previa con las bases de itinerarios (`bbdd-itinerarios-central`) fue concebida exclusivamente como un **mecanismo de migración e importación por única vez (onboarding acelerado)**. Esto permitió cargar los 692 despachos oficiales y las 340 paradas homologadas con precisión métrica sin requerir semanas de digitación manual.
 * **Gobierno Local de la Operación:** Toda la información cargada reside en PostgreSQL (`flota_db`) y en los modelos de Odoo (`transit.timetable`, `transit.route`, `transit_route_shape`), siendo propiedad directa de la empresa, que puede reconfigurar horarios, ramales o paradas según sus necesidades de tráfico.
-* **Exportación Batch Opcional:** En caso de que normativas futuras exijan remitir auditorías o informes periódicos al Viceministerio, la arquitectura permite habilitar conectores de exportación asíncrona en segundo plano, sin interferir jamás en la ingesta de telemetría ni en la operación de tráfico.
+* **Exportación Batch Opcional:** En caso de que normativas futuras exijan remitir auditorías o informes periódicos al Autoridad Reguladora, la arquitectura permite habilitar conectores de exportación asíncrona en segundo plano, sin interferir jamás en la ingesta de telemetría ni en la operación de tráfico.
 
 ---
 
@@ -515,7 +515,7 @@ El sistema está diseñado bajo el principio fundamental de **autonomía operati
 
 ### 12. Programación Operativa y Trazados de Servicios Eléctricos (Línea 20)
 
-El sistema almacena y gestiona en su base local `flota_db` de forma **100% autónoma y soberana** la programación operativa y los trazados vectoriales de los **Servicios Eléctricos de Línea 20 (E1, E2 y E3)**, habiendo utilizado la base del CID únicamente como estrategia de migración/siembra rápida (data bootstrapping) por única vez.
+El sistema almacena y gestiona en su base local `flota_db` de forma **100% autónoma y soberana** la programación operativa y los trazados vectoriales de los **Servicios Eléctricos de Línea 20 (E1, E2 y E3)**, habiendo utilizado la base central de itinerarios únicamente como estrategia de migración/siembra rápida (data bootstrapping) por única vez.
 
 #### 12.1. Arquitectura de Datos del Schema `servicios_especiales` en `flota_db`
 
@@ -622,20 +622,20 @@ Verifica que los 5 contenedores nucleares autónomos estén corriendo:
 
 #### 13.2. Carga Inicial de Shapes y Paradas (Bootstrap / Migración por única vez)
 ```powershell
-# Extraer los 6 ramales oficiales y sus 340 paradas desde la base CID:
-python scripts/sync_cid_shapes_to_flota.py
+# Extraer los 6 ramales oficiales y sus 340 paradas desde la base Itinerario:
+python scripts/sync_shapes_to_flota.py
 ```
 
 #### 13.3. Carga Inicial de la Programación Operativa (Bootstrap / Migración por única vez)
 ```powershell
 # Extraer y cargar los 908 horarios de servicios_especiales.programacion_operativa:
-python scripts/sync_cid_programacion_to_flota.py
+python scripts/sync_programacion_to_flota.py
 ```
 
 #### 13.4. Acceso a los Tableros de Control
 * **Tablero Lineal de Intervalos & Pegonamiento:** [http://localhost:8088/headway](http://localhost:8088/headway)
 * **Radar Satelital en Vivo con Leaflet:** [http://localhost:8088/map](http://localhost:8088/map)
-* **Dashboard Cumplimiento VMT (Res. 065/2024):** [http://localhost:8088/compliance](http://localhost:8088/compliance)
+* **Dashboard Cumplimiento Operativo (Res. 065/2024):** [http://localhost:8088/compliance](http://localhost:8088/compliance)
 * **Pagina de Parada para Pasajeros (con QR):** [http://localhost:8088/parada/{stop_code}](http://localhost:8088/parada/P001)
 * **ERP Odoo 18 (Operaciones de Transporte):** [http://localhost:8069](http://localhost:8069)
 * **Cuadros de Marcha / Horarios Oficiales en Odoo:** Menu `Operaciones de Transporte > Planificacion de Trafico > Cuadros de Marcha / Frecuencias`.
@@ -674,21 +674,21 @@ docker exec -e MQTT_BROKER_HOST=mosquitto odoo_transporte_gps_broker python /scr
 | `res.partner` | `custom_addons/transit_operations/models/res_partner.py` | Licencias de Chofer y RUC/DV para SIFEN. |
 | `transit.route` | `custom_addons/transit_operations/models/transit_route.py` | 6 Ramales oficiales Linea 20, Tarifas, Cabeceras. |
 | `transit.route.checkpoint` | `custom_addons/transit_operations/models/transit_route_checkpoint.py` | Paradas intermedias con lat/lon y radio en Odoo. |
-| `transit.timetable` | `custom_addons/transit_operations/models/transit_timetable.py` | Horarios teoricos, frecuencias y programacion CID. |
+| `transit.timetable` | `custom_addons/transit_operations/models/transit_timetable.py` | Horarios teoricos, frecuencias y programacion de frecuencias. |
 | `transit.dispatch` | `custom_addons/transit_operations/models/transit_dispatch.py` | Despacho diario, checklist, odometria, telemetria. |
 | `transit.ticket` | `custom_addons/transit_operations/models/transit_ticket.py` | Emision de boletos con facturacion 1 clic. |
 | `account.move` | `custom_addons/transit_operations/models/account_move_sifen.py` | Facturacion Electronica SIFEN, CDC 44 y QR. |
 | `main.py` | `gps_broker/main.py` | Broker FastAPI v3.0.0, Redis, WebSockets, motor PostGIS, 15+ endpoints REST. |
 | `headway_service.py` | `gps_broker/headway_service.py` | Tablero Lineal de Frecuencias, regularidad y detector de pegonamiento. |
 | `eta_service.py` | `gps_broker/eta_service.py` | **NUEVO:** ETA predictivo por parada. ST_LineLocatePoint + velocidad historica + pagina movil con QR. |
-| `compliance_service.py` | `gps_broker/compliance_service.py` | **NUEVO:** Dashboard cumplimiento Res. GVMT 065/2024: 692 despachos/dia, alertas, historial 30d. |
+| `compliance_service.py` | `gps_broker/compliance_service.py` | **NUEVO:** Dashboard cumplimiento Normativa Operativa: 692 despachos/dia, alertas, historial 30d. |
 | `street_service.py` | `gps_broker/street_service.py` | Motor de contextualizacion de calles y proximas intersecciones con Redis geocache. |
-| `sync_vmt_telemetry.py` | `scripts/sync_vmt_telemetry.py` | Conector continuo con base productiva VMT (`app_monitoreo_mensajeoperativo`). |
-| `sync_cid_shapes_to_flota.py` | `scripts/sync_cid_shapes_to_flota.py` | Sincronizador de shapes vectoriales historicos de los 6 ramales desde CID. |
-| `sync_cid_stops_to_flota.py` | `scripts/sync_cid_stops_to_flota.py` | Sincronizador de 340 paradas oficiales del CID con kilometraje lineal PostGIS. |
-| `sync_cid_programacion_to_flota.py` | `scripts/sync_cid_programacion_to_flota.py` | Sincronizador de 908 cuadros de marcha oficiales Electricos hacia Odoo `transit.timetable`. |
+| `sync_vmt_telemetry.py` | `scripts/sync_vmt_telemetry.py` | Conector continuo con fuente externa de telemetria (`app_monitoreo_mensajeoperativo`). |
+| `sync_shapes_to_flota.py` | `scripts/sync_shapes_to_flota.py` | Sincronizador de shapes vectoriales historicos de los 6 ramales desde Itinerario. |
+| `sync_stops_to_flota.py` | `scripts/sync_stops_to_flota.py` | Sincronizador de 340 paradas oficiales homologadas con kilometraje lineal PostGIS. |
+| `sync_programacion_to_flota.py` | `scripts/sync_programacion_to_flota.py` | Sincronizador de 908 cuadros de marcha oficiales Electricos hacia Odoo `transit.timetable`. |
 | `mosquitto.conf` / `passwd` | `config/mosquitto/` | Configuracion de Mosquitto MQTT, listeners 1883/9001 y credenciales cifradas. |
-| `transit.proto` | `gps_broker/proto/transit.proto` | Especificacion Protobuf v3 oficial de la Resolucion GVMT N 065/2024. |
+| `transit.proto` | `gps_broker/proto/transit.proto` | Especificacion Protobuf v3 oficial de la Resolucion Regulación N 065/2024. |
 | `transit_pb2.py` | `gps_broker/proto/transit_pb2.py` | Clases Python compiladas nativamente con `protoc` para deserializacion de ultra-alta velocidad. |
 | `decoder.py` | `gps_broker/proto/decoder.py` | Decodificador Protobuf v3 con soporte dual (nativo y parser de emergencia). |
 | `mqtt_consumer.py` | `gps_broker/mqtt_consumer.py` | Consumidor MQTT background suscrito a `transporte/flota/+/operacion`. |
@@ -759,7 +759,7 @@ $$\text{ICF (\%)} = \min\left(\frac{S_{\text{obs}}}{S_{\text{prog}}} \times 100,
   * Cuota diaria exigida (`daily_target_departures`).
   * Tolerancias de despacho (`tolerance_early_min`, `tolerance_late_min`).
   * Parámetros espaciales de fiscalización (`geofence_radius_m`, `itinerary_buffer_m`, `compliance_threshold_pct`, `incomplete_threshold_pct`).
-  * Vinculación a empresa concesionaria (`concessionaire_id`), código GVMT (`agency_vmt_id`) y código CID (`cid_service_id`).
+  * Vinculación a empresa concesionaria (`concessionaire_id`), código de agencia (`agency_code_id`) y código de servicio (`ext_service_id`).
 - **`transit.holiday`**: Registro de feriados oficiales de la República del Paraguay. Al calcular programas o auditorías, conmuta automáticamente entre los regímenes de Tipo de Día 5 (Laboral L-V), Tipo de Día 6 (Sábado) y Tipo de Día 7 (Domingos y Feriados).
 
 #### 16.2. Motor de Simulación Operativa y Cobertura de Flota (`transit.simulation.wizard`)

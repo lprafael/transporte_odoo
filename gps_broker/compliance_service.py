@@ -928,7 +928,7 @@ def get_compliance_html(default_agency: str = "004B", default_company: str = "Co
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Poliverso Transit | Auditoría VMT: CBD, ICCBDM, IFO & ICF</title>
+    <title>Poliverso Transit | Auditoría de Cumplimiento: CBD, ICCBDM, IFO &amp; ICF</title>
     <link rel="icon" href="data:,">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
     <style>
@@ -1090,7 +1090,7 @@ def get_compliance_html(default_agency: str = "004B", default_company: str = "Co
         <div class="brand">
             <div class="brand-icon">⚡</div>
             <div>
-                <div class="brand-title">Control de Cumplimiento Regulatorio VMT</div>
+                <div class="brand-title">Control de Cumplimiento y Regularidad Operativa</div>
                 <div class="brand-sub">CBD &middot; ICCBDM &middot; IFO (Línea Base 4 Semanas) &middot; ICF Provisorio</div>
             </div>
         </div>
@@ -1179,7 +1179,7 @@ def get_compliance_html(default_agency: str = "004B", default_company: str = "Co
                             <th>Mín. Normativa</th>
                             <th>CBD Objetivo</th>
                             <th>IFO Franja (%)</th>
-                            <th>Umbral GVMT</th>
+                            <th>Umbral Normativo</th>
                             <th>Estado Normativo</th>
                         </tr>
                     </thead>
