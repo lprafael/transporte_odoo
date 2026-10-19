@@ -263,8 +263,8 @@ HTML = """<!DOCTYPE html>
       <div class="callout callout-info">
         <div>&#127963;</div>
         <div>
-          <strong>Sincronizacion Oficial del CID / VMT (692 Despachos Diarios de Linea 20):</strong><br>
-          El sistema cuenta con la integracion nativa de la base del Viceministerio de Transporte (<code>servicios_especiales.programacion_operativa</code>), con <strong>692 salidas diarias homologadas exclusivamente para los Servicios Electricos de Linea 20 (E1, E2 y E3)</strong> a lo largo de sus 6 ramales oficiales (<code>020c</code>, <code>020d</code>, <code>020e</code>, <code>020f</code>, <code>0210</code>, <code>0211</code>):
+          <strong>Programacion Operativa Homologada (692 Despachos Diarios de Linea 20):</strong><br>
+          El sistema cuenta con el cuadro de marchas oficial precargado con <strong>692 salidas diarias homologadas exclusivamente para los Servicios Electricos de Linea 20 (E1, E2 y E3)</strong> a lo largo de sus 6 ramales oficiales (<code>020c</code>, <code>020d</code>, <code>020e</code>, <code>020f</code>, <code>0210</code>, <code>0211</code>):
           <ul style="margin:.5rem 0 0 1.25rem;font-size:.88rem;color:var(--text-muted);">
             <li><strong>Ramales 020C / 020D (E1):</strong> 110 despachos por sentido (46 dias habiles, 46 sabados, 18 domingos/feriados).</li>
             <li><strong>Ramales 020E / 020F (E2 Variante):</strong> 150 despachos por sentido (63 dias habiles, 63 sabados, 24 domingos/feriados).</li>
