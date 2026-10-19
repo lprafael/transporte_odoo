@@ -18,9 +18,11 @@ import sys
 import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
-from dotenv import load_dotenv
-
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # Conexión Origen: CID VMT
 CID_HOST = os.getenv("CID_DB_HOST", "168.90.177.232")
