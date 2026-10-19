@@ -30,13 +30,15 @@ CID_USER = os.getenv("CID_DB_USER", "cid_admin_user")
 CID_PASS = os.getenv("CID_DB_PASS", "vmtdmtcidccm")
 
 # Conexión Destino: Local flota_db
-# En Windows host se conecta a localhost:5434; dentro de docker a db:5432
 if os.getenv("RUNNING_IN_DOCKER"):
     PG_HOST = os.getenv("PG_HOST", "db")
     PG_PORT = int(os.getenv("PG_PORT", "5432"))
+elif sys.platform == 'win32':
+    PG_HOST = os.getenv("LOCAL_PG_HOST", "localhost")
+    PG_PORT = int(os.getenv("LOCAL_PG_PORT", 5437))
 else:
-    PG_HOST = os.getenv("LOCAL_PG_HOST") or ("localhost" if os.name == 'nt' else os.getenv("PG_HOST", "db"))
-    PG_PORT = int(os.getenv("LOCAL_PG_PORT") or ("5434" if os.name == 'nt' else os.getenv("PG_PORT", "5432")))
+    PG_HOST = os.getenv("PG_HOST", "localhost")
+    PG_PORT = int(os.getenv("PG_PORT", 5432))
 
 PG_NAME = os.getenv("PG_DB", "flota_db")
 PG_USER = os.getenv("PG_USER", "odoo")
@@ -321,10 +323,14 @@ def sync():
     # -------------------------------------------------------------
     print("\n[+] Paso 3: Asegurando transit_service y catálogo de ramales en transit_route...")
     
-    # 3.1 Concesionaria Titular
-    local_cur.execute("SELECT id FROM transit_concessionaire WHERE id = 1;")
+    # 3.1 Concesionaria Titular (Consorcio Arapotí)
+    local_cur.execute("SELECT id FROM transit_concessionaire WHERE name ILIKE '%Arapot%' OR id = 4 LIMIT 1;")
     conc_row = local_cur.fetchone()
-    concessionaire_id = conc_row['id'] if conc_row else 1
+    if not conc_row:
+        local_cur.execute("SELECT id FROM transit_concessionaire ORDER BY id ASC LIMIT 1;")
+        conc_row = local_cur.fetchone()
+    concessionaire_id = conc_row['id'] if conc_row else 4
+    print(f"  [+] Concesionaria Titular para Eléctricos: ID {concessionaire_id}")
 
     # 3.2 Asegurar transit_service para E1, E2, E3
     SERVICES_METADATA = [
