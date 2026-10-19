@@ -42,8 +42,8 @@
                 <templates>
                     <t t-name="card" class="flex-row p-3 border-start border-4"
                        t-attf-class="{{ record.driver_license_status.raw_value == 'expired' ? 'border-danger' : (record.driver_license_status.raw_value == 'warning' ? 'border-warning' : 'border-success') }}">
-                        <aside class="o_kanban_aside_full me-3">
-                            <img t-att-src="kanban_image('res.partner', 'avatar_128', record.id.raw_value)" class="o_kanban_image_fill rounded-circle shadow-sm" alt="Foto Chofer" style="width: 55px; height: 55px; object-fit: cover;"/>
+                        <aside class="o_kanban_aside_full me-3" style="width: 55px; height: 55px;">
+                            <field name="avatar_128" alt="Foto Chofer" class="h-100 w-100 rounded-circle shadow-sm" widget="image" options="{'img_class': 'object-fit-cover rounded-circle w-100 h-100'}"/>
                         </aside>
                         <main class="d-flex flex-column justify-content-between w-100">
                             <div>
