@@ -78,9 +78,7 @@ class ResConfigSettings(models.TransientModel):
         default='transporte_bot',
         help='Identificador de instancia para Evolution API o Z-API'
     )
-    transit_whatsapp_template = fields.Text(
-        string='Plantilla del Mensaje de Alerta',
-        default="""👋 ¡Hola, *{driver_name}*! 🚌
+    DEFAULT_WA_TEMPLATE = """👋 ¡Hola, *{driver_name}*! 🚌
 Te recordamos que tu turno inicia en *{minutes} minutos* (a las *{departure_time}* hs).
 
 📋 *Detalles del Servicio:*
@@ -89,15 +87,20 @@ Te recordamos que tu turno inicia en *{minutes} minutos* (a las *{departure_time
 • *Sentido:* {direction}
 • *Tramo / Ruta:* {route_name}
 
-⚠️ _Por favor preséntate en cabecera con uniforme para la inspección pre-operativa._ ¡Buen viaje! 🚦👍""",
+⚠️ _Por favor preséntate en cabecera con uniforme para la inspección pre-operativa._ ¡Buen viaje! 🚦👍"""
+
+    transit_whatsapp_template = fields.Text(
+        string='Plantilla del Mensaje de Alerta',
+        default=DEFAULT_WA_TEMPLATE,
         help='Plantilla con variables: {driver_name}, {minutes}, {departure_time}, {bus_number}, {license_plate}, {service_name}, {direction}, {route_name}'
     )
 
     def get_values(self):
         res = super(ResConfigSettings, self).get_values()
         ICP = self.env['ir.config_parameter'].sudo()
+        val = ICP.get_param('transit.whatsapp_template')
         res.update(
-            transit_whatsapp_template=ICP.get_param('transit.whatsapp_template', default=self.default_get(['transit_whatsapp_template']).get('transit_whatsapp_template'))
+            transit_whatsapp_template=val if val is not False and val is not None else self.DEFAULT_WA_TEMPLATE
         )
         return res
 
@@ -105,4 +108,5 @@ Te recordamos que tu turno inicia en *{minutes} minutos* (a las *{departure_time
         super(ResConfigSettings, self).set_values()
         ICP = self.env['ir.config_parameter'].sudo()
         ICP.set_param('transit.whatsapp_template', self.transit_whatsapp_template or '')
+
 
