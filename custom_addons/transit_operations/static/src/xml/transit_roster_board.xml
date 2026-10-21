@@ -147,7 +147,7 @@
                                         </button>
                                     </div>
 
-                                    <!-- Filtro por Línea y Búsqueda -->
+                                    <!-- Filtro por Línea, Turno Operativo y Búsqueda -->
                                     <div class="o_cuadrillas_subfilters">
                                         <div class="o_service_filter_group">
                                             <span class="o_filter_label">Línea:</span>
@@ -163,6 +163,31 @@
                                                     <t t-esc="svc"/>
                                                 </button>
                                             </t>
+                                        </div>
+
+                                        <!-- Filtro de Turnos Operativos (Jornada 04:00 a 03:30) -->
+                                        <div class="o_turn_filter_group">
+                                            <span class="o_filter_label">Turno:</span>
+                                            <button class="o_turn_pill"
+                                                    t-att-class="{ 'active': state.selectedTurnFilter === 'ALL' }"
+                                                    t-on-click="() => this.selectTurnFilter('ALL')">
+                                                Todos
+                                            </button>
+                                            <button class="o_turn_pill pill_morning"
+                                                    t-att-class="{ 'active': state.selectedTurnFilter === 'T1' }"
+                                                    t-on-click="() => this.selectTurnFilter('T1')">
+                                                🌅 Mañana (04-12h)
+                                            </button>
+                                            <button class="o_turn_pill pill_afternoon"
+                                                    t-att-class="{ 'active': state.selectedTurnFilter === 'T2' }"
+                                                    t-on-click="() => this.selectTurnFilter('T2')">
+                                                ☀️ Tarde (12-20h)
+                                            </button>
+                                            <button class="o_turn_pill pill_night"
+                                                    t-att-class="{ 'active': state.selectedTurnFilter === 'T3' }"
+                                                    t-on-click="() => this.selectTurnFilter('T3')">
+                                                🌙 Noche (20-03:30h)
+                                            </button>
                                         </div>
                                         
                                         <div class="o_cuadrilla_search_box">
@@ -196,7 +221,7 @@
 
                                             <!-- Encabezado de la Cuadrilla -->
                                             <div class="o_cuadrilla_header">
-                                                <div class="d-flex align-items-center gap-2">
+                                                <div class="d-flex align-items-center gap-2 flex-wrap">
                                                     <span class="o_cuadrilla_time">
                                                         <i class="fa fa-clock-o me-1 text-info"/>
                                                         <t t-esc="shift.start_time_str"/> - <t t-esc="shift.end_time_str"/>
@@ -206,6 +231,27 @@
                                                     </span>
                                                     <span class="o_shift_tag" t-att-class="'tag_' + shift.direction">
                                                         <t t-esc="shift.direction_label"/>
+                                                    </span>
+
+                                                    <!-- Turno Operativo -->
+                                                    <span t-if="shift.shift_turn === 'T1'" class="o_badge_turn turn_t1" title="Turno Mañana (04:00 - 12:00)">
+                                                        🌅 T1 Mañana
+                                                    </span>
+                                                    <span t-elif="shift.shift_turn === 'T2'" class="o_badge_turn turn_t2" title="Turno Tarde (12:00 - 20:00)">
+                                                        ☀️ T2 Tarde
+                                                    </span>
+                                                    <span t-elif="shift.shift_turn === 'T3'" class="o_badge_turn turn_t3" title="Turno Noche / Cierre (20:00 - 03:30)">
+                                                        🌙 T3 Noche
+                                                    </span>
+
+                                                    <!-- Badge Cierre / Pasa al Día Siguiente (+1d) -->
+                                                    <span t-if="shift.spans_next_day or shift.start_time &lt; 4.0" class="o_badge_next_day" title="Servicio que opera en la madrugada del día siguiente (+1d)">
+                                                        🌙 +1 día
+                                                    </span>
+
+                                                    <!-- Tolerancia Oficial VMT/CID -->
+                                                    <span class="o_vmt_tol_badge" t-att-title="shift.tolerance_window_str or 'Tolerancia oficial VMT: -5 min / +10 min'">
+                                                        <i class="fa fa-tachometer me-1"/>VMT: -5/+10m
                                                     </span>
                                                 </div>
                                                 <div class="o_cuadrilla_date_tag" t-if="state.selectedDayIndex === null">

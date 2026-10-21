@@ -23,6 +23,7 @@ export class TransitRosterBoard extends Component {
             viewMode: "cuadrillas", // 'cuadrillas' (Programación Operativa), 'bus_matrix', o 'chronological'
             selectedDayIndex: 0,    // Lunes por defecto (0..6) o null para todos
             selectedServiceFilter: "ALL", // 'ALL', 'E1', 'E2', 'E3', etc.
+            selectedTurnFilter: "ALL",    // 'ALL', 'T1' (Mañana), 'T2' (Tarde), 'T3' (Noche / Cierre)
             searchCuadrillaQuery: "",
             searchBusQuery: "",
             searchDriverQuery: "",
@@ -140,6 +141,11 @@ export class TransitRosterBoard extends Component {
             list = list.filter((s) => s.service_code === this.state.selectedServiceFilter);
         }
 
+        // Filtro por Turno Operativo (T1 Mañana, T2 Tarde, T3 Noche/Cierre)
+        if (this.state.selectedTurnFilter && this.state.selectedTurnFilter !== "ALL") {
+            list = list.filter((s) => s.shift_turn === this.state.selectedTurnFilter);
+        }
+
         // Buscador de Cuadrillas
         const q = (this.state.searchCuadrillaQuery || "").toLowerCase().trim();
         if (q) {
@@ -154,7 +160,16 @@ export class TransitRosterBoard extends Component {
             );
         }
 
-        return list.slice().sort((a, b) => (a.start_time || 0) - (b.start_time || 0));
+        // Orden operacional: la jornada va de 04:00 a 03:30 (+1d)
+        const getOpTime = (s) => {
+            if (s.operational_start_time !== undefined && s.operational_start_time !== null) {
+                return s.operational_start_time;
+            }
+            const t = s.start_time || 0;
+            return t < 4.0 ? t + 24.0 : t;
+        };
+
+        return list.slice().sort((a, b) => getOpTime(a) - getOpTime(b));
     }
 
     getDayStats(dayIndex) {
@@ -179,7 +194,14 @@ export class TransitRosterBoard extends Component {
                 slotsSet.add(s.start_time_str);
             }
         });
-        return Array.from(slotsSet).sort();
+        // Orden operacional: 04:00 a 23:59 primero, luego 00:00 a 03:30 (+1d)
+        const toOp = (str) => {
+            if (!str || !str.includes(":")) return 0;
+            const [h, m] = str.split(":").map(Number);
+            const val = h + (m || 0) / 60.0;
+            return val < 4.0 ? val + 24.0 : val;
+        };
+        return Array.from(slotsSet).sort((a, b) => toOp(a) - toOp(b));
     }
 
     getShiftsForBusAndDay(busId, dateStr) {
@@ -221,6 +243,10 @@ export class TransitRosterBoard extends Component {
 
     selectServiceFilter(code) {
         this.state.selectedServiceFilter = code;
+    }
+
+    selectTurnFilter(turn) {
+        this.state.selectedTurnFilter = turn;
     }
 
     onSelectBus(busId) {

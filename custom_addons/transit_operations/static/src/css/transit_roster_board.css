@@ -1085,4 +1085,105 @@
     border: 2px dashed #3b82f6 !important;
 }
 
+/* --------------------------------------------------------------------------
+   Filtros y Badges de Turnos Operativos (Jornada 04:00 - 03:30) y VMT
+   -------------------------------------------------------------------------- */
+.o_turn_filter_group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #1e293b;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid #334155;
+}
+
+.o_turn_pill {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #94a3b8;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.o_turn_pill:hover {
+    color: #f1f5f9;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.o_turn_pill.active {
+    background: #3b82f6;
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.o_turn_pill.pill_morning.active {
+    background: #059669; /* Verde Mañana */
+    color: #ffffff;
+}
+
+.o_turn_pill.pill_afternoon.active {
+    background: #d97706; /* Ámbar Tarde */
+    color: #ffffff;
+}
+
+.o_turn_pill.pill_night.active {
+    background: #7c3aed; /* Púrpura Noche */
+    color: #ffffff;
+}
+
+/* Badges en la Tarjeta de Cuadrilla */
+.o_badge_turn {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+.turn_t1 {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.turn_t2 {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.turn_t3 {
+    background: rgba(139, 92, 246, 0.2);
+    color: #c084fc;
+    border: 1px solid rgba(139, 92, 246, 0.4);
+}
+
+.o_badge_next_day {
+    font-size: 9px;
+    font-weight: 700;
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.o_vmt_tol_badge {
+    font-size: 9px;
+    font-weight: 600;
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    padding: 2px 5px;
+    border-radius: 4px;
+    cursor: help;
+}
+
+
 

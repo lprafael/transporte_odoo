@@ -4,7 +4,7 @@ from odoo import api, fields, models
 class TransitTimetable(models.Model):
     _name = 'transit.timetable'
     _description = 'Horarios Planificados (Cuadro de Marcha)'
-    _order = 'departure_time_float asc, service_number asc'
+    _order = 'operational_time_float asc, service_number asc'
 
     route_id = fields.Many2one('transit.route', string='Ruta / Ramal', required=True, ondelete='cascade', index=True)
     concessionaire_id = fields.Many2one(
@@ -22,6 +22,14 @@ class TransitTimetable(models.Model):
 
     # Hora en formato decimal (ej: 6.5 = 06:30, 14.75 = 14:45)
     departure_time_float = fields.Float(string='Hora Salida Programada', required=True)
+    # Eje operacional VMT / CID: La jornada comienza a las 04:00 y termina a las 03:30 del día siguiente
+    operational_time_float = fields.Float(
+        string='Hora Operativa (04:00 - 03:30)',
+        compute='_compute_operational_time',
+        store=True,
+        index=True,
+        help='Hora en el eje de la jornada operativa donde las salidas de 00:00 a 03:30 representan las horas 24.0 a 27.5 (+1 día)'
+    )
     scheduled_duration_minutes = fields.Integer(
         string='Duración Estimada (min)',
         related='route_id.standard_duration_minutes',
@@ -80,6 +88,13 @@ class TransitTimetable(models.Model):
 
     active = fields.Boolean(default=True)
 
+    @api.depends('departure_time_float')
+    def _compute_operational_time(self):
+        for rec in self:
+            dep = rec.departure_time_float or 0.0
+            # Jornada Eléctrica VMT: 04:00 a 03:30 (+1d). Si dep < 4.0, pasa al día siguiente (24.0 a 27.5)
+            rec.operational_time_float = dep if dep >= 4.0 else (dep + 24.0)
+
     @api.depends('departure_time_float', 'arrival_time_float')
     def _compute_horarios_str(self):
         for rec in self:
@@ -135,8 +150,9 @@ class TransitTimetable(models.Model):
             hours = int(rec.departure_time_float)
             minutes = int(round((rec.departure_time_float - hours) * 60))
             time_str = f"{hours:02d}:{minutes:02d}"
+            plus_day = " (+1d)" if rec.departure_time_float < 4.0 else ""
             route_code = rec.route_id.code if rec.route_id else 'Ruta'
             svc = rec.service_code or (f"S{rec.service_number:02d}" if rec.service_number else 'Servicio')
-            name = f"[{route_code}] {time_str} ({svc})"
+            name = f"[{route_code}] {time_str}{plus_day} ({svc})"
             result.append((rec.id, name))
         return result

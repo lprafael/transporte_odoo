@@ -308,7 +308,8 @@ class TransitDriverRoster(models.Model):
         }
 
     def _load_from_official_timetable(self):
-        """Carga las cuadrillas / turnos del Cuadro de Marchas Oficial (transit.timetable) para los 7 días"""
+        """Carga las cuadrillas / turnos del Cuadro de Marchas Oficial (transit.timetable) para los 7 días
+        respetando la jornada operativa 04:00 a 03:30 del día siguiente y parámetros de monitoreo VMT."""
         shift_obj = self.env['transit.driver.shift']
         tt_obj = self.env['transit.timetable']
         created = 0
@@ -321,11 +322,18 @@ class TransitDriverRoster(models.Model):
             if self.concessionaire_id:
                 domain.append(('concessionaire_id', '=', self.concessionaire_id.id))
 
-            timetables = tt_obj.search(domain, order='departure_time_float asc, service_number asc')
+            timetables = tt_obj.search(domain)
+            # Orden operacional VMT / CID: Las salidas de 00:00 a 03:30 representan las horas 24.0 a 27.5 (cierre del ciclo)
+            timetables = sorted(timetables, key=lambda t: (
+                (t.departure_time_float if t.departure_time_float >= 4.0 else t.departure_time_float + 24.0),
+                t.service_number or 0
+            ))
             for tt in timetables:
                 t_start = tt.departure_time_float
                 t_dur = (tt.scheduled_duration_minutes or 50) / 60.0
                 t_end = tt.arrival_time_float if tt.arrival_time_float else (t_start + t_dur)
+                tol_early = tt.service_id.tolerance_early_min if tt.service_id else 5
+                tol_late = tt.service_id.tolerance_late_min if tt.service_id else 10
                 shift_obj.create({
                     'roster_id': self.id,
                     'date': day_date,
@@ -335,6 +343,8 @@ class TransitDriverRoster(models.Model):
                     'direction': tt.direction or 'ida',
                     'start_time': t_start,
                     'end_time': t_end,
+                    'tolerance_early_min': tol_early,
+                    'tolerance_late_min': tol_late,
                     'vehicle_id': False,
                     'driver_id': False,
                     'state': 'unassigned',
@@ -771,6 +781,15 @@ class TransitDriverRoster(models.Model):
                 'direction_label': 'Ida' if s.direction == 'ida' else ('Vuelta' if s.direction == 'vuelta' else 'Redondo'),
                 'start_time': s.start_time,
                 'end_time': s.end_time,
+                'operational_start_time': s.operational_start_time,
+                'operational_end_time': s.operational_end_time,
+                'shift_turn': s.shift_turn or 'T1',
+                'shift_turn_label': s.shift_turn_label or 'Turno Mañana',
+                'is_night_shift': s.is_night_shift,
+                'spans_next_day': s.spans_next_day,
+                'tolerance_early_min': s.tolerance_early_min,
+                'tolerance_late_min': s.tolerance_late_min,
+                'tolerance_window_str': s.tolerance_window_str or '',
                 'start_time_str': s.start_time_str,
                 'end_time_str': s.end_time_str,
                 'duration_hours': s.duration_hours,
@@ -823,15 +842,20 @@ class TransitDriverRoster(models.Model):
         if not driver.exists():
             return {'success': False, 'message': 'Chofer no encontrado'}
 
-        # Comprobar superposiciones el mismo día
-        overlap_shifts = self.env['transit.driver.shift'].search([
+        # Comprobar superposiciones el mismo día operativo (04:00 - 03:30)
+        op_start = shift.operational_start_time or (shift.start_time if shift.start_time >= 4.0 else shift.start_time + 24.0)
+        op_end = shift.operational_end_time or (op_start + shift.duration_hours)
+        same_day_shifts = self.env['transit.driver.shift'].search([
             ('id', '!=', shift.id),
             ('roster_id', '=', shift.roster_id.id),
             ('date', '=', shift.date),
             ('driver_id', '=', driver.id),
-            ('start_time', '<', shift.end_time),
-            ('end_time', '>', shift.start_time),
         ])
+        overlap_shifts = [
+            s for s in same_day_shifts
+            if max(op_start, s.operational_start_time or (s.start_time if s.start_time >= 4.0 else s.start_time + 24.0)) <
+               min(op_end, s.operational_end_time or ((s.start_time if s.start_time >= 4.0 else s.start_time + 24.0) + s.duration_hours))
+        ]
 
         if overlap_shifts and not force:
             conflict_msg = _("¡Superposición de Turno! El conductor %s ya tiene asignado el Bus %s de %s a %s.") % (
@@ -846,19 +870,23 @@ class TransitDriverRoster(models.Model):
                 'message': conflict_msg,
             }
 
-        # Comprobar descanso mínimo reglamentario (ej. 10 horas) respecto al día anterior o siguiente
+        # Comprobar descanso mínimo reglamentario (10 horas) respecto al día anterior o siguiente
         rest_warning = False
-        prev_date = shift.date - timedelta(days=1)
-        prev_shifts = self.env['transit.driver.shift'].search([
-            ('roster_id', '=', shift.roster_id.id),
-            ('date', '=', prev_date),
-            ('driver_id', '=', driver.id),
-        ], order='end_time desc', limit=1)
+        if op_start < 14.0:
+            prev_date = shift.date - timedelta(days=1)
+            prev_shifts = self.env['transit.driver.shift'].search([
+                ('roster_id', '=', shift.roster_id.id),
+                ('date', '=', prev_date),
+                ('driver_id', '=', driver.id),
+            ], order='operational_end_time desc', limit=1)
 
-        if prev_shifts:
-            hours_rest = (24.0 - prev_shifts.end_time) + shift.start_time
-            if hours_rest < 10.0:
-                rest_warning = _("Descanso corto: El chofer solo tendrá %.1f horas de descanso entre el turno de ayer y hoy.") % hours_rest
+            if prev_shifts:
+                prev_end = prev_shifts.operational_end_time or (prev_shifts.start_time + prev_shifts.duration_hours + (24.0 if prev_shifts.start_time < 4.0 else 0.0))
+                if prev_end > 20.0:
+                    end_prev_rel = prev_end - 24.0
+                    hours_rest = op_start - end_prev_rel
+                    if hours_rest < 10.0:
+                        rest_warning = _("Descanso corto: El chofer cerró turno a las %s y solo tendrá %.1f horas de descanso (mínimo legal 10h).") % (prev_shifts.end_time_str, hours_rest)
 
         shift.write({
             'driver_id': driver.id,
@@ -905,15 +933,20 @@ class TransitDriverRoster(models.Model):
         if not vehicle.exists():
             return {'success': False, 'message': 'Bus no encontrado'}
 
-        # Comprobar superposiciones del mismo bus el mismo día
-        overlap_shifts = self.env['transit.driver.shift'].search([
+        # Comprobar superposiciones del mismo bus el mismo día operativo (04:00 - 03:30)
+        op_start = shift.operational_start_time or (shift.start_time if shift.start_time >= 4.0 else shift.start_time + 24.0)
+        op_end = shift.operational_end_time or (op_start + shift.duration_hours)
+        same_day_bus_shifts = self.env['transit.driver.shift'].search([
             ('id', '!=', shift.id),
             ('roster_id', '=', shift.roster_id.id),
             ('date', '=', shift.date),
             ('vehicle_id', '=', vehicle.id),
-            ('start_time', '<', shift.end_time),
-            ('end_time', '>', shift.start_time),
         ])
+        overlap_shifts = [
+            s for s in same_day_bus_shifts
+            if max(op_start, s.operational_start_time or (s.start_time if s.start_time >= 4.0 else s.start_time + 24.0)) <
+               min(op_end, s.operational_end_time or ((s.start_time if s.start_time >= 4.0 else s.start_time + 24.0) + s.duration_hours))
+        ]
 
         if overlap_shifts and not force:
             conflict_msg = _("¡Superposición de Bus! El Bus %s ya tiene asignado un turno de %s a %s.") % (
@@ -1115,7 +1148,7 @@ class TransitDriverRoster(models.Model):
 class TransitDriverShift(models.Model):
     _name = 'transit.driver.shift'
     _description = 'Turno Individual de Conducción en Cuadrante'
-    _order = 'date asc, start_time asc, id asc'
+    _order = 'date asc, operational_start_time asc, id asc'
 
     roster_id = fields.Many2one(
         'transit.driver.roster',
@@ -1151,6 +1184,42 @@ class TransitDriverShift(models.Model):
 
     start_time = fields.Float(string='Hora Salida', required=True, default=6.0)
     end_time = fields.Float(string='Hora Llegada', required=True, default=7.5)
+
+    # Eje operacional VMT / CID: Jornada de 04:00 a 03:30 (+1d)
+    operational_start_time = fields.Float(
+        string='Hora Operativa Salida',
+        compute='_compute_operational_times',
+        store=True,
+        index=True,
+        help='Hora en el eje operativo (04:00=4.0 ... 03:30=+1d 27.5)'
+    )
+    operational_end_time = fields.Float(
+        string='Hora Operativa Fin',
+        compute='_compute_operational_times',
+        store=True,
+        help='Hora fin en el eje operativo'
+    )
+    is_night_shift = fields.Boolean(
+        string='Turno Nocturno / Trasnoche',
+        compute='_compute_operational_times',
+        store=True
+    )
+    spans_next_day = fields.Boolean(
+        string='Pasa al Día Siguiente',
+        compute='_compute_operational_times',
+        store=True
+    )
+    shift_turn = fields.Selection([
+        ('T1', 'Turno Mañana (04:00 - 12:00)'),
+        ('T2', 'Turno Tarde (12:00 - 20:00)'),
+        ('T3', 'Turno Noche / Cierre (20:00 - 03:30)'),
+    ], string='Turno Operativo', compute='_compute_operational_times', store=True, index=True)
+    shift_turn_label = fields.Char(string='Etiqueta Turno', compute='_compute_operational_times')
+
+    # Tolerancias de Monitoreo VMT (GVMT CID)
+    tolerance_early_min = fields.Integer(string='Tolerancia Adelanto (min)', default=5)
+    tolerance_late_min = fields.Integer(string='Tolerancia Atraso (min)', default=10)
+    tolerance_window_str = fields.Char(string='Ventana de Salida VMT', compute='_compute_tolerance_window', store=True)
 
     start_time_str = fields.Char(string='Salida', compute='_compute_times_str', store=True)
     end_time_str = fields.Char(string='Llegada', compute='_compute_times_str', store=True)
@@ -1196,35 +1265,99 @@ class TransitDriverShift(models.Model):
                 dur += 24.0
             rec.duration_hours = round(dur, 2)
 
+    @api.depends('start_time', 'end_time', 'duration_hours')
+    def _compute_operational_times(self):
+        for rec in self:
+            st = rec.start_time or 0.0
+            dur = rec.duration_hours or 0.0
+            # Eje VMT Paraguay: la jornada operativa empieza a las 04:00 (4.0) y termina a las 03:30 del día siguiente (+1d = 27.5)
+            if st < 4.0:
+                op_start = st + 24.0
+                rec.is_night_shift = True
+                rec.spans_next_day = True
+                rec.shift_turn = 'T3'
+                rec.shift_turn_label = 'Turno Noche / Cierre'
+            else:
+                op_start = st
+                rec.is_night_shift = bool(st >= 20.0)
+                rec.shift_turn = 'T1' if st < 12.0 else ('T2' if st < 20.0 else 'T3')
+                if rec.shift_turn == 'T1':
+                    rec.shift_turn_label = 'Turno Mañana'
+                elif rec.shift_turn == 'T2':
+                    rec.shift_turn_label = 'Turno Tarde'
+                else:
+                    rec.shift_turn_label = 'Turno Noche / Cierre'
+
+            op_end = op_start + dur
+            rec.operational_start_time = op_start
+            rec.operational_end_time = op_end
+            rec.spans_next_day = bool(st < 4.0 or op_end > 24.0)
+
+    @api.depends('start_time', 'tolerance_early_min', 'tolerance_late_min')
+    def _compute_tolerance_window(self):
+        for rec in self:
+            st = rec.start_time or 0.0
+            t_early = (rec.tolerance_early_min or 5) / 60.0
+            t_late = (rec.tolerance_late_min or 10) / 60.0
+            w_start = st - t_early
+            w_end = st + t_late
+            if w_start < 0:
+                w_start += 24.0
+            rec.tolerance_window_str = f"Ventana VMT: {float_to_hhmm(w_start)} - {float_to_hhmm(w_end)} (-{rec.tolerance_early_min}/+{rec.tolerance_late_min}m)"
+
     def _validate_shift_conflicts(self):
-        """Valida si este turno tiene superposición de bus o de chofer"""
+        """Valida si este turno tiene superposición de bus o de chofer considerando la jornada 04:00 - 03:30"""
         for rec in self:
             conflicts = []
+            op_start = rec.operational_start_time or (rec.start_time if rec.start_time >= 4.0 else rec.start_time + 24.0)
+            op_end = rec.operational_end_time or (op_start + rec.duration_hours)
+
             if rec.driver_id:
-                # 1. Superposición de Chofer
-                overlap_drv = self.search([
+                # 1. Superposición de Chofer el mismo día operativo
+                same_day_shifts = self.search([
                     ('id', '!=', rec.id),
                     ('roster_id', '=', rec.roster_id.id),
                     ('date', '=', rec.date),
                     ('driver_id', '=', rec.driver_id.id),
-                    ('start_time', '<', rec.end_time),
-                    ('end_time', '>', rec.start_time),
                 ])
-                if overlap_drv:
-                    conflicts.append(f"Chofer {rec.driver_id.name} superpuesto con Bus {overlap_drv[0].vehicle_id.name}")
+                for other in same_day_shifts:
+                    o_start = other.operational_start_time or (other.start_time if other.start_time >= 4.0 else other.start_time + 24.0)
+                    o_end = other.operational_end_time or (o_start + other.duration_hours)
+                    if max(op_start, o_start) < min(op_end, o_end):
+                        conflicts.append(f"Chofer {rec.driver_id.name} superpuesto a las {other.start_time_str} ({other.vehicle_id.name if other.vehicle_id else 'Sin Bus'})")
+                        break
+
+                # 2. Control de descanso mínimo inter-jornadas (10 horas)
+                if op_start < 14.0:
+                    prev_date = rec.date - timedelta(days=1)
+                    prev_shifts = self.search([
+                        ('roster_id', '=', rec.roster_id.id),
+                        ('date', '=', prev_date),
+                        ('driver_id', '=', rec.driver_id.id),
+                    ], order='operational_end_time desc', limit=1)
+
+                    if prev_shifts:
+                        prev_end = prev_shifts.operational_end_time or (prev_shifts.start_time + prev_shifts.duration_hours + (24.0 if prev_shifts.start_time < 4.0 else 0.0))
+                        if prev_end > 20.0:
+                            end_prev_rel = prev_end - 24.0
+                            rest_hours = op_start - end_prev_rel
+                            if rest_hours < 10.0:
+                                conflicts.append(f"Descanso insuficiente: Chofer cerró turno a las {prev_shifts.end_time_str} y solo tuvo {rest_hours:.1f}h de descanso (mín legal 10h)")
 
             if rec.vehicle_id:
-                # 2. Superposición de Bus
-                overlap_veh = self.search([
+                # 3. Superposición de Bus el mismo día operativo
+                same_day_bus_shifts = self.search([
                     ('id', '!=', rec.id),
                     ('roster_id', '=', rec.roster_id.id),
                     ('date', '=', rec.date),
                     ('vehicle_id', '=', rec.vehicle_id.id),
-                    ('start_time', '<', rec.end_time),
-                    ('end_time', '>', rec.start_time),
                 ])
-                if overlap_veh:
-                    conflicts.append(f"Bus {rec.vehicle_id.name} ya tiene salida a las {overlap_veh[0].start_time_str}")
+                for other in same_day_bus_shifts:
+                    o_start = other.operational_start_time or (other.start_time if other.start_time >= 4.0 else other.start_time + 24.0)
+                    o_end = other.operational_end_time or (o_start + other.duration_hours)
+                    if max(op_start, o_start) < min(op_end, o_end):
+                        conflicts.append(f"Bus {rec.vehicle_id.name} ya tiene salida a las {other.start_time_str}")
+                        break
 
             if conflicts:
                 rec.state = 'conflict'

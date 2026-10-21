@@ -134,3 +134,41 @@ class TransitService(models.Model):
             code_str = f"[{rec.code}] " if rec.code else ""
             res.append((rec.id, f"{code_str}{rec.name}"))
         return res
+
+    def action_sync_cid_monitoring_parameters(self):
+        """Sincroniza los parámetros de monitoreo desde servicios_especiales.parametro_monitoreo"""
+        for rec in self:
+            if not rec.cid_service_id:
+                continue
+            self.env.cr.execute("""
+                SELECT radio_geocerca_m, radio_itinerario_m, rango_cumplimiento_pct,
+                       franja_hora_inicio, franja_hora_fin, tolerancia_antes_min,
+                       tolerancia_despues_min, agency_ids, pasa_al_dia_siguiente
+                FROM servicios_especiales.parametro_monitoreo
+                WHERE id_servicio_especial = %s
+                ORDER BY id_parametro DESC LIMIT 1;
+            """, (rec.cid_service_id,))
+            row = self.env.cr.dictfetchone()
+            if row:
+                rec.write({
+                    'geofence_radius_m': row['radio_geocerca_m'] or 250,
+                    'itinerary_buffer_m': row['radio_itinerario_m'] or 50,
+                    'compliance_threshold_pct': float(row['rango_cumplimiento_pct'] or 80.0),
+                    'operating_window_start': row['franja_hora_inicio'] or '04:00:00',
+                    'operating_window_end': row['franja_hora_fin'] or '03:30:59',
+                    'tolerance_early_min': row['tolerancia_antes_min'] or 5,
+                    'tolerance_late_min': row['tolerancia_despues_min'] or 10,
+                    'spans_next_day': bool(row['pasa_al_dia_siguiente']),
+                    'agency_vmt_id': row['agency_ids'] or '004B',
+                })
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Parámetros CID Sincronizados',
+                'message': 'Se actualizaron las reglas de monitoreo oficiales (04:00 a 03:30, tolerancias -5/+10m, geocercas y cumplimientos).',
+                'type': 'success',
+                'sticky': False,
+            }
+        }
+
