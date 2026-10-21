@@ -676,3 +676,38 @@
     justify-content: flex-end;
     gap: 10px;
 }
+
+/* ==========================================================================
+   Feedback Visual de Arrastrar y Soltar (Drag & Drop)
+   ========================================================================== */
+.o_grid_cell.drag_over_cell {
+    background-color: rgba(16, 185, 129, 0.18) !important;
+    outline: 2px dashed #10b981 !important;
+    outline-offset: -2px;
+}
+
+.o_shift_pill.drag_over {
+    background-color: rgba(56, 189, 248, 0.3) !important;
+    border-color: #38bdf8 !important;
+    transform: scale(1.02);
+}
+
+.o_cell_empty_drop_zone {
+    border: 1px dashed #334155;
+    border-radius: 6px;
+    padding: 10px 6px;
+    text-align: center;
+    color: #64748b;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    background-color: rgba(15, 23, 42, 0.4);
+}
+
+.o_cell_empty_drop_zone:hover {
+    border-color: #38bdf8;
+    color: #38bdf8;
+    background-color: rgba(56, 189, 248, 0.08);
+}
+

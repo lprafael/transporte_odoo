@@ -82,7 +82,7 @@
                                  t-att-class="{ 'selected': state.selectedBusId === bus.id }"
                                  t-on-click="() => this.onSelectBus(bus.id)">
                                 <div class="d-flex justify-content-between align-items-center">
-                                    <span class="o_bus_internal">Interno #<t t-esc="bus.internal_number or bus.name"/></span>
+                                    <span class="o_bus_internal">Interno #<t t-esc="bus.bus_internal_number or bus.name"/></span>
                                     <span class="o_bus_plate"><t t-esc="bus.license_plate"/></span>
                                 </div>
                                 <div t-if="bus.service_code" class="o_bus_service_badge">
@@ -115,29 +115,32 @@
                                     <t t-foreach="displayBuses" t-as="bus" t-key="bus.id">
                                         <tr>
                                             <td class="o_bus_row_header">
-                                                <div class="o_bus_badge_row">Interno #<t t-esc="bus.internal_number or bus.name"/></div>
+                                                <div class="o_bus_badge_row">Interno #<t t-esc="bus.bus_internal_number or bus.name"/></div>
                                                 <div style="font-size: 11px; color: #94a3b8;"><t t-esc="bus.license_plate"/></div>
                                                 <div t-if="bus.service_code" style="font-size: 10px; color: #38bdf8; font-weight: bold;">
                                                     <t t-esc="bus.service_code"/>
                                                 </div>
                                             </td>
 
-                                            <!-- 7 Columnas de Días -->
+                                            <!-- 7 Columnas de Días (Drop Targets Activos) -->
                                             <t t-foreach="state.days" t-as="day" t-key="day.index">
-                                                <td class="o_grid_cell">
+                                                <td class="o_grid_cell"
+                                                    t-on-dragover="(ev) => this.onDragOverCell(ev)"
+                                                    t-on-dragleave="(ev) => this.onDragLeaveCell(ev)"
+                                                    t-on-drop="(ev) => this.onDropOnCell(ev, bus.id, day.date_str)">
                                                     <div class="o_cell_shifts_wrapper">
                                                         <t t-set="cellShifts" t-value="getShiftsForBusAndDay(bus.id, day.date_str)"/>
                                                         <t t-if="cellShifts.length === 0">
-                                                            <div style="color: #475569; font-size: 11px; font-style: italic; padding: 4px;">
-                                                                Sin servicio
+                                                            <div class="o_cell_empty_drop_zone" title="Arrastra y suelta un chofer aquí para asignarlo a este bus">
+                                                                <i class="fa fa-hand-o-down me-1"/> Soltar Chofer
                                                             </div>
                                                         </t>
                                                         <t t-foreach="cellShifts" t-as="shift" t-key="shift.id">
                                                             <div class="o_shift_pill"
                                                                  t-att-class="getShiftPillClasses(shift)"
-                                                                 t-on-dragover="(ev) => this.onDragOverShift(ev, shift)"
-                                                                 t-on-dragleave="(ev) => this.onDragLeaveShift(ev, shift)"
-                                                                 t-on-drop="(ev) => this.onDropOnShift(ev, shift)">
+                                                                 t-on-dragover.stop="(ev) => this.onDragOverShift(ev, shift)"
+                                                                 t-on-dragleave.stop="(ev) => this.onDragLeaveShift(ev, shift)"
+                                                                 t-on-drop.stop="(ev) => this.onDropOnShift(ev, shift)">
 
                                                                 <div class="o_shift_header">
                                                                     <span class="o_shift_time">
@@ -215,19 +218,21 @@
                                             </td>
 
                                             <t t-foreach="state.days" t-as="day" t-key="day.index">
-                                                <td class="o_grid_cell">
+                                                <td class="o_grid_cell"
+                                                    t-on-dragover="(ev) => this.onDragOverCell(ev)"
+                                                    t-on-dragleave="(ev) => this.onDragLeaveCell(ev)">
                                                     <div class="o_cell_shifts_wrapper">
                                                         <t t-set="slotShifts" t-value="getShiftsForSlotAndDay(slot, day.date_str)"/>
                                                         <t t-foreach="slotShifts" t-as="shift" t-key="shift.id">
                                                             <div class="o_shift_pill"
                                                                  t-att-class="getShiftPillClasses(shift)"
-                                                                 t-on-dragover="(ev) => this.onDragOverShift(ev, shift)"
-                                                                 t-on-dragleave="(ev) => this.onDragLeaveShift(ev, shift)"
-                                                                 t-on-drop="(ev) => this.onDropOnShift(ev, shift)">
+                                                                 t-on-dragover.stop="(ev) => this.onDragOverShift(ev, shift)"
+                                                                 t-on-dragleave.stop="(ev) => this.onDragLeaveShift(ev, shift)"
+                                                                 t-on-drop.stop="(ev) => this.onDropOnShift(ev, shift)">
 
                                                                 <div class="o_shift_header">
                                                                     <span class="o_shift_time">
-                                                                        Bus #<t t-esc="shift.internal_number or shift.vehicle_name"/> (<t t-esc="shift.start_time_str"/>)
+                                                                        Bus #<t t-esc="shift.bus_internal_number or shift.internal_number or shift.vehicle_name"/> (<t t-esc="shift.start_time_str"/>)
                                                                     </span>
                                                                     <span class="o_shift_tag" t-att-class="'tag_' + shift.direction">
                                                                         <t t-esc="shift.direction_label"/>
@@ -320,7 +325,7 @@
                             <div class="o_driver_card"
                                  draggable="true"
                                  t-on-dragstart="(ev) => this.onDragStartDriver(ev, driver)"
-                                 t-on-dragend="onDragEndDriver">
+                                 t-on-dragend="(ev) => this.onDragEndDriver(ev)">
                                 <div class="o_driver_name">
                                     <span>👤 <t t-esc="driver.name"/></span>
                                     <span class="o_driver_code"><t t-esc="driver.driver_code"/></span>
@@ -353,8 +358,8 @@
                         <p style="font-size: 11px; color: #94a3b8;">¿Desea forzar la asignación de todos modos bajo responsabilidad del Despachador?</p>
                     </div>
                     <div class="o_modal_footer">
-                        <button class="btn btn-secondary btn-sm" t-on-click="onCloseModal">Cancelar</button>
-                        <button class="btn btn-danger btn-sm" t-on-click="onForceAssign">Forzar Asignación</button>
+                        <button class="btn btn-secondary btn-sm" t-on-click="() => this.onCloseModal()">Cancelar</button>
+                        <button class="btn btn-danger btn-sm" t-on-click="() => this.onForceAssign()">Forzar Asignación</button>
                     </div>
                 </div>
             </div>

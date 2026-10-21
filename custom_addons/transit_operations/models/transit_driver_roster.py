@@ -288,6 +288,10 @@ class TransitDriverRoster(models.Model):
                     })
                     created_count += 1
 
+        # 3. Si no habían hojas de ruta ni redondos para esa semana, generar turnos base para la flota activa
+        if not sched_lines and not created_count:
+            created_count = self._generate_default_fleet_slots()
+
         self._check_all_conflicts()
 
         return {
@@ -295,13 +299,52 @@ class TransitDriverRoster(models.Model):
             'tag': 'display_notification',
             'params': {
                 'title': _('Programación Operativa Cargada'),
-                'message': _('Se sincronizaron %d turnos para la semana del %s al %s.') % (
+                'message': _('Se prepararon %d turnos de servicio para la semana del %s al %s.') % (
                     len(self.shift_ids), self.date_start, self.date_end
                 ),
                 'type': 'success',
                 'sticky': False,
             }
         }
+
+    def _generate_default_fleet_slots(self):
+        """Genera turnos base de servicio (Turno 1 Ida / Turno 2 Vuelta) para todos los buses en los 7 días"""
+        shift_obj = self.env['transit.driver.shift']
+        bus_domain = []
+        if self.concessionaire_id:
+            bus_domain.append(('concessionaire_id', '=', self.concessionaire_id.id))
+        buses = self.env['fleet.vehicle'].search(bus_domain, order='bus_internal_number asc, name asc')
+
+        created = 0
+        for bus in buses:
+            for day_idx in range(7):
+                day_date = self.date_start + timedelta(days=day_idx)
+                # Turno Mañana (Ida - Verde: 05:30 - 13:30)
+                shift_obj.create({
+                    'roster_id': self.id,
+                    'date': day_date,
+                    'day_of_week': str(day_idx),
+                    'vehicle_id': bus.id,
+                    'service_id': bus.service_id.id if bus.service_id else False,
+                    'direction': 'ida',
+                    'start_time': 5.5,
+                    'end_time': 13.5,
+                    'state': 'unassigned',
+                })
+                # Turno Tarde (Vuelta - Naranja: 13:30 - 21:30)
+                shift_obj.create({
+                    'roster_id': self.id,
+                    'date': day_date,
+                    'day_of_week': str(day_idx),
+                    'vehicle_id': bus.id,
+                    'service_id': bus.service_id.id if bus.service_id else False,
+                    'direction': 'vuelta',
+                    'start_time': 13.5,
+                    'end_time': 21.5,
+                    'state': 'unassigned',
+                })
+                created += 2
+        return created
 
     # =========================================================================
     # Duplicar Planilla a la Semana Siguiente
@@ -806,6 +849,105 @@ class TransitDriverRoster(models.Model):
         })
         shift._validate_shift_conflicts()
         return {'success': True}
+
+    @api.model
+    def rpc_quick_assign_or_create_shift(self, roster_id, vehicle_id, date_str, driver_id, force=False):
+        """
+        Asigna el conductor al turno vacante del bus en date_str,
+        o crea automáticamente un turno nuevo si la celda estaba vacía ("Sin servicio").
+        """
+        roster = self.browse(roster_id)
+        if not roster.exists():
+            return {'success': False, 'message': 'Cuadrante no encontrado'}
+
+        driver = self.env['res.partner'].browse(driver_id)
+        if not driver.exists():
+            return {'success': False, 'message': 'Conductor no encontrado'}
+
+        vehicle = self.env['fleet.vehicle'].browse(vehicle_id)
+        if not vehicle.exists():
+            return {'success': False, 'message': 'Bus no encontrado'}
+
+        target_date = fields.Date.from_string(date_str)
+        day_idx = str(target_date.weekday())
+
+        # 1. Buscar si hay un turno vacante en esa celda
+        vacant_shift = self.env['transit.driver.shift'].search([
+            ('roster_id', '=', roster.id),
+            ('vehicle_id', '=', vehicle.id),
+            ('date', '=', target_date),
+            ('driver_id', '=', False),
+        ], order='start_time asc', limit=1)
+
+        if vacant_shift:
+            return self.rpc_assign_driver(vacant_shift.id, driver.id, force=force)
+
+        # 2. Si no hay turno vacante, crear un turno nuevo en esa celda
+        existing_shifts = self.env['transit.driver.shift'].search([
+            ('roster_id', '=', roster.id),
+            ('vehicle_id', '=', vehicle.id),
+            ('date', '=', target_date),
+        ], order='end_time desc', limit=1)
+
+        if existing_shifts:
+            t_start = round(existing_shifts.end_time + 0.5, 2)
+            t_end = round(t_start + 7.5, 2)
+            direction = 'vuelta' if existing_shifts.direction == 'ida' else 'ida'
+        else:
+            t_start = 5.5
+            t_end = 13.5
+            direction = 'ida'
+
+        # Validar colisión si no es forzada
+        overlap_shifts = self.env['transit.driver.shift'].search([
+            ('roster_id', '=', roster.id),
+            ('date', '=', target_date),
+            ('driver_id', '=', driver.id),
+            ('start_time', '<', t_end),
+            ('end_time', '>', t_start),
+        ])
+
+        if overlap_shifts and not force:
+            conflict_msg = _("¡Superposición de Turno! El conductor %s ya tiene asignado el Bus %s de %s a %s.") % (
+                driver.name,
+                overlap_shifts[0].vehicle_id.name if overlap_shifts[0].vehicle_id else 'S/N',
+                overlap_shifts[0].start_time_str,
+                overlap_shifts[0].end_time_str
+            )
+            return {
+                'success': False,
+                'conflict': True,
+                'message': conflict_msg,
+                'pendingCell': {
+                    'rosterId': roster.id,
+                    'vehicleId': vehicle.id,
+                    'dateStr': date_str,
+                    'driverId': driver.id,
+                }
+            }
+
+        new_shift = self.env['transit.driver.shift'].create({
+            'roster_id': roster.id,
+            'date': target_date,
+            'day_of_week': day_idx,
+            'vehicle_id': vehicle.id,
+            'service_id': vehicle.service_id.id if vehicle.service_id else False,
+            'direction': direction,
+            'start_time': t_start,
+            'end_time': t_end,
+            'driver_id': driver.id,
+            'state': 'assigned',
+        })
+        new_shift._validate_shift_conflicts()
+
+        return {
+            'success': True,
+            'shift': {
+                'id': new_shift.id,
+                'driver_id': driver.id,
+                'driver_name': driver.name,
+            }
+        }
 
     @api.model
     def rpc_send_shift_whatsapp(self, shift_id):

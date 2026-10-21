@@ -151,8 +151,13 @@ export class TransitRosterBoard extends Component {
     // =========================================================================
     onDragStartDriver(ev, driver) {
         this.state.draggedDriver = driver;
-        ev.dataTransfer.setData("application/json", JSON.stringify(driver));
-        ev.dataTransfer.effectAllowed = "move";
+        try {
+            ev.dataTransfer.setData("application/json", JSON.stringify(driver));
+            ev.dataTransfer.setData("text/plain", driver.name || "");
+        } catch (e) {
+            console.error("Error setting dataTransfer:", e);
+        }
+        ev.dataTransfer.effectAllowed = "all";
         if (ev.currentTarget) {
             ev.currentTarget.classList.add("dragging");
         }
@@ -164,9 +169,83 @@ export class TransitRosterBoard extends Component {
         }
     }
 
+    onDragOverCell(ev) {
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = "copy";
+        if (ev.currentTarget) {
+            ev.currentTarget.classList.add("drag_over_cell");
+        }
+    }
+
+    onDragLeaveCell(ev) {
+        if (ev.currentTarget) {
+            ev.currentTarget.classList.remove("drag_over_cell");
+        }
+    }
+
+    async onDropOnCell(ev, busId, dateStr) {
+        ev.preventDefault();
+        if (ev.currentTarget) {
+            ev.currentTarget.classList.remove("drag_over_cell");
+        }
+
+        let driver = this.state.draggedDriver;
+        if (!driver) {
+            try {
+                const dataStr = ev.dataTransfer.getData("application/json");
+                if (dataStr) {
+                    driver = JSON.parse(dataStr);
+                }
+            } catch (e) {
+                console.error("Error al parsear conductor drag:", e);
+            }
+        }
+
+        if (!driver || !driver.id) {
+            return;
+        }
+
+        await this.quickAssignOrCreateShift(busId, dateStr, driver.id, false);
+    }
+
+    async quickAssignOrCreateShift(busId, dateStr, driverId, force = false) {
+        try {
+            const res = await this.orm.call(
+                "transit.driver.roster",
+                "rpc_quick_assign_or_create_shift",
+                [this.state.rosterId, busId, dateStr, driverId, force]
+            );
+
+            if (res.conflict) {
+                this.state.modal = {
+                    visible: true,
+                    message: res.message,
+                    pendingShiftId: null,
+                    pendingDriverId: driverId,
+                    pendingCell: res.pendingCell,
+                };
+                return;
+            }
+
+            if (res.success) {
+                this.notification.add("Turno asignado correctamente.", { type: "success" });
+                if (res.warning) {
+                    this.notification.add(res.warning, { type: "warning", sticky: true });
+                }
+                await this.loadData(this.state.rosterId);
+            } else {
+                this.notification.add(res.message || "No se pudo asignar el chofer.", { type: "danger" });
+            }
+        } catch (err) {
+            console.error("Error al asignar chofer a la celda:", err);
+            this.notification.add("Ocurrió un error al asignar el chofer.", { type: "danger" });
+        }
+    }
+
     onDragOverShift(ev, shift) {
         ev.preventDefault();
-        ev.dataTransfer.dropEffect = "move";
+        ev.stopPropagation();
+        ev.dataTransfer.dropEffect = "copy";
         ev.currentTarget.classList.add("drag_over");
     }
 
@@ -176,6 +255,7 @@ export class TransitRosterBoard extends Component {
 
     async onDropOnShift(ev, shift) {
         ev.preventDefault();
+        ev.stopPropagation();
         ev.currentTarget.classList.remove("drag_over");
 
         let driver = this.state.draggedDriver;
@@ -212,6 +292,7 @@ export class TransitRosterBoard extends Component {
                     message: res.message,
                     pendingShiftId: shiftId,
                     pendingDriverId: driverId,
+                    pendingCell: null,
                 };
                 return;
             }
@@ -252,13 +333,21 @@ export class TransitRosterBoard extends Component {
         this.state.modal.visible = false;
         this.state.modal.pendingShiftId = null;
         this.state.modal.pendingDriverId = null;
+        this.state.modal.pendingCell = null;
     }
 
     async onForceAssign() {
-        const { pendingShiftId, pendingDriverId } = this.state.modal;
+        const { pendingShiftId, pendingDriverId, pendingCell } = this.state.modal;
         this.onCloseModal();
         if (pendingShiftId && pendingDriverId) {
             await this.assignDriverToShift(pendingShiftId, pendingDriverId, true);
+        } else if (pendingCell && pendingDriverId) {
+            await this.quickAssignOrCreateShift(
+                pendingCell.vehicleId,
+                pendingCell.dateStr,
+                pendingDriverId,
+                true
+            );
         }
     }
 
