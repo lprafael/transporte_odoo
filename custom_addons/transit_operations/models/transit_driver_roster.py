@@ -288,9 +288,9 @@ class TransitDriverRoster(models.Model):
                     })
                     created_count += 1
 
-        # 3. Si no habían hojas de ruta ni redondos para esa semana, generar turnos base para la flota activa
+        # 3. Si no habían hojas de ruta ni redondos para esa semana, cargar desde el Cuadro de Marchas Oficial (transit.timetable)
         if not sched_lines and not created_count:
-            created_count = self._generate_default_fleet_slots()
+            created_count = self._load_from_official_timetable()
 
         self._check_all_conflicts()
 
@@ -299,13 +299,52 @@ class TransitDriverRoster(models.Model):
             'tag': 'display_notification',
             'params': {
                 'title': _('Programación Operativa Cargada'),
-                'message': _('Se prepararon %d turnos de servicio para la semana del %s al %s.') % (
+                'message': _('Se prepararon %d cuadrillas/turnos de programación para la semana del %s al %s.') % (
                     len(self.shift_ids), self.date_start, self.date_end
                 ),
                 'type': 'success',
                 'sticky': False,
             }
         }
+
+    def _load_from_official_timetable(self):
+        """Carga las cuadrillas / turnos del Cuadro de Marchas Oficial (transit.timetable) para los 7 días"""
+        shift_obj = self.env['transit.driver.shift']
+        tt_obj = self.env['transit.timetable']
+        created = 0
+
+        for day_idx in range(7):
+            day_date = self.date_start + timedelta(days=day_idx)
+            # Régimen oficial VMT / CID: 0..4 laboral ('5'), 5 sábado ('6'), 6 domingo/feriado ('7')
+            t_dia = '7' if day_idx == 6 else ('6' if day_idx == 5 else '5')
+            domain = [('tipo_dia', '=', t_dia)]
+            if self.concessionaire_id:
+                domain.append(('concessionaire_id', '=', self.concessionaire_id.id))
+
+            timetables = tt_obj.search(domain, order='departure_time_float asc, service_number asc')
+            for tt in timetables:
+                t_start = tt.departure_time_float
+                t_dur = (tt.scheduled_duration_minutes or 50) / 60.0
+                t_end = tt.arrival_time_float if tt.arrival_time_float else (t_start + t_dur)
+                shift_obj.create({
+                    'roster_id': self.id,
+                    'date': day_date,
+                    'day_of_week': str(day_idx),
+                    'service_id': tt.service_id.id if tt.service_id else False,
+                    'route_id': tt.route_id.id if tt.route_id else False,
+                    'direction': tt.direction or 'ida',
+                    'start_time': t_start,
+                    'end_time': t_end,
+                    'vehicle_id': False,
+                    'driver_id': False,
+                    'state': 'unassigned',
+                })
+                created += 1
+
+        if not created:
+            created = self._generate_default_fleet_slots()
+        return created
+
 
     def _generate_default_fleet_slots(self):
         """Genera turnos base de servicio (Turno 1 Ida / Turno 2 Vuelta) para todos los buses en los 7 días"""
@@ -619,6 +658,11 @@ class TransitDriverRoster(models.Model):
         """Busca el cuadrante más reciente o crea automáticamente el de la semana en curso"""
         roster = self.search([], order='date_start desc, id desc', limit=1)
         if roster:
+            if not roster.shift_ids:
+                try:
+                    roster.action_load_from_operational_schedules()
+                except Exception as e:
+                    _logger.warning(f"No se pudieron precargar schedules: {e}")
             return roster.id
 
         today = fields.Date.today()
@@ -851,6 +895,68 @@ class TransitDriverRoster(models.Model):
         return {'success': True}
 
     @api.model
+    def rpc_assign_bus(self, shift_id, vehicle_id, force=False):
+        """Asigna un bus a una cuadrilla/programación operativa"""
+        shift = self.env['transit.driver.shift'].browse(shift_id)
+        if not shift.exists():
+            return {'success': False, 'message': 'Turno/Cuadrilla no encontrado'}
+
+        vehicle = self.env['fleet.vehicle'].browse(vehicle_id)
+        if not vehicle.exists():
+            return {'success': False, 'message': 'Bus no encontrado'}
+
+        # Comprobar superposiciones del mismo bus el mismo día
+        overlap_shifts = self.env['transit.driver.shift'].search([
+            ('id', '!=', shift.id),
+            ('roster_id', '=', shift.roster_id.id),
+            ('date', '=', shift.date),
+            ('vehicle_id', '=', vehicle.id),
+            ('start_time', '<', shift.end_time),
+            ('end_time', '>', shift.start_time),
+        ])
+
+        if overlap_shifts and not force:
+            conflict_msg = _("¡Superposición de Bus! El Bus %s ya tiene asignado un turno de %s a %s.") % (
+                vehicle.name or vehicle.bus_internal_number,
+                overlap_shifts[0].start_time_str,
+                overlap_shifts[0].end_time_str
+            )
+            return {
+                'success': False,
+                'conflict': True,
+                'message': conflict_msg,
+            }
+
+        shift.write({
+            'vehicle_id': vehicle.id,
+        })
+        shift._validate_shift_conflicts()
+
+        return {
+            'success': True,
+            'shift': {
+                'id': shift.id,
+                'vehicle_id': vehicle.id,
+                'vehicle_name': vehicle.name,
+                'bus_internal_number': vehicle.bus_internal_number or vehicle.name,
+                'license_plate': vehicle.license_plate or '',
+                'state': shift.state,
+                'conflict_note': shift.conflict_note or '',
+            }
+        }
+
+    @api.model
+    def rpc_unassign_bus(self, shift_id):
+        """Desasigna el bus de una cuadrilla/programación operativa"""
+        shift = self.env['transit.driver.shift'].browse(shift_id)
+        if not shift.exists():
+            return {'success': False, 'message': 'Turno no encontrado'}
+
+        shift.write({'vehicle_id': False})
+        shift._validate_shift_conflicts()
+        return {'success': True}
+
+    @api.model
     def rpc_quick_assign_or_create_shift(self, roster_id, vehicle_id, date_str, driver_id, force=False):
         """
         Asigna el conductor al turno vacante del bus en date_str,
@@ -1024,7 +1130,7 @@ class TransitDriverShift(models.Model):
     vehicle_id = fields.Many2one(
         'fleet.vehicle',
         string='Bus / Unidad',
-        required=True,
+        required=False,
         index=True
     )
     driver_id = fields.Many2one(

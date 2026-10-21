@@ -28,6 +28,12 @@
                 <!-- Selector de Vista (Switch) -->
                 <div class="o_roster_view_switcher">
                     <button class="o_roster_view_btn"
+                            t-att-class="{ 'active': state.viewMode === 'cuadrillas' }"
+                            t-on-click="() => this.setViewMode('cuadrillas')"
+                            title="Ver cuadrillas y programaciones operativas para asignar buses y choferes">
+                        <i class="fa fa-list-alt"/> Cuadrillas de Programación Operativa
+                    </button>
+                    <button class="o_roster_view_btn"
                             t-att-class="{ 'active': state.viewMode === 'bus_matrix' }"
                             t-on-click="() => this.setViewMode('bus_matrix')">
                         <i class="fa fa-th"/> Vista Buses × Días
@@ -35,7 +41,7 @@
                     <button class="o_roster_view_btn"
                             t-att-class="{ 'active': state.viewMode === 'chronological' }"
                             t-on-click="() => this.setViewMode('chronological')">
-                        <i class="fa fa-clock-o"/> Vista Cronológica (Ida/Vuelta)
+                        <i class="fa fa-clock-o"/> Vista Cronológica (Horarios)
                     </button>
                 </div>
 
@@ -64,11 +70,11 @@
             <!-- ========================================================== -->
             <div class="o_roster_body">
 
-                <!-- SIDEBAR IZQUIERDA: BUSES -->
+                <!-- SIDEBAR IZQUIERDA: BUSES (ARRASTRABLES) -->
                 <div class="o_roster_sidebar_left">
                     <div class="o_sidebar_header">
                         <div class="o_sidebar_title">
-                            <span><i class="fa fa-bus me-1"/> FLOTA DE BUSES</span>
+                            <span><i class="fa fa-bus me-1 text-primary"/> FLOTA DE BUSES</span>
                             <span class="o_sidebar_badge"><t t-esc="filteredBuses.length"/></span>
                         </div>
                         <input type="text"
@@ -79,14 +85,21 @@
                     <div class="o_sidebar_list">
                         <t t-foreach="filteredBuses" t-as="bus" t-key="bus.id">
                             <div class="o_bus_card"
+                                 draggable="true"
                                  t-att-class="{ 'selected': state.selectedBusId === bus.id }"
-                                 t-on-click="() => this.onSelectBus(bus.id)">
+                                 t-on-dragstart="(ev) => this.onDragStartBus(ev, bus)"
+                                 t-on-dragend="(ev) => this.onDragEndBus(ev)"
+                                 t-on-click="() => this.onSelectBus(bus.id)"
+                                 title="Arrastra este bus a una cuadrilla">
                                 <div class="d-flex justify-content-between align-items-center">
-                                    <span class="o_bus_internal">Interno #<t t-esc="bus.bus_internal_number or bus.name"/></span>
+                                    <span class="o_bus_internal"><i class="fa fa-bus me-1 text-primary"/>Interno #<t t-esc="bus.bus_internal_number or bus.name"/></span>
                                     <span class="o_bus_plate"><t t-esc="bus.license_plate"/></span>
                                 </div>
-                                <div t-if="bus.service_code" class="o_bus_service_badge">
-                                    Línea <t t-esc="bus.service_code"/>
+                                <div class="d-flex justify-content-between align-items-center mt-1">
+                                    <span t-if="bus.service_code" class="o_bus_service_badge">
+                                        Línea <t t-esc="bus.service_code"/>
+                                    </span>
+                                    <span class="o_drag_indicator"><i class="fa fa-arrows"/> Arrastrar</span>
                                 </div>
                             </div>
                         </t>
@@ -97,7 +110,198 @@
                 <div class="o_roster_main_area">
                     <div class="o_roster_grid_container">
 
-                        <!-- VISTA A: MATRIZ BUSES X DÍAS -->
+                        <!-- =================================================== -->
+                        <!-- VISTA C: CUADRILLAS DE PROGRAMACIÓN OPERATIVA       -->
+                        <!-- =================================================== -->
+                        <t t-if="state.viewMode === 'cuadrillas'">
+                            <div class="o_cuadrillas_view_wrapper">
+                                
+                                <!-- Controles: Selector de Días y Filtros -->
+                                <div class="o_cuadrillas_control_bar">
+                                    <!-- Pestañas Horizontales de Días -->
+                                    <div class="o_cuadrillas_day_tabs">
+                                        <t t-foreach="state.days" t-as="day" t-key="day.index">
+                                            <t t-set="dStat" t-value="getDayStats(day.index)"/>
+                                            <button class="o_day_tab_btn"
+                                                    t-att-class="{ 'active': state.selectedDayIndex === day.index }"
+                                                    t-on-click="() => this.selectDay(day.index)">
+                                                <div class="o_day_tab_name"><t t-esc="day.name"/></div>
+                                                <div class="o_day_tab_date"><t t-esc="day.display_date"/></div>
+                                                <div class="o_day_tab_progress">
+                                                    <div class="o_day_tab_bar" t-attf-style="width: #{dStat.percentage}%"/>
+                                                </div>
+                                                <div class="o_day_tab_count">
+                                                    <t t-esc="dStat.complete"/> / <t t-esc="dStat.total"/> listos
+                                                </div>
+                                            </button>
+                                        </t>
+                                        <button class="o_day_tab_btn o_tab_all"
+                                                t-att-class="{ 'active': state.selectedDayIndex === null }"
+                                                t-on-click="() => this.selectDay(null)"
+                                                title="Ver todos los días de la semana">
+                                            <div class="o_day_tab_name">Toda la Semana</div>
+                                            <div class="o_day_tab_date">7 Días</div>
+                                            <div class="o_day_tab_count" style="margin-top: 14px;">
+                                                <t t-esc="(state.shifts || []).length"/> salidas
+                                            </div>
+                                        </button>
+                                    </div>
+
+                                    <!-- Filtro por Línea y Búsqueda -->
+                                    <div class="o_cuadrillas_subfilters">
+                                        <div class="o_service_filter_group">
+                                            <span class="o_filter_label">Línea:</span>
+                                            <button class="o_svc_pill"
+                                                    t-att-class="{ 'active': state.selectedServiceFilter === 'ALL' }"
+                                                    t-on-click="() => this.selectServiceFilter('ALL')">
+                                                Todas
+                                            </button>
+                                            <t t-foreach="availableServices" t-as="svc" t-key="svc">
+                                                <button class="o_svc_pill"
+                                                        t-att-class="{ 'active': state.selectedServiceFilter === svc }"
+                                                        t-on-click="() => this.selectServiceFilter(svc)">
+                                                    <t t-esc="svc"/>
+                                                </button>
+                                            </t>
+                                        </div>
+                                        
+                                        <div class="o_cuadrilla_search_box">
+                                            <input type="text"
+                                                   class="o_cuadrilla_search_input"
+                                                   placeholder="Buscar horario, ruta o interno..."
+                                                   t-model="state.searchCuadrillaQuery"/>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Grilla de Cuadrillas / Programaciones -->
+                                <div class="o_cuadrillas_grid">
+                                    <t t-if="cuadrillasForDisplay.length === 0">
+                                        <div class="o_cuadrillas_empty_state">
+                                            <div class="o_empty_icon">📋</div>
+                                            <h4>No hay programaciones operativas para este filtro</h4>
+                                            <p>Haz clic en <strong>"Cargar Programación"</strong> en la barra superior para precargar los horarios oficiales del cuadro de marcha.</p>
+                                            <button class="btn btn-primary btn-sm mt-2" t-on-click="onLoadOperationalSchedule">
+                                                <i class="fa fa-download me-1"/> Cargar Programación Operativa
+                                            </button>
+                                        </div>
+                                    </t>
+
+                                    <t t-foreach="cuadrillasForDisplay" t-as="shift" t-key="shift.id">
+                                        <div class="o_cuadrilla_card"
+                                             t-att-class="getShiftPillClasses(shift)"
+                                             t-on-dragover="(ev) => this.onDragOverSlot(ev)"
+                                             t-on-dragleave="(ev) => this.onDragLeaveSlot(ev)"
+                                             t-on-drop="(ev) => this.onDropUnifiedShift(ev, shift)">
+
+                                            <!-- Encabezado de la Cuadrilla -->
+                                            <div class="o_cuadrilla_header">
+                                                <div class="d-flex align-items-center gap-2">
+                                                    <span class="o_cuadrilla_time">
+                                                        <i class="fa fa-clock-o me-1 text-info"/>
+                                                        <t t-esc="shift.start_time_str"/> - <t t-esc="shift.end_time_str"/>
+                                                    </span>
+                                                    <span t-if="shift.service_code" class="o_cuadrilla_service_badge">
+                                                        <t t-esc="shift.service_code"/>
+                                                    </span>
+                                                    <span class="o_shift_tag" t-att-class="'tag_' + shift.direction">
+                                                        <t t-esc="shift.direction_label"/>
+                                                    </span>
+                                                </div>
+                                                <div class="o_cuadrilla_date_tag" t-if="state.selectedDayIndex === null">
+                                                    <i class="fa fa-calendar me-1"/> <t t-esc="shift.date"/>
+                                                </div>
+                                            </div>
+
+                                            <!-- Tramo / Itinerario -->
+                                            <div class="o_cuadrilla_route_name" t-if="shift.route_name">
+                                                <i class="fa fa-map-marker me-1 text-danger"/>
+                                                <t t-esc="shift.route_name"/>
+                                            </div>
+
+                                            <!-- SLOTS DE ASIGNACIÓN: BUS Y CHOFER -->
+                                            <div class="o_cuadrilla_slots_container">
+                                                <!-- SLOT 1: BUS -->
+                                                <div class="o_slot_box o_slot_bus_box">
+                                                    <div class="o_slot_label"><i class="fa fa-bus me-1 text-primary"/> Bus Asignado</div>
+                                                    <!-- Si ya tiene Bus asignado -->
+                                                    <t t-if="shift.vehicle_id">
+                                                        <div class="o_cuadrilla_slot_assigned o_slot_bus_assigned">
+                                                            <div class="o_assigned_text">
+                                                                <span class="o_assigned_main">Interno #<t t-esc="shift.bus_internal_number"/></span>
+                                                                <span class="o_assigned_sub"><t t-esc="shift.license_plate"/></span>
+                                                            </div>
+                                                            <button class="btn_slot_unassign"
+                                                                    title="Quitar Bus de esta programación"
+                                                                    t-on-click="() => this.onUnassignBus(shift.id)">
+                                                                <i class="fa fa-times"/>
+                                                            </button>
+                                                        </div>
+                                                    </t>
+                                                    <!-- Si está vacante: Zona de drop para Bus -->
+                                                    <t t-else="">
+                                                        <div class="o_cuadrilla_slot_dropzone o_dropzone_bus"
+                                                             t-on-dragover="(ev) => this.onDragOverSlot(ev)"
+                                                             t-on-dragleave="(ev) => this.onDragLeaveSlot(ev)"
+                                                             t-on-drop="(ev) => this.onDropBusOnShift(ev, shift)"
+                                                             title="Arrastra un bus desde la izquierda y suéltalo aquí">
+                                                            <i class="fa fa-plus-circle me-1"/> Tirar Bus aquí
+                                                        </div>
+                                                    </t>
+                                                </div>
+
+                                                <!-- SLOT 2: CHOFER -->
+                                                <div class="o_slot_box o_slot_driver_box">
+                                                    <div class="o_slot_label"><i class="fa fa-user me-1 text-success"/> Conductor / Chofer</div>
+                                                    <!-- Si ya tiene Chofer asignado -->
+                                                    <t t-if="shift.driver_id">
+                                                        <div class="o_cuadrilla_slot_assigned o_slot_driver_assigned">
+                                                            <div class="o_assigned_text">
+                                                                <span class="o_assigned_main"><t t-esc="shift.driver_name"/></span>
+                                                                <span t-if="shift.driver_code" class="o_assigned_sub">Cód: <t t-esc="shift.driver_code"/></span>
+                                                            </div>
+                                                            <div class="d-flex align-items-center gap-1">
+                                                                <a t-if="shift.whatsapp_url"
+                                                                   t-att-href="shift.whatsapp_url"
+                                                                   target="_blank"
+                                                                   class="btn_whatsapp_shift"
+                                                                   t-att-title="shift.whatsapp_sent ? 'Aviso WhatsApp Enviado (Reenviar)' : 'Avisar por WhatsApp (20 min antes)'">
+                                                                    <i t-attf-class="fa fa-whatsapp #{shift.whatsapp_sent ? 'text-success' : 'text-secondary'}"/>
+                                                                </a>
+                                                                <button class="btn_slot_unassign"
+                                                                        title="Quitar Chofer de esta programación"
+                                                                        t-on-click="() => this.onUnassignDriver(shift.id)">
+                                                                    <i class="fa fa-times"/>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </t>
+                                                    <!-- Si está vacante: Zona de drop para Chofer -->
+                                                    <t t-else="">
+                                                        <div class="o_cuadrilla_slot_dropzone o_dropzone_driver"
+                                                             t-on-dragover="(ev) => this.onDragOverSlot(ev)"
+                                                             t-on-dragleave="(ev) => this.onDragLeaveSlot(ev)"
+                                                             t-on-drop="(ev) => this.onDropDriverOnShift(ev, shift)"
+                                                             title="Arrastra un conductor desde la derecha y suéltalo aquí">
+                                                            <i class="fa fa-plus-circle me-1"/> Tirar Chofer aquí
+                                                        </div>
+                                                    </t>
+                                                </div>
+                                            </div>
+
+                                            <!-- Alerta de Conflicto -->
+                                            <div t-if="shift.conflict_note" class="o_conflict_alert mt-2">
+                                                ⚠️ <t t-esc="shift.conflict_note"/>
+                                            </div>
+                                        </div>
+                                    </t>
+                                </div>
+                            </div>
+                        </t>
+
+                        <!-- =================================================== -->
+                        <!-- VISTA A: MATRIZ BUSES X DÍAS                        -->
+                        <!-- =================================================== -->
                         <t t-if="state.viewMode === 'bus_matrix'">
                             <table class="o_roster_grid">
                                 <thead>
@@ -122,7 +326,7 @@
                                                 </div>
                                             </td>
 
-                                            <!-- 7 Columnas de Días (Drop Targets Activos) -->
+                                            <!-- 7 Columnas de Días -->
                                             <t t-foreach="state.days" t-as="day" t-key="day.index">
                                                 <td class="o_grid_cell"
                                                     t-on-dragover="(ev) => this.onDragOverCell(ev)"
@@ -138,9 +342,9 @@
                                                         <t t-foreach="cellShifts" t-as="shift" t-key="shift.id">
                                                             <div class="o_shift_pill"
                                                                  t-att-class="getShiftPillClasses(shift)"
-                                                                 t-on-dragover.stop="(ev) => this.onDragOverShift(ev, shift)"
-                                                                 t-on-dragleave.stop="(ev) => this.onDragLeaveShift(ev, shift)"
-                                                                 t-on-drop.stop="(ev) => this.onDropOnShift(ev, shift)">
+                                                                 t-on-dragover.stop="(ev) => this.onDragOverSlot(ev)"
+                                                                 t-on-dragleave.stop="(ev) => this.onDragLeaveSlot(ev)"
+                                                                 t-on-drop.stop="(ev) => this.onDropDriverOnShift(ev, shift)">
 
                                                                 <div class="o_shift_header">
                                                                     <span class="o_shift_time">
@@ -194,7 +398,9 @@
                             </table>
                         </t>
 
-                        <!-- VISTA B: CRONOLÓGICA POR ITINERARIOS / REDONDOS -->
+                        <!-- =================================================== -->
+                        <!-- VISTA B: CRONOLÓGICA POR ITINERARIOS / REDONDOS     -->
+                        <!-- =================================================== -->
                         <t t-if="state.viewMode === 'chronological'">
                             <table class="o_roster_grid">
                                 <thead>
@@ -226,19 +432,40 @@
                                                         <t t-foreach="slotShifts" t-as="shift" t-key="shift.id">
                                                             <div class="o_shift_pill"
                                                                  t-att-class="getShiftPillClasses(shift)"
-                                                                 t-on-dragover.stop="(ev) => this.onDragOverShift(ev, shift)"
-                                                                 t-on-dragleave.stop="(ev) => this.onDragLeaveShift(ev, shift)"
-                                                                 t-on-drop.stop="(ev) => this.onDropOnShift(ev, shift)">
+                                                                 t-on-dragover.stop="(ev) => this.onDragOverSlot(ev)"
+                                                                 t-on-dragleave.stop="(ev) => this.onDragLeaveSlot(ev)"
+                                                                 t-on-drop.stop="(ev) => this.onDropUnifiedShift(ev, shift)">
 
                                                                 <div class="o_shift_header">
                                                                     <span class="o_shift_time">
-                                                                        Bus #<t t-esc="shift.bus_internal_number or shift.internal_number or shift.vehicle_name"/> (<t t-esc="shift.start_time_str"/>)
+                                                                        <t t-if="shift.vehicle_id">
+                                                                            Bus #<t t-esc="shift.bus_internal_number"/> (<t t-esc="shift.start_time_str"/>)
+                                                                        </t>
+                                                                        <t t-else="">
+                                                                            [Sin Bus] (<t t-esc="shift.start_time_str"/>)
+                                                                        </t>
                                                                     </span>
                                                                     <span class="o_shift_tag" t-att-class="'tag_' + shift.direction">
                                                                         <t t-esc="shift.direction_label"/>
                                                                     </span>
                                                                 </div>
 
+                                                                <!-- Asignación Bus -->
+                                                                <div class="mb-1">
+                                                                    <t t-if="shift.vehicle_id">
+                                                                        <div class="o_shift_assigned" style="background: rgba(30, 58, 138, 0.4);">
+                                                                            <span>🚌 Bus #<t t-esc="shift.bus_internal_number"/></span>
+                                                                            <button class="btn_unassign" title="Quitar Bus" t-on-click="() => this.onUnassignBus(shift.id)">×</button>
+                                                                        </div>
+                                                                    </t>
+                                                                    <t t-else="">
+                                                                        <div class="o_shift_vacant" t-on-drop.stop="(ev) => this.onDropBusOnShift(ev, shift)">
+                                                                            <i class="fa fa-bus me-1"/> Soltar Bus
+                                                                        </div>
+                                                                    </t>
+                                                                </div>
+
+                                                                <!-- Asignación Chofer -->
                                                                 <t t-if="shift.driver_id">
                                                                     <div class="o_shift_assigned">
                                                                         <span>👤 <t t-esc="shift.driver_name"/></span>
@@ -259,8 +486,8 @@
                                                                     </div>
                                                                 </t>
                                                                 <t t-else="">
-                                                                    <div class="o_shift_vacant">
-                                                                        <i class="fa fa-plus me-1"/> Arrastrar Chofer
+                                                                    <div class="o_shift_vacant" t-on-drop.stop="(ev) => this.onDropDriverOnShift(ev, shift)">
+                                                                        <i class="fa fa-user me-1"/> Soltar Chofer
                                                                     </div>
                                                                 </t>
 
@@ -308,11 +535,11 @@
                     </div>
                 </div>
 
-                <!-- SIDEBAR DERECHA: CHOFERES DISPONIBLES -->
+                <!-- SIDEBAR DERECHA: CHOFERES DISPONIBLES (ARRASTRABLES) -->
                 <div class="o_roster_sidebar_right">
                     <div class="o_sidebar_header">
                         <div class="o_sidebar_title">
-                            <span><i class="fa fa-users me-1"/> POOL DE CONDUCTORES</span>
+                            <span><i class="fa fa-users me-1 text-success"/> POOL DE CONDUCTORES</span>
                             <span class="o_sidebar_badge"><t t-esc="filteredDrivers.length"/></span>
                         </div>
                         <input type="text"
@@ -325,7 +552,8 @@
                             <div class="o_driver_card"
                                  draggable="true"
                                  t-on-dragstart="(ev) => this.onDragStartDriver(ev, driver)"
-                                 t-on-dragend="(ev) => this.onDragEndDriver(ev)">
+                                 t-on-dragend="(ev) => this.onDragEndDriver(ev)"
+                                 title="Arrastra este chofer a una cuadrilla">
                                 <div class="o_driver_name">
                                     <span>👤 <t t-esc="driver.name"/></span>
                                     <span class="o_driver_code"><t t-esc="driver.driver_code"/></span>
@@ -351,11 +579,11 @@
                 <div class="o_roster_modal">
                     <div class="o_modal_header">
                         <i class="fa fa-exclamation-triangle"/>
-                        <span>Conflicto de Horario / Descanso</span>
+                        <span>Conflicto de Horario / Superposición</span>
                     </div>
                     <div class="o_modal_body">
                         <p><t t-esc="state.modal.message"/></p>
-                        <p style="font-size: 11px; color: #94a3b8;">¿Desea forzar la asignación de todos modos bajo responsabilidad del Despachador?</p>
+                        <p style="font-size: 11px; color: #94a3b8;">¿Desea forzar la asignación de todos modos bajo responsabilidad de Tráfico?</p>
                     </div>
                     <div class="o_modal_footer">
                         <button class="btn btn-secondary btn-sm" t-on-click="() => this.onCloseModal()">Cancelar</button>

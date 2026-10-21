@@ -711,3 +711,378 @@
     background-color: rgba(56, 189, 248, 0.08);
 }
 
+/* ==========================================================================
+   VISTA DE CUADRILLAS DE PROGRAMACIÓN OPERATIVA
+   ========================================================================== */
+.o_cuadrillas_view_wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 100%;
+}
+
+/* 1. Barra de Control de Cuadrillas */
+.o_cuadrillas_control_bar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: #111827;
+    border: 1px solid #1f2937;
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+
+/* Pestañas de Días */
+.o_cuadrillas_day_tabs {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+
+.o_day_tab_btn {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: #94a3b8;
+    cursor: pointer;
+    min-width: 105px;
+    transition: all 0.2s ease;
+    text-align: center;
+}
+
+.o_day_tab_btn:hover {
+    border-color: #38bdf8;
+    color: #f8fafc;
+    background-color: #273549;
+}
+
+.o_day_tab_btn.active {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 100%);
+    border-color: #3b82f6;
+    color: #ffffff;
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+}
+
+.o_day_tab_name {
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.o_day_tab_date {
+    font-size: 10px;
+    opacity: 0.85;
+}
+
+.o_day_tab_progress {
+    height: 3px;
+    background: #334155;
+    border-radius: 2px;
+    margin: 4px 0 2px 0;
+    overflow: hidden;
+}
+
+.o_day_tab_bar {
+    height: 100%;
+    background: #10b981;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.o_day_tab_count {
+    font-size: 9px;
+    opacity: 0.8;
+}
+
+.o_day_tab_btn.o_tab_all {
+    min-width: 90px;
+}
+
+/* Subfiltros: Línea y Búsqueda */
+.o_cuadrillas_subfilters {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-top: 1px solid #1f2937;
+    padding-top: 8px;
+}
+
+.o_service_filter_group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.o_filter_label {
+    font-size: 11px;
+    color: #94a3b8;
+    font-weight: 600;
+}
+
+.o_svc_pill {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.o_svc_pill:hover {
+    background: #334155;
+    color: #ffffff;
+}
+
+.o_svc_pill.active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
+
+.o_cuadrilla_search_box {
+    flex: 1;
+    max-width: 320px;
+}
+
+.o_cuadrilla_search_input {
+    width: 100%;
+    padding: 5px 10px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    color: #f1f5f9;
+    font-size: 11px;
+    outline: none;
+}
+
+.o_cuadrilla_search_input:focus {
+    border-color: #38bdf8;
+}
+
+/* 2. Grilla de Tarjetas de Cuadrillas */
+.o_cuadrillas_grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 12px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.o_cuadrillas_empty_state {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 40px 20px;
+    background: #111827;
+    border: 1px dashed #334155;
+    border-radius: 8px;
+    color: #94a3b8;
+}
+
+.o_empty_icon {
+    font-size: 36px;
+    margin-bottom: 12px;
+}
+
+/* Tarjeta Individual de Cuadrilla */
+.o_cuadrilla_card {
+    background: #161e2e;
+    border: 1px solid #1f2937;
+    border-left: 4px solid #3b82f6;
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: all 0.2s ease;
+}
+
+.o_cuadrilla_card:hover {
+    border-color: #38bdf8;
+    background: #1b263b;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.o_cuadrilla_header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.o_cuadrilla_time {
+    font-size: 13px;
+    font-weight: 800;
+    color: #f1f5f9;
+    letter-spacing: 0.3px;
+}
+
+.o_cuadrilla_service_badge {
+    background: #1e3a8a;
+    color: #60a5fa;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid #2563eb;
+}
+
+.o_cuadrilla_date_tag {
+    font-size: 10px;
+    color: #94a3b8;
+}
+
+.o_cuadrilla_route_name {
+    font-size: 11px;
+    color: #94a3b8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Contenedor de Slots Dobles (Bus y Chofer) */
+.o_cuadrilla_slots_container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.o_slot_box {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.o_slot_label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+/* Zonas de Drop Vacantes */
+.o_cuadrilla_slot_dropzone {
+    border: 1px dashed #334155;
+    border-radius: 6px;
+    padding: 8px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.o_dropzone_bus {
+    color: #60a5fa;
+    background: rgba(37, 99, 235, 0.08);
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+.o_dropzone_bus:hover, .o_dropzone_bus.drag_over {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.22);
+    transform: scale(1.02);
+}
+
+.o_dropzone_driver {
+    color: #34d399;
+    background: rgba(16, 185, 129, 0.08);
+    border-color: rgba(16, 185, 129, 0.4);
+}
+
+.o_dropzone_driver:hover, .o_dropzone_driver.drag_over {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.22);
+    transform: scale(1.02);
+}
+
+/* Slots Asignados */
+.o_cuadrilla_slot_assigned {
+    border-radius: 6px;
+    padding: 6px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 38px;
+    border: 1px solid transparent;
+}
+
+.o_slot_bus_assigned {
+    background: rgba(30, 58, 138, 0.35);
+    border-color: #2563eb;
+    color: #93c5fd;
+}
+
+.o_slot_driver_assigned {
+    background: rgba(6, 78, 59, 0.35);
+    border-color: #059669;
+    color: #6ee7b7;
+}
+
+.o_assigned_text {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.o_assigned_main {
+    font-size: 11px;
+    font-weight: 700;
+    color: #f8fafc;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.o_assigned_sub {
+    font-size: 9px;
+    color: #94a3b8;
+}
+
+.btn_slot_unassign {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 0 4px;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+}
+
+.btn_slot_unassign:hover {
+    color: #f87171;
+    background: rgba(239, 68, 68, 0.15);
+}
+
+.o_drag_indicator {
+    font-size: 9px;
+    color: #64748b;
+    font-style: italic;
+}
+
+.o_bus_card {
+    cursor: grab !important;
+}
+
+.o_bus_card:active {
+    cursor: grabbing !important;
+}
+
+.o_bus_card.dragging {
+    opacity: 0.4;
+    border: 2px dashed #3b82f6 !important;
+}
+
+
