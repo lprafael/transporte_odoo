@@ -1214,7 +1214,7 @@ class TransitDriverShift(models.Model):
         ('T2', 'Turno Tarde (12:00 - 20:00)'),
         ('T3', 'Turno Noche / Cierre (20:00 - 03:30)'),
     ], string='Turno Operativo', compute='_compute_operational_times', store=True, index=True)
-    shift_turn_label = fields.Char(string='Etiqueta Turno', compute='_compute_operational_times')
+    shift_turn_label = fields.Char(string='Etiqueta Turno', compute='_compute_operational_times', store=True)
 
     # Tolerancias de Monitoreo VMT (GVMT CID)
     tolerance_early_min = fields.Integer(string='Tolerancia Adelanto (min)', default=5)
