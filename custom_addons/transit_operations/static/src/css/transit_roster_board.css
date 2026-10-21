@@ -1,0 +1,678 @@
+/* ==========================================================================
+   Tablero Interactivo de Asignación de Turnos y Rostering Semanal
+   Módulo: transit_operations (Odoo 18)
+   ========================================================================== */
+
+.o_transit_roster_app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background-color: #0f172a;
+    color: #f8fafc;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   1. Barra Superior / Header de Controles
+   -------------------------------------------------------------------------- */
+.o_roster_topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 18px;
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border-bottom: 1px solid #334155;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    z-index: 10;
+}
+
+.o_roster_title_group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.o_roster_logo_badge {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    color: white;
+    font-weight: 800;
+    font-size: 14px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.4);
+}
+
+.o_roster_title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin: 0;
+}
+
+.o_roster_subtitle {
+    font-size: 12px;
+    color: #94a3b8;
+    margin: 0;
+}
+
+.o_roster_view_switcher {
+    display: flex;
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 3px;
+    gap: 4px;
+}
+
+.o_roster_view_btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.o_roster_view_btn:hover {
+    color: #f8fafc;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.o_roster_view_btn.active {
+    background-color: #3b82f6;
+    color: #ffffff;
+    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+.o_roster_actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.o_roster_action_btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid #334155;
+    background-color: #1e293b;
+    color: #e2e8f0;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.o_roster_action_btn:hover {
+    background-color: #334155;
+    color: #ffffff;
+    border-color: #475569;
+}
+
+.o_roster_action_btn.btn_primary {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    border-color: #059669;
+    color: white;
+}
+
+.o_roster_action_btn.btn_primary:hover {
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+
+/* --------------------------------------------------------------------------
+   2. Layout Principal de 3 Paneles
+   -------------------------------------------------------------------------- */
+.o_roster_body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Sidebar Izquierda (Buses) */
+.o_roster_sidebar_left {
+    width: 230px;
+    min-width: 230px;
+    background-color: #111827;
+    border-right: 1px solid #1f2937;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Sidebar Derecha (Choferes) */
+.o_roster_sidebar_right {
+    width: 270px;
+    min-width: 270px;
+    background-color: #111827;
+    border-left: 1px solid #1f2937;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.o_sidebar_header {
+    padding: 12px 14px;
+    background-color: #1f2937;
+    border-bottom: 1px solid #374151;
+}
+
+.o_sidebar_title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #e5e7eb;
+    margin: 0 0 8px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.o_sidebar_badge {
+    background-color: #374151;
+    color: #9ca3af;
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 12px;
+}
+
+.o_sidebar_search {
+    width: 100%;
+    padding: 6px 10px;
+    background-color: #111827;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    color: #f3f4f6;
+    font-size: 12px;
+    outline: none;
+}
+
+.o_sidebar_search:focus {
+    border-color: #3b82f6;
+}
+
+.o_sidebar_list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* Item de Bus */
+.o_bus_card {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    padding: 8px 10px;
+    transition: all 0.15s ease;
+    cursor: pointer;
+}
+
+.o_bus_card:hover {
+    border-color: #60a5fa;
+    background-color: #273549;
+    transform: translateX(2px);
+}
+
+.o_bus_card.selected {
+    border-color: #3b82f6;
+    background-color: #1e3a8a;
+}
+
+.o_bus_internal {
+    font-weight: 800;
+    color: #60a5fa;
+    font-size: 13px;
+}
+
+.o_bus_plate {
+    font-size: 11px;
+    color: #9ca3af;
+    margin-left: 6px;
+}
+
+.o_bus_service_badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background-color: #374151;
+    color: #e5e7eb;
+    margin-top: 4px;
+}
+
+/* Tarjeta de Chofer (Draggable) */
+.o_driver_card {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    padding: 8px 10px;
+    cursor: grab;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.o_driver_card:hover {
+    border-color: #10b981;
+    background-color: #1e3a35;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+}
+
+.o_driver_card:active {
+    cursor: grabbing;
+}
+
+.o_driver_card.dragging {
+    opacity: 0.4;
+    border: 2px dashed #10b981;
+}
+
+.o_driver_name {
+    font-weight: 700;
+    font-size: 12px;
+    color: #f3f4f6;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.o_driver_code {
+    font-size: 10px;
+    color: #9ca3af;
+}
+
+.o_driver_meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+    font-size: 11px;
+}
+
+.o_driver_hours {
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+
+.o_hours_normal {
+    background-color: #064e3b;
+    color: #6ee7b7;
+}
+
+.o_hours_warning {
+    background-color: #78350f;
+    color: #fde68a;
+}
+
+.o_hours_danger {
+    background-color: #7f1d1d;
+    color: #fca5a5;
+}
+
+.o_driver_rest {
+    color: #9ca3af;
+    font-size: 10px;
+}
+
+/* --------------------------------------------------------------------------
+   3. Centro: Planilla Semanal
+   -------------------------------------------------------------------------- */
+.o_roster_main_area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background-color: #0b1120;
+}
+
+.o_roster_grid_container {
+    flex: 1;
+    overflow: auto;
+    padding: 12px;
+}
+
+/* Estructura de Tabla Grilla */
+.o_roster_grid {
+    width: 100%;
+    min-width: 950px;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: #111827;
+}
+
+.o_roster_grid th {
+    background-color: #1e293b;
+    color: #f1f5f9;
+    font-weight: 700;
+    font-size: 12px;
+    padding: 10px 8px;
+    text-align: center;
+    border-bottom: 2px solid #334155;
+    border-right: 1px solid #334155;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+
+.o_roster_grid th:first-child {
+    text-align: left;
+    width: 170px;
+    padding-left: 14px;
+}
+
+.o_roster_grid td {
+    border-bottom: 1px solid #1f2937;
+    border-right: 1px solid #1f2937;
+    vertical-align: top;
+    padding: 6px;
+}
+
+.o_roster_grid tr:hover td {
+    background-color: rgba(30, 41, 59, 0.3);
+}
+
+.o_bus_row_header {
+    background-color: #161e2e !important;
+    padding: 10px 14px !important;
+    vertical-align: middle !important;
+}
+
+.o_bus_badge_row {
+    font-size: 13px;
+    font-weight: 800;
+    color: #60a5fa;
+}
+
+.o_cell_shifts_wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 48px;
+}
+
+/* Ficha de Turno (Slot de Asignación) */
+.o_shift_pill {
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 11px;
+    transition: all 0.15s ease;
+    position: relative;
+    border-left: 4px solid transparent;
+}
+
+/* Sentido Ida (Verde) */
+.o_shift_pill.direction_ida {
+    background-color: rgba(16, 185, 129, 0.15);
+    border-color: #10b981;
+    border-left-color: #10b981;
+}
+
+/* Sentido Vuelta (Naranja) */
+.o_shift_pill.direction_vuelta {
+    background-color: rgba(249, 115, 22, 0.15);
+    border-color: #f97316;
+    border-left-color: #f97316;
+}
+
+/* Sentido Redondo */
+.o_shift_pill.direction_roundtrip {
+    background-color: rgba(59, 130, 246, 0.15);
+    border-color: #3b82f6;
+    border-left-color: #3b82f6;
+}
+
+/* Estado Conflicto (Rojo) */
+.o_shift_pill.state_conflict {
+    background-color: rgba(239, 68, 68, 0.25) !important;
+    border: 1px solid #ef4444 !important;
+    border-left: 4px solid #ef4444 !important;
+    animation: pulseConflict 1.5s infinite;
+}
+
+@keyframes pulseConflict {
+    0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* Zona de Drop Activa */
+.o_shift_pill.drag_over {
+    border: 2px dashed #38bdf8 !important;
+    background-color: rgba(56, 189, 248, 0.25) !important;
+    transform: scale(1.02);
+}
+
+.o_shift_header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.o_shift_time {
+    font-weight: 700;
+    color: #e2e8f0;
+}
+
+.o_shift_tag {
+    font-size: 9px;
+    font-weight: 800;
+    padding: 1px 4px;
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+
+.o_shift_tag.tag_ida {
+    background-color: #10b981;
+    color: #ffffff;
+}
+
+.o_shift_tag.tag_vuelta {
+    background-color: #f97316;
+    color: #ffffff;
+}
+
+.o_shift_assigned {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-weight: 600;
+    color: #f8fafc;
+}
+
+.o_shift_assigned .btn_unassign {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0 2px;
+}
+
+.o_shift_assigned .btn_unassign:hover {
+    color: #f87171;
+}
+
+.o_shift_assigned .btn_whatsapp_shift {
+    background: transparent;
+    border: none;
+    color: #22c55e;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 4px;
+    transition: transform 0.15s ease;
+    text-decoration: none;
+}
+
+.o_shift_assigned .btn_whatsapp_shift:hover {
+    transform: scale(1.2);
+    color: #4ade80;
+}
+
+.o_shift_vacant {
+    border: 1px dashed #64748b;
+    border-radius: 4px;
+    padding: 4px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.o_shift_vacant:hover {
+    border-color: #38bdf8;
+    color: #38bdf8;
+}
+
+.o_conflict_alert {
+    font-size: 9px;
+    color: #fca5a5;
+    font-weight: bold;
+    margin-top: 3px;
+}
+
+/* --------------------------------------------------------------------------
+   4. Franja Inferior: Choferes de Franco por Día
+   -------------------------------------------------------------------------- */
+.o_roster_free_drivers_bar {
+    background-color: #111827;
+    border-top: 2px solid #1e293b;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    max-height: 140px;
+    overflow-y: auto;
+}
+
+.o_free_bar_title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #38bdf8;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.o_free_bar_columns {
+    display: flex;
+    gap: 10px;
+}
+
+.o_free_day_col {
+    flex: 1;
+    background-color: #1e293b;
+    border-radius: 6px;
+    padding: 6px;
+    border: 1px solid #334155;
+    min-height: 50px;
+}
+
+.o_free_day_name {
+    font-size: 11px;
+    font-weight: 700;
+    color: #94a3b8;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #334155;
+    padding-bottom: 2px;
+}
+
+.o_free_chips_list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.o_free_chip {
+    background-color: #0c4a6e;
+    color: #bae6fd;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 12px;
+    cursor: grab;
+    user-select: none;
+    border: 1px solid #0284c7;
+    transition: all 0.15s ease;
+}
+
+.o_free_chip:hover {
+    background-color: #0284c7;
+    color: white;
+    transform: translateY(-1px);
+}
+
+.o_free_chip:active {
+    cursor: grabbing;
+}
+
+/* --------------------------------------------------------------------------
+   5. Modal y Notificaciones
+   -------------------------------------------------------------------------- */
+.o_roster_modal_backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.o_roster_modal {
+    background-color: #1e293b;
+    border: 1px solid #475569;
+    border-radius: 10px;
+    width: 440px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.o_modal_header {
+    padding: 14px 18px;
+    background-color: #0f172a;
+    border-bottom: 1px solid #334155;
+    font-size: 15px;
+    font-weight: 700;
+    color: #ef4444;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.o_modal_body {
+    padding: 16px 18px;
+    font-size: 13px;
+    color: #e2e8f0;
+    line-height: 1.5;
+}
+
+.o_modal_footer {
+    padding: 12px 18px;
+    background-color: #0f172a;
+    border-top: 1px solid #334155;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}

@@ -26,3 +26,4 @@ from . import transit_dynamic_report
 from . import transit_service_roundtrip
 from . import hr_employee
 from . import transit_requirement
+from . import transit_driver_roster

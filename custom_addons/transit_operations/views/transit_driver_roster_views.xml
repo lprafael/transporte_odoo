@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ================================================================== -->
+    <!-- Acción Cliente: Tablero Interactivo Drag & Drop (OWL)              -->
+    <!-- ================================================================== -->
+    <record id="action_transit_roster_board" model="ir.actions.client">
+        <field name="name">Mesa de Asignación de Turnos (Roster Board)</field>
+        <field name="tag">transit_roster_board</field>
+        <field name="target">main</field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- 1. Vistas de Cuadrante Semanal (transit.driver.roster)             -->
+    <!-- ================================================================== -->
+    <record id="view_transit_driver_roster_tree" model="ir.ui.view">
+        <field name="name">transit.driver.roster.list</field>
+        <field name="model">transit.driver.roster</field>
+        <field name="arch" type="xml">
+            <list string="Cuadrantes Semanales de Choferes"
+                  decoration-danger="conflict_count > 0"
+                  decoration-success="state == 'confirmed' and conflict_count == 0"
+                  decoration-muted="state == 'done'">
+                <field name="name"/>
+                <field name="week_number"/>
+                <field name="date_start"/>
+                <field name="date_end"/>
+                <field name="concessionaire_id"/>
+                <field name="total_shifts"/>
+                <field name="assigned_shifts"/>
+                <field name="unassigned_shifts"/>
+                <field name="coverage_percentage" widget="progressbar"/>
+                <field name="conflict_count" decoration-danger="conflict_count > 0"/>
+                <field name="state" widget="badge"
+                       decoration-info="state == 'draft'"
+                       decoration-success="state == 'confirmed'"
+                       decoration-muted="state == 'done'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_transit_driver_roster_form" model="ir.ui.view">
+        <field name="name">transit.driver.roster.form</field>
+        <field name="model">transit.driver.roster</field>
+        <field name="arch" type="xml">
+            <form string="Cuadrante Semanal de Choferes">
+                <header>
+                    <button name="action_open_roster_board"
+                            string="🚀 Abrir Mesa de Asignación (Drag &amp; Drop)"
+                            type="object"
+                            class="oe_highlight btn-primary"
+                            icon="fa-th-large"/>
+
+                    <button name="action_load_from_operational_schedules"
+                            string="⚡ Cargar Programación Operativa"
+                            type="object"
+                            class="btn-secondary"
+                            invisible="state == 'done'"
+                            icon="fa-download"/>
+
+                    <button name="action_duplicate_next_week"
+                            string="📋 Duplicar a Siguiente Semana"
+                            type="object"
+                            class="btn-secondary"
+                            icon="fa-copy"/>
+
+                    <button name="action_export_excel"
+                            string="📊 Exportar Excel (.xlsx)"
+                            type="object"
+                            class="btn-secondary"
+                            icon="fa-file-excel-o"/>
+
+                    <button name="action_confirm"
+                            string="✔️ Confirmar y Sincronizar Despachos"
+                            type="object"
+                            class="btn-success"
+                            invisible="state != 'draft'"
+                            icon="fa-check"/>
+
+                    <button name="action_set_draft"
+                            string="Volver a Borrador"
+                            type="object"
+                            class="btn-light"
+                            invisible="state == 'draft'"/>
+
+                    <field name="state" widget="statusbar" statusbar_visible="draft,confirmed,done"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button class="oe_stat_button" icon="fa-tasks" type="object" name="action_open_roster_board">
+                            <field name="coverage_percentage" widget="statinfo" string="% Cobertura"/>
+                        </button>
+                        <button class="oe_stat_button" icon="fa-exclamation-triangle" invisible="conflict_count == 0">
+                            <field name="conflict_count" widget="statinfo" string="Conflictos"/>
+                        </button>
+                    </div>
+
+                    <div class="oe_title">
+                        <span class="o_form_label">Planilla de Asignación Semanal</span>
+                        <h1>
+                            <field name="name" placeholder="Ej. CUADRANTE-S43-2026"/>
+                        </h1>
+                    </div>
+
+                    <group>
+                        <group name="period_info" string="Período y Concesión">
+                            <field name="date_start"/>
+                            <field name="date_end"/>
+                            <field name="week_number"/>
+                            <field name="concessionaire_id"/>
+                        </group>
+                        <group name="metrics_info" string="Resumen de Cobertura">
+                            <field name="total_shifts"/>
+                            <field name="assigned_shifts"/>
+                            <field name="unassigned_shifts"/>
+                            <field name="conflict_count" decoration-danger="conflict_count > 0"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Turnos de la Semana" name="shifts_page">
+                            <field name="shift_ids" mode="list">
+                                <list string="Turnos" editable="bottom"
+                                      decoration-danger="state == 'conflict'"
+                                      decoration-warning="state == 'unassigned'"
+                                      decoration-success="state == 'assigned'">
+                                    <field name="date"/>
+                                    <field name="day_of_week"/>
+                                    <field name="vehicle_id"/>
+                                    <field name="service_id"/>
+                                    <field name="direction" widget="badge"
+                                           decoration-success="direction == 'ida'"
+                                           decoration-warning="direction == 'vuelta'"
+                                           decoration-info="direction == 'roundtrip'"/>
+                                    <field name="start_time_str"/>
+                                    <field name="end_time_str"/>
+                                    <field name="duration_hours" sum="Total Horas"/>
+                                    <field name="driver_id"/>
+                                    <field name="state" widget="badge"
+                                           decoration-danger="state == 'conflict'"
+                                           decoration-warning="state == 'unassigned'"
+                                           decoration-success="state == 'assigned'"/>
+                                    <field name="conflict_note"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Observaciones de Tráfico" name="notes_page">
+                            <field name="notes" placeholder="Notas sobre relevos, choferes con permisos especiales, licencias o guardias..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- 2. Vistas de Turno Individual (transit.driver.shift)               -->
+    <!-- ================================================================== -->
+    <record id="view_transit_driver_shift_tree" model="ir.ui.view">
+        <field name="name">transit.driver.shift.list</field>
+        <field name="model">transit.driver.shift</field>
+        <field name="arch" type="xml">
+            <list string="Turnos de Conducción"
+                  decoration-danger="state == 'conflict'"
+                  decoration-warning="state == 'unassigned'"
+                  decoration-success="state == 'assigned'">
+                <field name="roster_id"/>
+                <field name="date"/>
+                <field name="day_of_week"/>
+                <field name="vehicle_id"/>
+                <field name="service_id"/>
+                <field name="direction" widget="badge"
+                       decoration-success="direction == 'ida'"
+                       decoration-warning="direction == 'vuelta'"/>
+                <field name="start_time_str"/>
+                <field name="end_time_str"/>
+                <field name="duration_hours" sum="Total Horas"/>
+                <field name="driver_id"/>
+                <field name="state" widget="badge"/>
+                <field name="conflict_note"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_transit_driver_shift_calendar" model="ir.ui.view">
+        <field name="name">transit.driver.shift.calendar</field>
+        <field name="model">transit.driver.shift</field>
+        <field name="arch" type="xml">
+            <calendar string="Calendario de Turnos de Chofer"
+                      date_start="date"
+                      color="driver_id"
+                      mode="week">
+                <field name="vehicle_id"/>
+                <field name="driver_id"/>
+                <field name="start_time_str"/>
+                <field name="end_time_str"/>
+                <field name="direction"/>
+            </calendar>
+        </field>
+    </record>
+
+    <!-- Acciones de Ventana -->
+    <record id="action_transit_driver_roster" model="ir.actions.act_window">
+        <field name="name">Cuadrantes Semanales de Choferes</field>
+        <field name="res_model">transit.driver.roster</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Cree un nuevo cuadrante semanal para planificar la asignación de turnos a los choferes.
+            </p>
+        </field>
+    </record>
+
+    <record id="action_transit_driver_shift" model="ir.actions.act_window">
+        <field name="name">Turnos de Choferes</field>
+        <field name="res_model">transit.driver.shift</field>
+        <field name="view_mode">list,calendar,form</field>
+    </record>
+</odoo>

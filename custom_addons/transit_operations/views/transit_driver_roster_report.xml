@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Declaración del Reporte PDF Oficial -->
+    <record id="action_report_transit_driver_roster" model="ir.actions.report">
+        <field name="name">Cuadrante Semanal de Turnos (PDF Oficial)</field>
+        <field name="model">transit.driver.roster</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">transit_operations.report_transit_driver_roster_document</field>
+        <field name="report_file">transit_operations.report_transit_driver_roster_document</field>
+        <field name="print_report_name">'Cuadrante_%s' % (object.name)</field>
+        <field name="binding_model_id" ref="model_transit_driver_roster"/>
+        <field name="binding_type">report</field>
+        <field name="paperformat_id" ref="base.paperformat_euro"/>
+    </record>
+
+    <!-- Plantilla del Reporte -->
+    <template id="report_transit_driver_roster_document">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="doc">
+                <div class="page" style="font-family: 'Segoe UI', Arial, sans-serif; font-size: 10px; color: #1e293b;">
+                    <!-- Cabecera Oficial -->
+                    <div style="border-bottom: 2px solid #1e3a8a; padding-bottom: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-end;">
+                        <div>
+                            <h2 style="margin: 0; color: #1e3a8a; font-size: 18px; font-weight: bold;">
+                                <t t-esc="doc.concessionaire_id.name or 'EMPRESA CONCESIONARIA DE TRANSPORTE'"/>
+                            </h2>
+                            <p style="margin: 2px 0 0; font-size: 12px; color: #475569;">
+                                PLANILLA OFICIAL DE ASIGNACIÓN DE TURNOS Y ROSTERING SEMANAL
+                            </p>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="display: inline-block; background-color: #1e3a8a; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;">
+                                <t t-esc="doc.name"/> (Semana <t t-esc="doc.week_number"/>)
+                            </span>
+                            <div style="font-size: 10px; color: #64748b; margin-top: 3px;">
+                                Período: <t t-esc="doc.date_start"/> al <t t-esc="doc.date_end"/>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Indicadores de Cobertura -->
+                    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 12px; margin-bottom: 12px; display: flex; gap: 20px;">
+                        <div><strong>Total Turnos:</strong> <t t-esc="doc.total_shifts"/></div>
+                        <div><strong>Cubiertos:</strong> <t t-esc="doc.assigned_shifts"/></div>
+                        <div><strong>Vacantes:</strong> <t t-esc="doc.unassigned_shifts"/></div>
+                        <div><strong>% Cobertura:</strong> <t t-esc="doc.coverage_percentage"/>%</div>
+                        <div t-if="doc.conflict_count > 0" style="color: #dc2626; font-weight: bold;">
+                            ⚠️ <t t-esc="doc.conflict_count"/> Conflictos
+                        </div>
+                    </div>
+
+                    <!-- Grilla Semanal por Bus -->
+                    <table style="width: 100%; border-collapse: collapse; font-size: 9px; margin-bottom: 15px;">
+                        <thead>
+                            <tr style="background-color: #1e3a8a; color: #ffffff;">
+                                <th style="border: 1px solid #94a3b8; padding: 5px; width: 14%; text-align: left;">Bus / Interno</th>
+                                <th style="border: 1px solid #94a3b8; padding: 5px; width: 12%; text-align: center;">Lunes</th>
+                                <th style="border: 1px solid #94a3b8; padding: 5px; width: 12%; text-align: center;">Martes</th>
+                                <th style="border: 1px solid #94a3b8; padding: 5px; width: 12%; text-align: center;">Miércoles</th>
+                                <th style="border: 1px solid #94a3b8; padding: 5px; width: 12%; text-align: center;">Jueves</th>
+                                <th style="border: 1px solid #94a3b8; padding: 5px; width: 12%; text-align: center;">Viernes</th>
+                                <th style="border: 1px solid #94a3b8; padding: 5px; width: 13%; text-align: center;">Sábado</th>
+                                <th style="border: 1px solid #94a3b8; padding: 5px; width: 13%; text-align: center;">Domingo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <t t-set="vehicles" t-value="doc.shift_ids.mapped('vehicle_id').sorted(lambda v: v.internal_number or 999)"/>
+                            <t t-foreach="vehicles" t-as="veh">
+                                <tr style="border-bottom: 1px solid #cbd5e1;">
+                                    <td style="border: 1px solid #cbd5e1; padding: 4px; background-color: #f1f5f9; font-weight: bold;">
+                                        Interno #<t t-esc="veh.internal_number or veh.name"/><br/>
+                                        <span style="font-size: 8px; color: #64748b;"><t t-esc="veh.license_plate or ''"/></span>
+                                    </td>
+                                    <!-- 7 Días -->
+                                    <t t-foreach="range(7)" t-as="d_idx">
+                                        <t t-set="curr_date" t-value="doc.date_start + datetime.timedelta(days=d_idx)"/>
+                                        <t t-set="day_shifts" t-value="doc.shift_ids.filtered(lambda s: s.vehicle_id == veh and s.date == curr_date).sorted('start_time')"/>
+                                        <td style="border: 1px solid #cbd5e1; padding: 3px; vertical-align: top;">
+                                            <t t-if="not day_shifts">
+                                                <span style="color: #94a3b8; font-size: 8px;">—</span>
+                                            </t>
+                                            <t t-foreach="day_shifts" t-as="sh">
+                                                <div t-attf-style="margin-bottom: 3px; padding: 2px 4px; border-radius: 3px; font-size: 8px; border-left: 3px solid #{'#16a34a' if sh.direction == 'ida' else ('#ea580c' if sh.direction == 'vuelta' else '#0284c7')}; background-color: #{'#dcfce7' if sh.direction == 'ida' else ('#ffedd5' if sh.direction == 'vuelta' else '#e0f2fe')};">
+                                                    <strong><t t-esc="sh.start_time_str"/>-<t t-esc="sh.end_time_str"/></strong>
+                                                    (<t t-esc="'IDA' if sh.direction == 'ida' else ('VTA' if sh.direction == 'vuelta' else 'RED')"/>)<br/>
+                                                    <t t-if="sh.driver_id">
+                                                        <span style="font-weight: bold; color: #0f172a;"><t t-esc="sh.driver_id.name"/></span>
+                                                    </t>
+                                                    <t t-else="">
+                                                        <span style="color: #dc2626; font-weight: bold;">⚠️ VACANTE</span>
+                                                    </t>
+                                                </div>
+                                            </t>
+                                        </td>
+                                    </t>
+                                </tr>
+                            </t>
+
+                            <!-- Fila de Francos / Disponibles -->
+                            <tr style="background-color: #f0fdf4; border: 2px solid #16a34a;">
+                                <td style="border: 1px solid #cbd5e1; padding: 5px; font-weight: bold; color: #166534;">
+                                    🏖️ CHOFERES DE FRANCO
+                                </td>
+                                <t t-foreach="range(7)" t-as="d_idx">
+                                    <t t-set="curr_date" t-value="doc.date_start + datetime.timedelta(days=d_idx)"/>
+                                    <t t-set="free_drivers" t-value="doc._get_free_drivers_for_date(curr_date)"/>
+                                    <td style="border: 1px solid #cbd5e1; padding: 3px; vertical-align: top; font-size: 8px; color: #166534;">
+                                        <t t-if="free_drivers">
+                                            <t t-foreach="free_drivers" t-as="f_drv">
+                                                • <t t-esc="f_drv.name"/><br/>
+                                            </t>
+                                        </t>
+                                        <t t-else="">
+                                            <span style="color: #94a3b8;">— Ninguno —</span>
+                                        </t>
+                                    </td>
+                                </t>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <!-- Firmas de Conformidad -->
+                    <div style="margin-top: 30px; display: flex; justify-content: space-between; page-break-inside: avoid;">
+                        <div style="width: 30%; text-align: center; border-top: 1px solid #64748b; padding-top: 5px;">
+                            <strong>Jefatura de Operaciones / Tráfico</strong><br/>
+                            <span style="font-size: 8px; color: #64748b;">Firma y Sello</span>
+                        </div>
+                        <div style="width: 30%; text-align: center; border-top: 1px solid #64748b; padding-top: 5px;">
+                            <strong>Recursos Humanos / Nómina</strong><br/>
+                            <span style="font-size: 8px; color: #64748b;">Control de Jornadas y Descansos</span>
+                        </div>
+                        <div style="width: 30%; text-align: center; border-top: 1px solid #64748b; padding-top: 5px;">
+                            <strong>Delegado de Conductores</strong><br/>
+                            <span style="font-size: 8px; color: #64748b;">Conformidad de Cartelera</span>
+                        </div>
+                    </div>
+                </div>
+            </t>
+        </t>
+    </template>
+</odoo>

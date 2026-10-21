@@ -15,6 +15,18 @@
               parent="menu_transit_root"
               sequence="10"/>
 
+    <menuitem id="menu_transit_roster_board"
+              name="🎯 Mesa de Asignación de Turnos (Roster Board)"
+              parent="menu_transit_daily_operations"
+              action="action_transit_roster_board"
+              sequence="3"/>
+
+    <menuitem id="menu_transit_driver_roster"
+              name="Cuadrantes Semanales de Choferes"
+              parent="menu_transit_daily_operations"
+              action="action_transit_driver_roster"
+              sequence="4"/>
+
     <menuitem id="menu_transit_bus_schedule"
               name="Hojas de Ruta Diarias (Turnos de Buses)"
               parent="menu_transit_daily_operations"

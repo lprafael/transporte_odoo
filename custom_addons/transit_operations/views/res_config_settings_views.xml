@@ -49,6 +49,39 @@
                             </div>
                         </setting>
                     </block>
+                    <block title="Avisos Automáticos por WhatsApp a Choferes (Pre-Turno)" id="transit_whatsapp_settings">
+                        <setting string="Alerta Pre-Turno a Conductores" help="Envía mensaje 20 minutos antes de la salida programada">
+                            <field name="transit_whatsapp_enabled"/>
+                            <div class="content-group mt8" invisible="not transit_whatsapp_enabled">
+                                <div class="row">
+                                    <div class="col-6">
+                                        <label for="transit_whatsapp_minutes_before" string="Anticipación (Minutos)"/>
+                                        <field name="transit_whatsapp_minutes_before"/>
+                                    </div>
+                                    <div class="col-6">
+                                        <label for="transit_whatsapp_provider" string="Proveedor / Método"/>
+                                        <field name="transit_whatsapp_provider"/>
+                                    </div>
+                                </div>
+                                <div class="mt8" invisible="transit_whatsapp_provider == 'manual_wa_link'">
+                                    <label for="transit_whatsapp_api_url" string="URL del Gateway / Webhook"/>
+                                    <field name="transit_whatsapp_api_url"/>
+                                </div>
+                                <div class="mt8" invisible="transit_whatsapp_provider == 'manual_wa_link'">
+                                    <label for="transit_whatsapp_api_token" string="API Key / Token"/>
+                                    <field name="transit_whatsapp_api_token" password="True"/>
+                                </div>
+                                <div class="mt8" invisible="transit_whatsapp_provider == 'manual_wa_link'">
+                                    <label for="transit_whatsapp_instance" string="Instancia / ID Sesión"/>
+                                    <field name="transit_whatsapp_instance"/>
+                                </div>
+                                <div class="mt8">
+                                    <label for="transit_whatsapp_template" string="Plantilla de Mensaje"/>
+                                    <field name="transit_whatsapp_template"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
                 </app>
             </xpath>
         </field>

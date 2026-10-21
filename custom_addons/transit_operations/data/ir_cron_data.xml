@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<odoo>
+<odoo noupdate="1">
     <!-- Acción Planificada: Detección y Sincronización Automática de Planillas Excel -->
     <record id="ir_cron_auto_sync_transit_reports" model="ir.cron">
         <field name="name">Tránsito: Detección Automática de Servicios Concluidos en Planillas Excel</field>
@@ -7,6 +7,16 @@
         <field name="state">code</field>
         <field name="code">model.cron_auto_sync_all_reports()</field>
         <field name="interval_number">15</field>
+        <field name="interval_type">minutes</field>
+        <field name="active">True</field>
+    </record>
+    <!-- Acción Planificada: Envío Automático de Avisos WhatsApp 20 min antes del turno -->
+    <record id="ir_cron_whatsapp_pre_shift_alerts" model="ir.cron">
+        <field name="name">Tránsito: Alerta Pre-Turno por WhatsApp a Choferes (20 min antes)</field>
+        <field name="model_id" ref="model_transit_driver_roster"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_send_pre_shift_whatsapp_alerts()</field>
+        <field name="interval_number">5</field>
         <field name="interval_type">minutes</field>
         <field name="active">True</field>
     </record>
