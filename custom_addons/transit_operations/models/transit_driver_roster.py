@@ -477,11 +477,11 @@ class TransitDriverRoster(models.Model):
         ws.row_dimensions[4].height = 28
 
         # Recopilar todos los buses de este cuadrante
-        vehicles = self.shift_ids.mapped('vehicle_id').sorted(lambda v: v.internal_number or 999)
+        vehicles = self.shift_ids.mapped('vehicle_id').sorted(lambda v: v.bus_internal_number or '999')
         current_row = 5
 
         for veh in vehicles:
-            ws.cell(row=current_row, column=1, value=f"Interno #{veh.internal_number or veh.name}\n[{veh.license_plate or ''}]").font = Font(name='Segoe UI', size=9, bold=True)
+            ws.cell(row=current_row, column=1, value=f"Interno #{veh.bus_internal_number or veh.name}\n[{veh.license_plate or ''}]").font = Font(name='Segoe UI', size=9, bold=True)
             ws.cell(row=current_row, column=1).alignment = Alignment(vertical='center', wrap_text=True)
             ws.cell(row=current_row, column=1).border = thin_border
 
@@ -572,7 +572,27 @@ class TransitDriverRoster(models.Model):
     # API Backend para Tablero Drag & Drop (OWL)
     # =========================================================================
     @api.model
-    def get_roster_board_data(self, roster_id):
+    def get_or_create_current_roster(self):
+        """Busca el cuadrante más reciente o crea automáticamente el de la semana en curso"""
+        roster = self.search([], order='date_start desc, id desc', limit=1)
+        if roster:
+            return roster.id
+
+        today = fields.Date.today()
+        monday = today - timedelta(days=today.weekday())
+        w_num = monday.isocalendar()[1]
+        new_roster = self.create({
+            'name': f"CUADRANTE-S{w_num:02d}-{monday.year}",
+            'date_start': monday,
+        })
+        try:
+            new_roster.action_load_from_operational_schedules()
+        except Exception as e:
+            _logger.warning(f"No se pudieron precargar schedules para el nuevo cuadrante: {e}")
+        return new_roster.id
+
+    @api.model
+    def get_roster_board_data(self, roster_id=None):
         """
         Retorna la estructura completa de datos requerida para el componente interactivo:
         - Información del cuadrante
@@ -582,9 +602,12 @@ class TransitDriverRoster(models.Model):
         - Lista de Turnos (shifts) con id, horario, sentido, bus, chofer, alertas
         - Lista de Choferes de Franco por día
         """
+        if not roster_id or not self.browse(roster_id).exists():
+            roster_id = self.get_or_create_current_roster()
+
         roster = self.browse(roster_id)
         if not roster.exists():
-            return {'error': 'Cuadrante no encontrado'}
+            return {'error': 'No se pudo obtener o crear el cuadrante semanal.'}
 
         start_d = roster.date_start
         end_d = roster.date_end
@@ -605,13 +628,14 @@ class TransitDriverRoster(models.Model):
         bus_domain = []
         if roster.concessionaire_id:
             bus_domain.append(('concessionaire_id', '=', roster.concessionaire_id.id))
-        buses = self.env['fleet.vehicle'].search(bus_domain, order='internal_number asc, name asc')
+        buses = self.env['fleet.vehicle'].search(bus_domain, order='bus_internal_number asc, name asc')
         buses_data = []
         for b in buses:
             buses_data.append({
                 'id': b.id,
                 'name': b.name,
-                'internal_number': b.internal_number or '',
+                'internal_number': b.bus_internal_number or b.name or '',
+                'bus_internal_number': b.bus_internal_number or b.name or '',
                 'license_plate': b.license_plate or '',
                 'service_code': b.service_id.code if b.service_id else '',
                 'service_name': b.service_id.name if b.service_id else '',
@@ -652,7 +676,8 @@ class TransitDriverRoster(models.Model):
                 'day_index': int(s.day_of_week or 0),
                 'vehicle_id': s.vehicle_id.id if s.vehicle_id else False,
                 'vehicle_name': s.vehicle_id.name if s.vehicle_id else 'Sin Bus',
-                'internal_number': s.vehicle_id.internal_number if s.vehicle_id else '',
+                'internal_number': s.vehicle_id.bus_internal_number or s.vehicle_id.name if s.vehicle_id else '',
+                'bus_internal_number': s.vehicle_id.bus_internal_number or s.vehicle_id.name if s.vehicle_id else '',
                 'driver_id': s.driver_id.id if s.driver_id else False,
                 'driver_name': s.driver_id.name if s.driver_id else '',
                 'direction': s.direction or 'ida',

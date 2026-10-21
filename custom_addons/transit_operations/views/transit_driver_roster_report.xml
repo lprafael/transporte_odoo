@@ -64,11 +64,11 @@
                             </tr>
                         </thead>
                         <tbody>
-                            <t t-set="vehicles" t-value="doc.shift_ids.mapped('vehicle_id').sorted(lambda v: v.internal_number or 999)"/>
+                            <t t-set="vehicles" t-value="doc.shift_ids.mapped('vehicle_id').sorted(lambda v: v.bus_internal_number or '999')"/>
                             <t t-foreach="vehicles" t-as="veh">
                                 <tr style="border-bottom: 1px solid #cbd5e1;">
                                     <td style="border: 1px solid #cbd5e1; padding: 4px; background-color: #f1f5f9; font-weight: bold;">
-                                        Interno #<t t-esc="veh.internal_number or veh.name"/><br/>
+                                        Interno #<t t-esc="veh.bus_internal_number or veh.name"/><br/>
                                         <span style="font-size: 8px; color: #64748b;"><t t-esc="veh.license_plate or ''"/></span>
                                     </td>
                                     <!-- 7 Días -->

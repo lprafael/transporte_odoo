@@ -35,25 +35,8 @@ export class TransitRosterBoard extends Component {
 
         onWillStart(async () => {
             const ctx = this.props.action && this.props.action.context ? this.props.action.context : {};
-            let rosterId = ctx.active_roster_id || ctx.active_id;
-
-            if (!rosterId) {
-                // Obtener el cuadrante más reciente
-                const rosters = await this.orm.searchRead(
-                    "transit.driver.roster",
-                    [],
-                    ["id"],
-                    { limit: 1, order: "date_start desc, id desc" }
-                );
-                if (rosters && rosters.length > 0) {
-                    rosterId = rosters[0].id;
-                }
-            }
-
-            this.state.rosterId = rosterId;
-            if (rosterId) {
-                await this.loadData(rosterId);
-            }
+            const rosterId = ctx.active_roster_id || ctx.active_id || false;
+            await this.loadData(rosterId);
         });
     }
 
@@ -62,12 +45,13 @@ export class TransitRosterBoard extends Component {
             const data = await this.orm.call(
                 "transit.driver.roster",
                 "get_roster_board_data",
-                [rosterId]
+                [rosterId || false]
             );
             if (data.error) {
                 this.notification.add(data.error, { type: "danger" });
                 return;
             }
+            this.state.rosterId = data.roster.id;
             this.state.roster = data.roster;
             this.state.days = data.days;
             this.state.buses = data.buses;
