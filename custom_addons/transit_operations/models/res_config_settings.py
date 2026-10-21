@@ -80,7 +80,6 @@ class ResConfigSettings(models.TransientModel):
     )
     transit_whatsapp_template = fields.Text(
         string='Plantilla del Mensaje de Alerta',
-        config_parameter='transit.whatsapp_template',
         default="""👋 ¡Hola, *{driver_name}*! 🚌
 Te recordamos que tu turno inicia en *{minutes} minutos* (a las *{departure_time}* hs).
 
@@ -93,3 +92,17 @@ Te recordamos que tu turno inicia en *{minutes} minutos* (a las *{departure_time
 ⚠️ _Por favor preséntate en cabecera con uniforme para la inspección pre-operativa._ ¡Buen viaje! 🚦👍""",
         help='Plantilla con variables: {driver_name}, {minutes}, {departure_time}, {bus_number}, {license_plate}, {service_name}, {direction}, {route_name}'
     )
+
+    def get_values(self):
+        res = super(ResConfigSettings, self).get_values()
+        ICP = self.env['ir.config_parameter'].sudo()
+        res.update(
+            transit_whatsapp_template=ICP.get_param('transit.whatsapp_template', default=self.default_get(['transit_whatsapp_template']).get('transit_whatsapp_template'))
+        )
+        return res
+
+    def set_values(self):
+        super(ResConfigSettings, self).set_values()
+        ICP = self.env['ir.config_parameter'].sudo()
+        ICP.set_param('transit.whatsapp_template', self.transit_whatsapp_template or '')
+
