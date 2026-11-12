@@ -11,7 +11,10 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError, ValidationError
