@@ -31,6 +31,11 @@
                        decoration-warning="compliance_status in ('early', 'incomplete')"
                        decoration-danger="compliance_status in ('delayed', 'unperformed')"
                        decoration-info="compliance_status == 'reinforcement'"/>
+                <field name="clasificacion_operativa" widget="badge"
+                       decoration-success="clasificacion_operativa == 'segun_operativa'"
+                       decoration-warning="clasificacion_operativa == 'fuera_operativa'"
+                       decoration-danger="clasificacion_operativa == 'no_realizado'"
+                       optional="show"/>
                 <field name="is_reserve_substituted" widget="boolean" optional="show" string="Reserva"/>
                 <field name="battery_soc_departure" optional="hide" string="Bat. Salida %"/>
                 <field name="battery_soc_arrival" optional="hide" string="Bat. Llegada %"/>
@@ -413,6 +418,10 @@
                 <filter string="Hoy" name="today" domain="[('date', '=', context_today())]"/>
                 <filter string="Próximos Días" name="future" domain="[('date', '&gt;', context_today())]"/>
                 <separator/>
+                <filter string="✅ Según Operativa" name="filter_segun_operativa" domain="[('clasificacion_operativa', '=', 'segun_operativa')]"/>
+                <filter string="⚠️ Fuera de Operativa" name="filter_fuera_operativa" domain="[('clasificacion_operativa', '=', 'fuera_operativa')]"/>
+                <filter string="❌ No Realizados" name="filter_no_realizados" domain="[('clasificacion_operativa', '=', 'no_realizado')]"/>
+                <separator/>
                 <filter string="Regulares (En Horario)" name="on_time" domain="[('compliance_status', '=', 'on_time')]"/>
                 <filter string="Irregulares (Atrasados)" name="delayed" domain="[('compliance_status', '=', 'delayed')]"/>
                 <filter string="Irregulares (Adelantados)" name="early" domain="[('compliance_status', '=', 'early')]"/>
@@ -440,6 +449,7 @@
                     <filter string="Ruta / Ramal" name="group_route" context="{'group_by': 'route_id'}"/>
                     <filter string="Semáforo GPS" name="group_semaphore" context="{'group_by': 'semaphore_color'}"/>
                     <filter string="Régimen / Tipo de Día" name="group_tipo_dia" context="{'group_by': 'tipo_dia'}"/>
+                    <filter string="Clasificación Operativa (VMT)" name="group_clasif_operativa" context="{'group_by': 'clasificacion_operativa'}"/>
                     <filter string="Puntualidad / Regularidad" name="group_compliance" context="{'group_by': 'compliance_status'}"/>
                     <filter string="Tipo de Parada Técnica" name="group_layover" context="{'group_by': 'layover_type'}"/>
                     <filter string="Franja Horaria" name="group_franja" context="{'group_by': 'franja_horaria'}"/>

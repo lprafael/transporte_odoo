@@ -39,6 +39,49 @@
               action="action_transit_service_roundtrip"
               sequence="6"/>
 
+    <menuitem id="menu_transit_monitoring_audit"
+              name="📊 Auditoría y Monitoreo VMT"
+              parent="menu_transit_daily_operations"
+              action="action_transit_monitoring_audit"
+              sequence="7"/>
+
+    <!-- Control de Indicadores CBD & IFO (Res. 120/2025) -->
+    <menuitem id="menu_transit_cbd_root"
+              name="🚦 Control Regulatorio CBD &amp; IFO"
+              parent="menu_transit_daily_operations"
+              sequence="7"/>
+
+    <menuitem id="menu_transit_cbd_franja"
+              name="🎯 Monitoreo de Franjas &amp; Alertas IFO"
+              parent="menu_transit_cbd_root"
+              action="action_transit_cbd_franja"
+              sequence="1"/>
+
+    <menuitem id="menu_transit_cbd_hourly"
+              name="⏱️ Control de Buses por Hora (CBD)"
+              parent="menu_transit_cbd_root"
+              action="action_transit_cbd_hourly"
+              sequence="2"/>
+
+    <menuitem id="menu_transit_cbd_bus_detail"
+              name="🚌 Auditoría de Flota en Tránsito"
+              parent="menu_transit_cbd_root"
+              action="action_transit_cbd_bus_detail"
+              sequence="3"/>
+
+    <menuitem id="menu_transit_atypical_day"
+              name="📅 Días Atípicos, Lluvias y Feriados"
+              parent="menu_transit_cbd_root"
+              action="action_transit_atypical_day"
+              sequence="4"/>
+
+    <menuitem id="menu_transit_rain_casuistica"
+              name="🌧️ Casuísticas de Lluvia (Open-Meteo)"
+              parent="menu_transit_cbd_root"
+              action="action_transit_rain_casuistica"
+              sequence="5"/>
+
+
     <menuitem id="menu_transit_dynamic_report"
               name="Planillas Principales (Libros Excel .xlsx)"
               parent="menu_transit_daily_operations"

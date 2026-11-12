@@ -1101,6 +1101,38 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
 
     v_state["state"] = v_state["current_state"]
 
+    # 5. Detección de Eventos Operativos para Odoo (Res. GVMT 065/2024 & Monitoreo VMT)
+    new_state = v_state["current_state"]
+    if old_state != new_state:
+        event_type = None
+        if old_state in ("AT_ORIGIN", "DEPOT") and new_state == "IN_TRANSIT":
+            event_type = "departure"
+        elif old_state == "IN_TRANSIT" and new_state == "AT_DESTINATION":
+            event_type = "arrival"
+        elif new_state == "OFF_ROUTE" and old_state != "OFF_ROUTE":
+            event_type = "deviation"
+
+        if event_type:
+            event_payload = {
+                "event_type": event_type,
+                "internal_number": bus_key,
+                "license_plate": plate,
+                "agency_id": agency,
+                "route_code": v_state.get("route_id"),
+                "latitude": ping.latitude,
+                "longitude": ping.longitude,
+                "speed_kmh": speed,
+                "timestamp": now_iso,
+                "progress_percent": v_state.get("progress_percent", 0.0),
+                "distance_km": v_state.get("distance_traveled_km", 0.0),
+                "deviation_meters": v_state.get("deviation_meters", 0.0),
+            }
+            logger.info(f"⚡ Disparando evento '{event_type}' hacia Odoo para Bus #{bus_key} (estado: {old_state} -> {new_state})")
+            if background_tasks:
+                background_tasks.add_task(dispatch_odoo_webhook_with_retry, event_payload)
+            else:
+                threading.Thread(target=dispatch_odoo_webhook_with_retry, args=(event_payload,), daemon=True).start()
+
     # Alerta por Velocidad
     if speed > SPEED_LIMIT_KMH and not v_state.get("speed_alert"):
         v_state["speed_alert"] = True

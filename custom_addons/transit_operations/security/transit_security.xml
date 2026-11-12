@@ -149,4 +149,31 @@
         <field name="groups" eval="[(5, 0, 0)]"/>
         <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
+
+    <!-- 13. Monitoreo por Franjas CBD/IFO: transit.cbd.franja -->
+    <record id="transit_cbd_franja_concessionaire_rule" model="ir.rule">
+        <field name="name">Franjas CBD/IFO: Aislamiento Multi-Tenant Estricto</field>
+        <field name="model_id" ref="model_transit_cbd_franja"/>
+        <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+    </record>
+
+    <!-- 14. Monitoreo Horario CBD/IFO: transit.cbd.hourly -->
+    <record id="transit_cbd_hourly_concessionaire_rule" model="ir.rule">
+        <field name="name">CBD Horario: Aislamiento Multi-Tenant Estricto</field>
+        <field name="model_id" ref="model_transit_cbd_hourly"/>
+        <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+    </record>
+
+    <!-- 15. Detalle de Buses en Tránsito: transit.cbd.bus.detail -->
+    <record id="transit_cbd_bus_detail_concessionaire_rule" model="ir.rule">
+        <field name="name">Detalle Buses CBD: Aislamiento Multi-Tenant Estricto</field>
+        <field name="model_id" ref="model_transit_cbd_bus_detail"/>
+        <field name="global" eval="True"/>
+        <field name="groups" eval="[(5, 0, 0)]"/>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+    </record>
 </odoo>

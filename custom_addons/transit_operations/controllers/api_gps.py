@@ -102,13 +102,6 @@ class TransitGpsApiController(http.Controller):
             ('state', 'in', ['draft', 'inspected', 'dispatched', 'in_transit'])
         ], order='scheduled_departure asc', limit=1)
 
-        if not dispatch:
-            return Response(
-                json.dumps({'error': f'No hay despacho activo hoy para la unidad {vehicle.name}', 'code': 422}),
-                status=422,
-                content_type='application/json'
-            )
-
         # Parsear fecha de evento
         if event_time_str:
             clean_time = event_time_str.replace('Z', '+00:00')
@@ -118,6 +111,89 @@ class TransitGpsApiController(http.Controller):
                 event_dt = fields.Datetime.now()
         else:
             event_dt = fields.Datetime.now()
+
+        if not dispatch:
+            # Autodetección automática de servicio desde gps_broker / telemetría en vivo
+            route = None
+            route_code = payload.get('route_code') or payload.get('route_id') or payload.get('service_code')
+            if route_code:
+                # 1. Buscar directamente por código de ruta o ramal
+                route = env['transit.route'].search([('code', '=ilike', str(route_code).strip())], limit=1)
+                # 2. Buscar por servicio operativo (ej. E1, E2, E3, B1)
+                if not route:
+                    service = env['transit.service'].search([('code', '=ilike', str(route_code).strip())], limit=1)
+                    if service and service.route_ids:
+                        route = service.route_ids[0]
+
+            if not route or not route.exists():
+                route_id_val = payload.get('route_id')
+                if route_id_val and str(route_id_val).isdigit():
+                    route = env['transit.route'].browse(int(route_id_val))
+
+            if not route or not route.exists():
+                # Asignar la primera ruta activa asociada a la empresa permisionaria
+                route = env['transit.route'].search([('active', '=', True)], limit=1)
+
+            if route:
+                event_date = event_dt.date() if hasattr(event_dt, 'date') else fields.Date.context_today(env['transit.dispatch'])
+                # Buscar horarios programados para la ruta o servicio
+                timetables = env['transit.timetable'].search([
+                    '|',
+                    ('route_id', '=', route.id),
+                    ('service_id', '=', route.service_id.id if route.service_id else False)
+                ])
+
+                # Evaluar proximidad con horarios programados (tolerancia ±25 min)
+                matched_timetable = False
+                matched_scheduled_dt = False
+                is_reinforce = True
+                if timetables:
+                    ev_hour_float = event_dt.hour + (event_dt.minute / 60.0) + (event_dt.second / 3600.0)
+                    best_diff = 999.0
+                    best_tt = None
+                    for tt in timetables:
+                        diff_min = abs(tt.departure_time_float - ev_hour_float) * 60.0
+                        if diff_min < best_diff:
+                            best_diff = diff_min
+                            best_tt = tt
+                    if best_tt and best_diff <= 25.0:
+                        matched_timetable = best_tt
+                        sched_h = int(best_tt.departure_time_float)
+                        sched_m = int(round((best_tt.departure_time_float - sched_h) * 60.0))
+                        import datetime as dt_module
+                        matched_scheduled_dt = dt_module.datetime.combine(
+                            event_date,
+                            dt_module.time(sched_h % 24, sched_m % 60)
+                        )
+                        is_reinforce = False
+
+                dispatch = env['transit.dispatch'].create({
+                    'vehicle_id': vehicle.id,
+                    'route_id': route.id,
+                    'date': event_date,
+                    'timetable_id': matched_timetable.id if matched_timetable else False,
+                    'scheduled_departure': matched_scheduled_dt or event_dt,
+                    'is_reinforcement': is_reinforce,
+                    'state': 'in_transit',
+                    'actual_departure': event_dt,
+                    'initial_odometer': odometer or 0.0,
+                    'last_latitude': latitude or 0.0,
+                    'last_longitude': longitude or 0.0,
+                    'current_geofence_status': f'Autodetectado en vivo ({checkpoint_name or "Cabecera"})',
+                })
+                dispatch._compute_performance()
+                dispatch._compute_clasificacion_operativa()
+                clasif_str = "Según Operativa (Oficial)" if dispatch.segun_operativa else "Fuera de Operativa (Refuerzo / Desfasado)"
+                dispatch.message_post(
+                    body=f"🤖 <strong>Despacho Autodetectado por Telemetría:</strong> Salida registrada automáticamente por <code>gps_broker</code> para la unidad {vehicle.name} en {checkpoint_name}. Clasificación: <b>{clasif_str}</b>."
+                )
+                _logger.info("Despacho autodetectado y creado en Odoo: ID %d para vehículo %s (%s)", dispatch.id, vehicle.name, clasif_str)
+            else:
+                return Response(
+                    json.dumps({'error': f'No hay despacho activo hoy ni ruta configurada para la unidad {vehicle.name}', 'code': 422}),
+                    status=422,
+                    content_type='application/json'
+                )
 
         # Procesar según el evento operativo
         try:
@@ -138,6 +214,7 @@ class TransitGpsApiController(http.Controller):
                 })
                 dispatch.write(write_vals)
                 dispatch._compute_performance()
+                dispatch._compute_clasificacion_operativa()
 
                 # Marcar parada de cabecera como cruzada
                 origin_cp = dispatch.checkpoint_ids.filtered(lambda c: c.checkpoint_type == 'origin' or 'cabecera' in c.name.lower())
@@ -166,19 +243,38 @@ class TransitGpsApiController(http.Controller):
                     })
 
             elif event_type == 'arrival':
+                progress_pct = float(payload.get('progress_percent') or 100.0)
+                is_incomplete = progress_pct < 80.0  # Regla 80% del VMT
+
                 write_vals.update({
                     'actual_arrival': event_dt,
                     'final_odometer': odometer or dispatch.final_odometer,
+                    'is_incomplete': is_incomplete,
                     'state': 'completed',
-                    'current_geofence_status': 'En Terminal Destino (Finalizado)',
+                    'current_geofence_status': 'En Terminal Destino (Finalizado)' if not is_incomplete else f'Incompleto ({progress_pct:.1f}% traza)',
                 })
                 dispatch.write(write_vals)
-                dispatch.action_complete()
+                if dispatch.final_odometer and dispatch.final_odometer > dispatch.initial_odometer:
+                    env['fleet.vehicle.odometer'].create({
+                        'vehicle_id': dispatch.vehicle_id.id,
+                        'value': dispatch.final_odometer,
+                        'date': dispatch.date,
+                    })
+                dispatch._compute_performance()
+                dispatch._compute_clasificacion_operativa()
 
                 # Marcar parada destino
                 dest_cp = dispatch.checkpoint_ids.filtered(lambda c: c.checkpoint_type == 'destination' or 'destino' in c.name.lower())
                 if dest_cp:
                     dest_cp.write({'status': 'crossed', 'actual_time': event_dt})
+
+            elif event_type == 'deviation':
+                dev_m = float(payload.get('deviation_meters') or 0.0)
+                write_vals['current_geofence_status'] = f'Desviado ({round(dev_m)}m de traza oficial)'
+                dispatch.write(write_vals)
+                dispatch.message_post(
+                    body=f"⚠️ <strong>Alerta de Desvío VMT:</strong> Bus {vehicle.name} desviado de la traza oficial por {round(dev_m)} metros a las {event_dt.strftime('%H:%M:%S')}."
+                )
 
             elif event_type == 'speeding_alert':
                 write_vals['speed_alert'] = True

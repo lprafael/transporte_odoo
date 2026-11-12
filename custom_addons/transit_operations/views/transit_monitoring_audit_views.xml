@@ -1,0 +1,356 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ================================================================== -->
+    <!-- LINEAS DE AUDITORIA OPERATIVA VMT -->
+    <!-- ================================================================== -->
+    <record id="view_transit_monitoring_audit_line_tree_segun" model="ir.ui.view">
+        <field name="name">transit.monitoring.audit.line.tree.segun</field>
+        <field name="model">transit.monitoring.audit.line</field>
+        <field name="arch" type="xml">
+            <list string="Servicios Realizados según Operativa" decoration-success="category == 'segun_operativa'" create="false" edit="false" delete="false">
+                <field name="direction" widget="badge" decoration-info="direction == 'ida'" decoration-primary="direction == 'vuelta'"/>
+                <field name="mean_id" string="Bus (AVL)"/>
+                <field name="idsam" string="Validador"/>
+                <field name="service_number_prog" string="Nº Prog"/>
+                <field name="scheduled_time" string="Hora Prog"/>
+                <field name="actual_start" string="Salida Real"/>
+                <field name="actual_end" string="Llegada Real"/>
+                <field name="duration_minutes" string="Duración (min)"/>
+                <field name="deviation_minutes" string="Desvío (min)"/>
+                <field name="compliance_pct" string="% Itinerario" widget="percentage"/>
+                <field name="validations_total" string="Pasajeros"/>
+                <field name="validations_general" string="General" optional="hide"/>
+                <field name="validations_transfer" string="Transbordo" optional="hide"/>
+                <field name="validations_student" string="Estudiante" optional="hide"/>
+                <field name="validations_disability" string="Discapacidad" optional="hide"/>
+                <field name="status_reason" string="Diagnóstico"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_transit_monitoring_audit_line_tree_fuera" model="ir.ui.view">
+        <field name="name">transit.monitoring.audit.line.tree.fuera</field>
+        <field name="model">transit.monitoring.audit.line</field>
+        <field name="arch" type="xml">
+            <list string="Servicios Realizados fuera de Operativa" decoration-warning="category == 'fuera_operativa'" create="false" edit="false" delete="false">
+                <field name="direction" widget="badge" decoration-info="direction == 'ida'" decoration-primary="direction == 'vuelta'"/>
+                <field name="mean_id" string="Bus (AVL)"/>
+                <field name="idsam" string="Validador"/>
+                <field name="service_number_prog" string="Nº Prog"/>
+                <field name="scheduled_time" string="Hora Prog"/>
+                <field name="actual_start" string="Salida Real"/>
+                <field name="duration_minutes" string="Duración (min)"/>
+                <field name="deviation_minutes" string="Desvío (min)"/>
+                <field name="compliance_pct" string="% Itinerario" widget="percentage"/>
+                <field name="validations_total" string="Pasajeros"/>
+                <field name="status_reason" string="Motivo Fuera de Operativa" decoration-danger="1"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_transit_monitoring_audit_line_tree_no_real" model="ir.ui.view">
+        <field name="name">transit.monitoring.audit.line.tree.no_real</field>
+        <field name="model">transit.monitoring.audit.line</field>
+        <field name="arch" type="xml">
+            <list string="Servicios NO Realizados (Faltantes)" decoration-danger="category == 'no_realizados'" create="false" edit="false" delete="false">
+                <field name="direction" widget="badge" decoration-info="direction == 'ida'" decoration-primary="direction == 'vuelta'"/>
+                <field name="service_number_prog" string="Nº Salida Programada"/>
+                <field name="scheduled_time" string="Horario Programado"/>
+                <field name="status_reason" string="Estado / Incidencia"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- VISTA FORMULARIO PRINCIPAL DE AUDITORIA VMT -->
+    <!-- ================================================================== -->
+    <record id="view_transit_monitoring_audit_form" model="ir.ui.view">
+        <field name="name">transit.monitoring.audit.form</field>
+        <field name="model">transit.monitoring.audit</field>
+        <field name="arch" type="xml">
+            <form string="Auditoría y Monitoreo VMT">
+                <header>
+                    <button name="action_run_monitoring"
+                            type="object"
+                            string="⚡ Ejecutar Monitoreo VMT"
+                            class="oe_highlight btn-primary"
+                            icon="fa-play"/>
+                    <button name="action_contrast_operator_sheet"
+                            type="object"
+                            string="📊 Contrastar con Planilla de Tránsito"
+                            class="btn-secondary"
+                            icon="fa-balance-scale"
+                            invisible="not operator_excel_file"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,done"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" class="oe_edit_only"/>
+                        <h1>
+                            <field name="name" placeholder="Ej: [E1] Auditoría Diaria VMT"/>
+                        </h1>
+                    </div>
+
+                    <!-- Indicadores KPI Superiores -->
+                    <div class="row text-center mb-3">
+                        <div class="col-md-2 p-2 border rounded bg-light mr-1">
+                            <span class="text-muted d-block font-weight-bold">Programados</span>
+                            <h3 class="m-0 text-dark"><field name="total_programados"/></h3>
+                            <small class="text-muted"><field name="prog_ida"/> Ida / <field name="prog_vuelta"/> Vta</small>
+                        </div>
+                        <div class="col-md-2 p-2 border rounded bg-light mr-1" style="background-color: #E2F0D9 !important;">
+                            <span class="text-success d-block font-weight-bold">✓ Según Operativa</span>
+                            <h3 class="m-0 text-success"><field name="total_segun_operativa"/></h3>
+                            <small class="text-success"><field name="segun_operativa_ida"/> Ida / <field name="segun_operativa_vuelta"/> Vta</small>
+                        </div>
+                        <div class="col-md-2 p-2 border rounded bg-light mr-1" style="background-color: #FFF2CC !important;">
+                            <span class="text-warning d-block font-weight-bold">⚠ Fuera Operativa</span>
+                            <h3 class="m-0 text-warning"><field name="total_fuera_operativa"/></h3>
+                            <small class="text-warning"><field name="fuera_operativa_ida"/> Ida / <field name="fuera_operativa_vuelta"/> Vta</small>
+                        </div>
+                        <div class="col-md-2 p-2 border rounded bg-light mr-1" style="background-color: #FCE4D6 !important;">
+                            <span class="text-danger d-block font-weight-bold">✗ No Realizados</span>
+                            <h3 class="m-0 text-danger"><field name="total_no_realizados"/></h3>
+                            <small class="text-danger"><field name="no_realizados_ida"/> Ida / <field name="no_realizados_vuelta"/> Vta</small>
+                        </div>
+                        <div class="col-md-2 p-2 border rounded bg-light mr-1">
+                            <span class="text-primary d-block font-weight-bold">% Cumplimiento</span>
+                            <h3 class="m-0 text-primary"><field name="compliance_pct"/>%</h3>
+                            <small class="text-muted">Cobertura: <field name="coverage_pct"/>%</small>
+                        </div>
+                        <div class="col-md-2 p-2 border rounded bg-light">
+                            <span class="text-info d-block font-weight-bold">Pasajeros Total</span>
+                            <h3 class="m-0 text-info"><field name="total_validaciones"/></h3>
+                            <small class="text-muted"><field name="km_oficiales"/> km liquidados</small>
+                        </div>
+                    </div>
+
+                    <group>
+                        <group string="Configuración del Monitoreo">
+                            <field name="service_id" options="{'no_create': True}"/>
+                            <field name="service_code" invisible="1"/>
+                            <field name="mode"/>
+                            <field name="date" invisible="mode != 'daily'"/>
+                            <field name="year" invisible="mode != 'monthly'"/>
+                            <field name="month" invisible="mode != 'monthly'"/>
+                        </group>
+                        <group string="Detalles Regulatorios VMT">
+                            <field name="tipo_dia_desc"/>
+                            <field name="km_oficiales"/>
+                            <field name="execution_time_seconds"/>
+                        </group>
+                    </group>
+
+                    <group string="Planilla del Operador (Arapotí / Permisionaria)" invisible="mode != 'daily'">
+                        <group>
+                            <field name="operator_excel_filename" invisible="1"/>
+                            <field name="operator_excel_file" filename="operator_excel_filename" widget="binary"/>
+                            <field name="contrast_concordance_pct" widget="percentage" invisible="operator_declared_trips == 0"/>
+                        </group>
+                        <group>
+                            <field name="contrast_excel_filename" invisible="1"/>
+                            <field name="contrast_excel_file" filename="contrast_excel_filename" widget="binary" invisible="not contrast_excel_file"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <!-- Pestaña 1: Según Operativa -->
+                        <page string="✓ Según Operativa (Regulares)" name="segun_operativa">
+                            <field name="line_segun_operativa_ids">
+                                <list decoration-success="1" create="false" edit="false" delete="false">
+                                    <field name="direction" widget="badge" decoration-info="direction == 'ida'" decoration-primary="direction == 'vuelta'"/>
+                                    <field name="mean_id" string="Bus"/>
+                                    <field name="idsam" string="Validador"/>
+                                    <field name="service_number_prog" string="Nº Prog"/>
+                                    <field name="scheduled_time" string="Hora Programada"/>
+                                    <field name="actual_start" string="Salida Real"/>
+                                    <field name="actual_end" string="Llegada Real"/>
+                                    <field name="duration_minutes" string="Duración (min)"/>
+                                    <field name="deviation_minutes" string="Desvío (min)"/>
+                                    <field name="compliance_pct" string="Cumplimiento %" widget="percentage"/>
+                                    <field name="validations_total" string="Pasajeros"/>
+                                    <field name="status_reason" string="Estado"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <!-- Pestaña 2: Fuera de Operativa -->
+                        <page string="⚠ Fuera de Operativa (Irregulares / Refuerzos / Desvíos)" name="fuera_operativa">
+                            <field name="line_fuera_operativa_ids">
+                                <list decoration-warning="1" create="false" edit="false" delete="false">
+                                    <field name="direction" widget="badge" decoration-info="direction == 'ida'" decoration-primary="direction == 'vuelta'"/>
+                                    <field name="mean_id" string="Bus"/>
+                                    <field name="idsam" string="Validador"/>
+                                    <field name="service_number_prog" string="Nº Prog Asoc."/>
+                                    <field name="scheduled_time" string="Hora Programada"/>
+                                    <field name="actual_start" string="Salida Real"/>
+                                    <field name="duration_minutes" string="Duración (min)"/>
+                                    <field name="deviation_minutes" string="Desvío (min)"/>
+                                    <field name="compliance_pct" string="Cumplimiento %" widget="percentage"/>
+                                    <field name="validations_total" string="Pasajeros"/>
+                                    <field name="status_reason" string="Motivo Fuera de Operativa"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <!-- Pestaña 3: No Realizados -->
+                        <page string="✗ No Realizados (Faltantes / Cancelados)" name="no_realizados">
+                            <field name="line_no_realizados_ids">
+                                <list decoration-danger="1" create="false" edit="false" delete="false">
+                                    <field name="direction" widget="badge" decoration-info="direction == 'ida'" decoration-primary="direction == 'vuelta'"/>
+                                    <field name="service_number_prog" string="Nº Salida Oficial"/>
+                                    <field name="scheduled_time" string="Horario Programado"/>
+                                    <field name="status_reason" string="Incidencia / Estado"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <!-- Pestaña 4: Contraste con Planilla del Operador -->
+                        <page string="📑 Contraste Planilla Operador" name="contraste_operador" invisible="not operator_excel_file">
+                            <group>
+                                <group string="Resumen de Conciliación">
+                                    <field name="operator_declared_trips"/>
+                                    <field name="contrast_matched_trips"/>
+                                    <field name="contrast_discrepancy_trips"/>
+                                </group>
+                                <group string="Diagnóstico de Brechas">
+                                    <field name="contrast_missing_gps_trips"/>
+                                    <field name="contrast_unreported_reinforcements"/>
+                                    <field name="contrast_concordance_pct" widget="percentage"/>
+                                </group>
+                            </group>
+                            <field name="contrast_line_ids">
+                                <list create="false" edit="false" delete="false"
+                                      decoration-success="status == 'matched'"
+                                      decoration-warning="status == 'time_diff'"
+                                      decoration-info="status == 'unreported_reinforcement'"
+                                      decoration-danger="status in ('no_gps_with_val', 'no_gps_no_val')">
+                                    <field name="direction" widget="badge" decoration-info="direction == 'ida'" decoration-primary="direction == 'vuelta'"/>
+                                    <field name="bus" string="Bus"/>
+                                    <field name="declared_departure" string="Salida Planilla"/>
+                                    <field name="monitored_departure" string="Salida GPS Real"/>
+                                    <field name="time_diff_minutes" string="Desfase (min)"/>
+                                    <field name="declared_validations" string="Tarj. Planilla"/>
+                                    <field name="monitored_validations" string="Val. VMT"/>
+                                    <field name="compliance_pct" string="% Itinerario" widget="percentage"/>
+                                    <field name="status" widget="badge"
+                                           decoration-success="status == 'matched'"
+                                           decoration-warning="status == 'time_diff'"
+                                           decoration-info="status == 'unreported_reinforcement'"
+                                           decoration-danger="status in ('no_gps_with_val', 'no_gps_no_val')"/>
+                                    <field name="diagnosis" string="Diagnóstico Técnico"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <!-- Pestaña 4: Desglose de Billetaje -->
+                        <page string="💳 Desglose de Billetaje Electrónico" name="billetaje">
+                            <group>
+                                <group string="Perfiles y Categorías de Pasajeros">
+                                    <field name="validaciones_general"/>
+                                    <field name="validaciones_transbordo"/>
+                                    <field name="validaciones_estudiante"/>
+                                    <field name="validaciones_discapacidad"/>
+                                    <field name="total_validaciones" class="oe_subtotal_footer_separator"/>
+                                </group>
+                            </group>
+                        </page>
+
+                        <!-- Pestaña 5: Reportes Excel Oficiales -->
+                        <page string="📥 Reportes Oficiales Excel (.xlsx)" name="reportes_excel">
+                            <group string="Descarga de Archivos Generados">
+                                <field name="excel_daily_filename" invisible="1"/>
+                                <field name="excel_daily_file"
+                                       filename="excel_daily_filename"
+                                       widget="binary"
+                                       string="Reporte Diario Servicios y Validaciones (.xlsx)"
+                                       invisible="mode != 'daily'"/>
+
+                                <field name="excel_monthly_filename" invisible="1"/>
+                                <field name="excel_monthly_file"
+                                       filename="excel_monthly_filename"
+                                       widget="binary"
+                                       string="Planilla Mensual Oficial VMT (Informe KM + Validaciones + Resumen) (.xlsx)"
+                                       invisible="mode != 'monthly'"/>
+                            </group>
+                        </page>
+
+                        <!-- Pestaña 6: Trazas Técnicas -->
+                        <page string="📋 Trazas y Log de Monitoreo" name="log">
+                            <field name="log_output" readonly="1" widget="ace" options="{'mode': 'text'}"/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- VISTA LISTA / TREE PRINCIPAL -->
+    <!-- ================================================================== -->
+    <record id="view_transit_monitoring_audit_tree" model="ir.ui.view">
+        <field name="name">transit.monitoring.audit.tree</field>
+        <field name="model">transit.monitoring.audit</field>
+        <field name="arch" type="xml">
+            <list string="Auditorías y Monitoreo VMT" decoration-danger="total_no_realizados &gt; 0" decoration-success="compliance_pct &gt;= 95">
+                <field name="name"/>
+                <field name="service_id"/>
+                <field name="mode"/>
+                <field name="date" optional="show"/>
+                <field name="total_programados" string="Prog."/>
+                <field name="total_segun_operativa" string="Según Op." decoration-success="1"/>
+                <field name="total_fuera_operativa" string="Fuera Op." decoration-warning="1"/>
+                <field name="total_no_realizados" string="Faltantes" decoration-danger="1"/>
+                <field name="compliance_pct" string="% Cumpl." widget="percentage"/>
+                <field name="total_validaciones" string="Pasajeros"/>
+                <field name="km_oficiales" string="Km"/>
+                <field name="state" widget="badge" decoration-success="state == 'done'" decoration-warning="state == 'running'" decoration-danger="state == 'error'"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- VISTA BUSQUEDA / FILTROS -->
+    <!-- ================================================================== -->
+    <record id="view_transit_monitoring_audit_search" model="ir.ui.view">
+        <field name="name">transit.monitoring.audit.search</field>
+        <field name="model">transit.monitoring.audit</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Auditorías">
+                <field name="name"/>
+                <field name="service_id"/>
+                <field name="service_code"/>
+                <filter name="filter_con_faltantes" string="Con Salidas Faltantes" domain="[('total_no_realizados', '>', 0)]"/>
+                <filter name="filter_done" string="Concluidos" domain="[('state', '=', 'done')]"/>
+                <filter name="filter_daily" string="Diarios" domain="[('mode', '=', 'daily')]"/>
+                <filter name="filter_monthly" string="Mensuales" domain="[('mode', '=', 'monthly')]"/>
+                <group expand="0" string="Agrupar por">
+                    <filter name="group_service" string="Servicio Especial" context="{'group_by': 'service_id'}"/>
+                    <filter name="group_mode" string="Modo" context="{'group_by': 'mode'}"/>
+                    <filter name="group_date" string="Fecha" context="{'group_by': 'date'}"/>
+                    <filter name="group_state" string="Estado" context="{'group_by': 'state'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ================================================================== -->
+    <!-- ACCION DE VENTANA -->
+    <!-- ================================================================== -->
+    <record id="action_transit_monitoring_audit" model="ir.actions.act_window">
+        <field name="name">Auditoría y Monitoreo VMT</field>
+        <field name="res_model">transit.monitoring.audit</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'search_default_filter_done': 0}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Ejecuta una auditoría de monitoreo telemático VMT
+            </p>
+            <p>
+                Calcula en tiempo real los servicios realizados según su operativa, los realizados fuera de su operativa (adelantados, atrasados, refuerzos o desvíos) y las salidas que no se realizaron (faltantes). Genera además los reportes oficiales Excel.
+            </p>
+        </field>
+    </record>
+</odoo>
+

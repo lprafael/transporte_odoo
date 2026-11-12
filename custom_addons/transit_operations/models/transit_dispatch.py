@@ -174,6 +174,21 @@ class TransitDispatch(models.Model):
         ('unperformed', 'No Realizado / Faltante'),
     ], string='Estado de Regularidad', compute='_compute_performance', store=True, tracking=True)
 
+    clasificacion_operativa = fields.Selection([
+        ('segun_operativa', 'Según Operativa (Oficial VMT)'),
+        ('fuera_operativa', 'Fuera de Operativa (Refuerzo / Desfasado)'),
+        ('no_realizado', 'No Realizado (Falta / Suspendido)'),
+    ], string='Clasificación Operativa', compute='_compute_clasificacion_operativa', store=True, index=True,
+       help='Clasificación oficial VMT y de monitoreo operativo: Según Operativa (>=80% traza en horario oficial), Fuera de Operativa (refuerzo o desvío) o No Realizado.')
+
+    segun_operativa = fields.Boolean(
+        string='Según Operativa',
+        compute='_compute_clasificacion_operativa',
+        store=True,
+        index=True,
+        help='True si el servicio cumple la traza oficial dentro de la ventana de horario programado'
+    )
+
     tipo_dia = fields.Selection([
         ('5', 'Laboral (Lunes a Viernes)'),
         ('6', 'Sábado'),
@@ -459,6 +474,35 @@ class TransitDispatch(models.Model):
             # Los servicios regulares e irregulares ejecutados son computables en el ICF
             # Los no realizados y cancelados quedan sin reconocimiento
             rec.is_recognized_icf = rec.compliance_status in ('on_time', 'delayed', 'early', 'reinforcement') and rec.state in ('dispatched', 'in_transit', 'completed')
+
+    @api.depends('compliance_status', 'state', 'is_reinforcement', 'is_incomplete', 'departure_delay_minutes')
+    def _compute_clasificacion_operativa(self):
+        for rec in self:
+            if rec.state == 'canceled' or rec.compliance_status == 'unperformed':
+                rec.clasificacion_operativa = 'no_realizado'
+                rec.segun_operativa = False
+            elif rec.is_reinforcement or rec.compliance_status == 'reinforcement':
+                rec.clasificacion_operativa = 'fuera_operativa'
+                rec.segun_operativa = False
+            elif rec.is_incomplete or rec.compliance_status == 'incomplete':
+                rec.clasificacion_operativa = 'fuera_operativa'
+                rec.segun_operativa = False
+            elif rec.compliance_status in ('on_time', 'delayed', 'early'):
+                # En la lógica VMT:
+                # Regular en tolerancia oficial o atraso/adelanto <= 20 min -> Según Operativa
+                if rec.compliance_status == 'on_time':
+                    rec.clasificacion_operativa = 'segun_operativa'
+                    rec.segun_operativa = True
+                else:
+                    if abs(rec.departure_delay_minutes) <= 20.0:
+                        rec.clasificacion_operativa = 'segun_operativa'
+                        rec.segun_operativa = True
+                    else:
+                        rec.clasificacion_operativa = 'fuera_operativa'
+                        rec.segun_operativa = False
+            else:
+                rec.clasificacion_operativa = False
+                rec.segun_operativa = False
 
     @api.depends('initial_odometer', 'final_odometer')
     def _compute_km(self):

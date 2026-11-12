@@ -27,3 +27,6 @@ from . import transit_service_roundtrip
 from . import hr_employee
 from . import transit_requirement
 from . import transit_driver_roster
+from . import transit_monitoring_audit
+from . import transit_cbd_control
+

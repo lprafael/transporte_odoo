@@ -20,4 +20,15 @@
         <field name="interval_type">minutes</field>
         <field name="active">True</field>
     </record>
+
+    <!-- Acción Planificada: Cálculo Periódico de CBD e IFO (Res. 120/2025) y Alertas Anti-Infracción -->
+    <record id="ir_cron_update_today_cbd_ifo" model="ir.cron">
+        <field name="name">Tránsito: Control Continuo de Buses (CBD), IFO y Alertas Preventivas de Franja</field>
+        <field name="model_id" ref="model_transit_cbd_hourly"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_update_today_cbd_ifo()</field>
+        <field name="interval_number">10</field>
+        <field name="interval_type">minutes</field>
+        <field name="active">True</field>
+    </record>
 </odoo>

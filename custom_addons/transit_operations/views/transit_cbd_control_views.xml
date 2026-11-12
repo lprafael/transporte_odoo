@@ -1,0 +1,736 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ================================================================== -->
+    <!-- 1. VISTAS: CONTROL POR FRANJA OPERATIVA (transit.cbd.franja)       -->
+    <!-- ================================================================== -->
+
+    <!-- Form View -->
+    <record id="view_transit_cbd_franja_form" model="ir.ui.view">
+        <field name="name">transit.cbd.franja.form</field>
+        <field name="model">transit.cbd.franja</field>
+        <field name="arch" type="xml">
+            <form string="Control de Franja Operativa (CBD, ICCBDM &amp; IFO)">
+                <header>
+                    <button name="action_recalculate"
+                            string="🔄 Sincronizar GPS / Recalcular"
+                            type="object"
+                            class="oe_highlight"/>
+                    <field name="state" widget="statusbar" statusbar_visible="future,in_progress,closed"/>
+                </header>
+                <sheet>
+                    <div class="alert alert-danger" role="alert" invisible="alert_severity != 'danger'">
+                        <field name="alert_message" readonly="1"/>
+                    </div>
+                    <div class="alert alert-warning" role="alert" invisible="alert_severity != 'warning'">
+                        <field name="alert_message" readonly="1"/>
+                    </div>
+                    <div class="alert alert-success" role="alert" invisible="alert_severity != 'ok'">
+                        <field name="alert_message" readonly="1"/>
+                    </div>
+
+                    <div class="oe_title">
+                        <label for="name" string="Franja Operativa"/>
+                        <h1>
+                            <field name="name" readonly="1"/>
+                        </h1>
+                        <h3>
+                            <field name="range_label" readonly="1"/>
+                        </h3>
+                    </div>
+
+                    <group>
+                        <group string="Identificación, Régimen y Clima (Open-Meteo)">
+                            <field name="concessionaire_id" options="{'no_create': True}"/>
+                            <field name="agency_id" readonly="1"/>
+                            <field name="cid_franja_id" readonly="1"/>
+                            <field name="date"/>
+                            <field name="tipo_dia" readonly="1"/>
+                            <field name="is_holiday" readonly="1"/>
+                            <field name="holiday_info" readonly="1"/>
+                            <field name="is_rainy_day" readonly="1"/>
+                            <field name="weather_description" readonly="1"/>
+                            <field name="precipitation_mm" readonly="1"/>
+                            <field name="is_peak" readonly="1"/>
+                            <field name="is_regulated" readonly="1"/>
+                            <field name="alert_severity" invisible="1"/>
+                        </group>
+                        <group string="Progreso y Base Histórica (Res. 120/2025)">
+                            <field name="total_hours" readonly="1"/>
+                            <field name="elapsed_hours" readonly="1"/>
+                            <field name="remaining_hours" readonly="1"/>
+                            <field name="adjustment_factor" readonly="1"/>
+                            <field name="factor_details" readonly="1"/>
+                            <field name="reference_dates_info" readonly="1"/>
+                            <field name="excluded_dates_info" readonly="1"/>
+                            <field name="ifo_umbral_minimo" readonly="1"/>
+                            <field name="infraccion_prevista" readonly="1"
+                                   decoration-danger="infraccion_prevista in ('art_15_3', 'art_15_5', 'art_15_6')"
+                                   decoration-warning="infraccion_prevista in ('art_15_2', 'art_15_4')"
+                                   decoration-success="infraccion_prevista == 'none'"/>
+                        </group>
+                    </group>
+
+                    <group>
+                        <group string="Indicadores CBD y Flota Mínima (ICCBDM)">
+                            <field name="cbd_franja_distinct" readonly="1"
+                                   decoration-danger="not cumple_cbd_franja"
+                                   decoration-success="cumple_cbd_franja"/>
+                            <field name="cbd_minimo_franja" readonly="1"/>
+                            <field name="cbd_minimo_hora" readonly="1"/>
+                            <field name="cbd_objetivo_franja" readonly="1"/>
+                            <field name="buses_faltantes_franja" readonly="1"
+                                   decoration-danger="buses_faltantes_franja &gt; 0"/>
+                            <field name="iccbdm_pct" widget="progressbar" readonly="1"/>
+                            <field name="cbd_compliance_state" widget="badge"
+                                   decoration-success="cbd_compliance_state == 'Cumple'"
+                                   decoration-warning="cbd_compliance_state in ('Leve', 'Intermedia')"
+                                   decoration-danger="cbd_compliance_state == 'Grave'"
+                                   readonly="1"/>
+                        </group>
+                        <group string="Indicadores IFO y Compensación de Franja">
+                            <field name="ifo_promedio" widget="progressbar" readonly="1"/>
+                            <field name="ifo_level" widget="badge"
+                                   decoration-success="ifo_level == 'A'"
+                                   decoration-warning="ifo_level == 'B'"
+                                   decoration-danger="ifo_level == 'C'"
+                                   readonly="1"/>
+                            <field name="ifo_acumulado_transcurrido" readonly="1"/>
+                            <field name="ifo_requerido_restante_a" readonly="1"
+                                   decoration-danger="ifo_requerido_restante_a &gt; 100.0"
+                                   decoration-warning="ifo_requerido_restante_a &gt; 90.0"
+                                   decoration-success="ifo_requerido_restante_a &lt;= 90.0"/>
+                            <field name="buses_requeridos_restante_a" readonly="1"/>
+                            <field name="ifo_requerido_restante_b" readonly="1"/>
+                            <field name="buses_requeridos_restante_b" readonly="1"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="⏱️ Desglose por Hora y Metas Compensadas">
+                            <field name="hourly_line_ids">
+                                <list editable="bottom"
+                                      decoration-success="ifo_level == 'A' and cumple_cbd_minimo"
+                                      decoration-warning="ifo_level == 'B' and cumple_cbd_minimo"
+                                      decoration-danger="ifo_level == 'C' or not cumple_cbd_minimo">
+                                    <field name="hour_label" readonly="1"/>
+                                    <field name="distinct_buses_count" string="CBD Actual (Buses)"/>
+                                    <field name="cbd_minimo_hora" string="CBD Mín. Hora" readonly="1"/>
+                                    <field name="cbd_historico" string="CBD Histórico" readonly="1"/>
+                                    <field name="adjustment_factor" string="Factor" readonly="1"/>
+                                    <field name="cbd_objetivo" string="CBD Obj. (100%)" readonly="1"/>
+                                    <field name="ifo_pct" string="IFO Actual (%)" readonly="1"/>
+                                    <field name="ifo_level" widget="badge" readonly="1"
+                                           decoration-success="ifo_level == 'A'"
+                                           decoration-warning="ifo_level == 'B'"
+                                           decoration-danger="ifo_level == 'C'"/>
+                                    <field name="ifo_objetivo_compensado_a" string="IFO Obj. Compensado (%)" readonly="1"
+                                           decoration-danger="ifo_objetivo_compensado_a &gt; 100.0"
+                                           decoration-warning="ifo_objetivo_compensado_a &gt; 90.0"/>
+                                    <field name="cbd_objetivo_compensado_a" string="Buses Requeridos (Nivel A)" readonly="1"/>
+                                    <field name="buses_faltantes_a" string="Buses Faltantes" readonly="1"
+                                           decoration-danger="buses_faltantes_a &gt; 0"/>
+                                    <field name="cumple_cbd_minimo" column_invisible="True"/>
+                                    <field name="alert_status" widget="badge" readonly="1"
+                                           decoration-success="alert_status == 'ok'"
+                                           decoration-warning="alert_status == 'warning'"
+                                           decoration-danger="alert_status == 'critical'"/>
+                                    <field name="alert_message" readonly="1" optional="show"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Tree View -->
+    <record id="view_transit_cbd_franja_tree" model="ir.ui.view">
+        <field name="name">transit.cbd.franja.tree</field>
+        <field name="model">transit.cbd.franja</field>
+        <field name="arch" type="xml">
+            <list string="Monitoreo de Franjas Operativas (Res. 120/2025)"
+                  decoration-success="ifo_level == 'A' and cumple_cbd_franja"
+                  decoration-warning="ifo_level == 'B' and cumple_cbd_franja"
+                  decoration-danger="ifo_level == 'C' or not cumple_cbd_franja">
+                <field name="date"/>
+                <field name="concessionaire_id"/>
+                <field name="tipo_dia" optional="show"/>
+                <field name="name"/>
+                <field name="range_label"/>
+                <field name="weather_description" string="Clima Open-Meteo" optional="show"/>
+                <field name="holiday_info" string="Calendario / Feriado" optional="hide"/>
+                <field name="adjustment_factor" string="Factor Ajuste" optional="show"/>
+                <field name="cbd_franja_distinct" string="CBD Franja"/>
+                <field name="cbd_minimo_franja" string="CBD Mín. Franja"/>
+                <field name="cbd_minimo_hora" string="CBD Mín. Hora"/>
+                <field name="iccbdm_pct" string="ICCBDM (%)"/>
+                <field name="ifo_promedio" string="IFO Franja (%)" widget="progressbar"/>
+                <field name="ifo_umbral_minimo" string="Umbral IFO (%)" optional="hide"/>
+                <field name="ifo_level" widget="badge"
+                       decoration-success="ifo_level == 'A'"
+                       decoration-warning="ifo_level == 'B'"
+                       decoration-danger="ifo_level == 'C'"/>
+                <field name="ifo_requerido_restante_a" string="IFO Obj. Restante (%)" optional="show"/>
+                <field name="buses_requeridos_restante_a" string="Buses/h Requeridos" optional="show"/>
+                <field name="infraccion_prevista" optional="show"/>
+                <field name="state" widget="badge"
+                       decoration-info="state == 'in_progress'"
+                       decoration-muted="state == 'future'"
+                       decoration-success="state == 'closed' and ifo_level == 'A'"
+                       decoration-danger="state == 'closed' and ifo_level == 'C'"/>
+                <field name="cumple_cbd_franja" column_invisible="True"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Kanban View -->
+    <record id="view_transit_cbd_franja_kanban" model="ir.ui.view">
+        <field name="name">transit.cbd.franja.kanban</field>
+        <field name="model">transit.cbd.franja</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="state" class="o_kanban_dashboard" sample="1">
+                <field name="id"/>
+                <field name="name"/>
+                <field name="date"/>
+                <field name="range_label"/>
+                <field name="concessionaire_id"/>
+                <field name="cbd_franja_distinct"/>
+                <field name="cbd_minimo_franja"/>
+                <field name="iccbdm_pct"/>
+                <field name="ifo_promedio"/>
+                <field name="ifo_level"/>
+                <field name="state"/>
+                <field name="alert_severity"/>
+                <field name="ifo_requerido_restante_a"/>
+                <field name="buses_requeridos_restante_a"/>
+                <field name="alert_message"/>
+                <templates>
+                    <t t-name="card">
+                        <div t-attf-class="oe_kanban_global_click oe_kanban_card #{record.alert_severity.raw_value == 'danger' ? 'border-danger' : (record.alert_severity.raw_value == 'warning' ? 'border-warning' : 'border-success')}">
+                            <div class="o_kanban_record_top">
+                                <div class="o_kanban_record_headings">
+                                    <strong class="o_kanban_record_title"><t t-esc="record.name.value"/></strong>
+                                    <span class="text-muted ms-2"><t t-esc="record.range_label.value"/></span>
+                                </div>
+                                <span t-attf-class="badge #{record.ifo_level.raw_value == 'A' ? 'text-bg-success' : (record.ifo_level.raw_value == 'B' ? 'text-bg-warning' : 'text-bg-danger')}">
+                                    Nivel <t t-esc="record.ifo_level.value"/>
+                                </span>
+                            </div>
+                            <div class="o_kanban_record_body my-2">
+                                <div class="row text-center">
+                                    <div class="col-4">
+                                        <small class="text-muted">CBD Franja</small>
+                                        <h5><t t-esc="record.cbd_franja_distinct.value"/> / <small><t t-esc="record.cbd_minimo_franja.value"/></small></h5>
+                                    </div>
+                                    <div class="col-4">
+                                        <small class="text-muted">ICCBDM</small>
+                                        <h5><t t-esc="record.iccbdm_pct.value"/>%</h5>
+                                    </div>
+                                    <div class="col-4">
+                                        <small class="text-muted">IFO Promedio</small>
+                                        <h5><t t-esc="record.ifo_promedio.value"/>%</h5>
+                                    </div>
+                                </div>
+                                <t t-if="record.ifo_requerido_restante_a.raw_value &gt; 0">
+                                    <div class="alert alert-warning p-1 my-1 text-center small" role="alert">
+                                        🎯 Meta Nivel A: <strong class="text-danger"><t t-esc="record.ifo_requerido_restante_a.value"/>% IFO</strong> (~<t t-esc="record.buses_requeridos_restante_a.value"/> buses/h)
+                                    </div>
+                                </t>
+                            </div>
+                            <div class="o_kanban_record_bottom mt-1">
+                                <div class="oe_kanban_bottom_left">
+                                    <small><t t-esc="record.concessionaire_id.value"/></small>
+                                </div>
+                                <div class="oe_kanban_bottom_right">
+                                    <small class="text-muted"><t t-esc="record.date.value"/></small>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- Search View -->
+    <record id="view_transit_cbd_franja_search" model="ir.ui.view">
+        <field name="name">transit.cbd.franja.search</field>
+        <field name="model">transit.cbd.franja</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Franjas">
+                <field name="name"/>
+                <field name="concessionaire_id"/>
+                <field name="date"/>
+                <filter string="Hoy" name="today" domain="[('date', '=', context_today())]"/>
+                <filter string="En Curso" name="in_progress" domain="[('state', '=', 'in_progress')]"/>
+                <separator/>
+                <filter string="🚨 Nivel C (Infracción)" name="level_c" domain="[('ifo_level', '=', 'C')]"/>
+                <filter string="⚠️ Nivel B (Alerta)" name="level_b" domain="[('ifo_level', '=', 'B')]"/>
+                <filter string="✅ Nivel A (Cumple)" name="level_a" domain="[('ifo_level', '=', 'A')]"/>
+                <group expand="0" string="Agrupar Por">
+                    <filter string="Fecha" name="group_date" context="{'group_by': 'date'}"/>
+                    <filter string="Empresa" name="group_concessionaire" context="{'group_by': 'concessionaire_id'}"/>
+                    <filter string="Estado" name="group_state" context="{'group_by': 'state'}"/>
+                    <filter string="Nivel IFO" name="group_ifo_level" context="{'group_by': 'ifo_level'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Acción: Franjas Operativas -->
+    <record id="action_transit_cbd_franja" model="ir.actions.act_window">
+        <field name="name">Monitoreo de Franjas y Alertas IFO</field>
+        <field name="res_model">transit.cbd.franja</field>
+        <field name="view_mode">kanban,list,form</field>
+        <field name="context">{}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Monitorea en tiempo real el cumplimiento del CBD e IFO por franja operativa.
+            </p>
+            <p>
+                El sistema calcula los buses distintos observados, predice si caerás en infracción y te indica cuántos buses e IFO necesitas en las siguientes horas para alcanzar Nivel A.
+            </p>
+        </field>
+    </record>
+
+
+    <!-- ================================================================== -->
+    <!-- 2. VISTAS: CONTEO HORARIO DE BUSES CBD (transit.cbd.hourly)        -->
+    <!-- ================================================================== -->
+
+    <!-- Form View -->
+    <record id="view_transit_cbd_hourly_form" model="ir.ui.view">
+        <field name="name">transit.cbd.hourly.form</field>
+        <field name="model">transit.cbd.hourly</field>
+        <field name="arch" type="xml">
+            <form string="Conteo Horario de Buses en Tránsito (CBD)">
+                <header>
+                    <button name="action_recalculate_day"
+                            string="🔄 Sincronizar GPS del Día"
+                            type="object"
+                            class="oe_highlight"/>
+                </header>
+                <sheet>
+                    <div class="alert alert-danger" role="alert" invisible="alert_status != 'critical'">
+                        <field name="alert_message" readonly="1"/>
+                    </div>
+                    <div class="alert alert-warning" role="alert" invisible="alert_status != 'warning'">
+                        <field name="alert_message" readonly="1"/>
+                    </div>
+                    <div class="alert alert-success" role="alert" invisible="alert_status != 'ok'">
+                        <field name="alert_message" readonly="1"/>
+                    </div>
+
+                    <div class="oe_title">
+                        <label for="hour_label" string="Horario Analizado"/>
+                        <h1>
+                            <field name="hour_label" readonly="1"/>
+                        </h1>
+                        <h3>
+                            <field name="franja_id" readonly="1"/>
+                        </h3>
+                    </div>
+
+                    <group>
+                        <group string="Datos del Período y Empresa">
+                            <field name="concessionaire_id" readonly="1"/>
+                            <field name="agency_id" readonly="1"/>
+                            <field name="date" readonly="1"/>
+                            <field name="hour" readonly="1"/>
+                            <field name="data_source" readonly="1"/>
+                            <field name="is_current_hour" readonly="1"/>
+                            <field name="alert_status" invisible="1"/>
+                        </group>
+                        <group string="Cálculo CBD e IFO (Método cbd_monitor)">
+                            <field name="distinct_buses_count"/>
+                            <field name="cbd_minimo_hora" readonly="1"/>
+                            <field name="cbd_historico" readonly="1"/>
+                            <field name="adjustment_factor" readonly="1"/>
+                            <field name="cbd_denominador_ajustado" readonly="1"/>
+                            <field name="cbd_objetivo" readonly="1"/>
+                            <field name="ifo_pct" readonly="1"/>
+                            <field name="ifo_level" widget="badge"
+                                   decoration-success="ifo_level == 'A'"
+                                   decoration-warning="ifo_level == 'B'"
+                                   decoration-danger="ifo_level == 'C'"
+                                   readonly="1"/>
+                        </group>
+                    </group>
+
+                    <group string="🎯 Metas Operativas y Compensación Horaria">
+                        <group string="Metas para Nivel A (Promedio Franja >= 90%)">
+                            <field name="ifo_objetivo_compensado_a" readonly="1"
+                                   decoration-danger="ifo_objetivo_compensado_a &gt; 100.0"
+                                   decoration-warning="ifo_objetivo_compensado_a &gt; 90.0"/>
+                            <field name="cbd_objetivo_compensado_a" readonly="1"/>
+                            <field name="buses_faltantes_a" readonly="1"
+                                   decoration-danger="buses_faltantes_a &gt; 0"/>
+                        </group>
+                        <group string="Mínimos de Respaldo (Nivel B >= 80% y CBD Mínimo)">
+                            <field name="ifo_objetivo_compensado_b" readonly="1"/>
+                            <field name="cbd_objetivo_compensado_b" readonly="1"/>
+                            <field name="buses_faltantes_minimo" readonly="1"
+                                   decoration-danger="buses_faltantes_minimo &gt; 0"/>
+                        </group>
+                    </group>
+
+                    <group string="Resumen de Unidades en Tránsito">
+                        <field name="bus_codes_summary" readonly="1"/>
+                        <field name="factor_details" readonly="1"/>
+                    </group>
+
+                    <notebook>
+                        <page string="🚌 Detalle Individual de Coches Detectados (bus_monitor.py)">
+                            <field name="bus_detail_ids" readonly="1">
+                                <list decoration-success="is_valid_transit" decoration-muted="not is_valid_transit">
+                                    <field name="bus_internal_code"/>
+                                    <field name="first_ping"/>
+                                    <field name="last_ping"/>
+                                    <field name="message_count"/>
+                                    <field name="duration_min"/>
+                                    <field name="is_valid_transit" widget="boolean_toggle"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Tree View -->
+    <record id="view_transit_cbd_hourly_tree" model="ir.ui.view">
+        <field name="name">transit.cbd.hourly.tree</field>
+        <field name="model">transit.cbd.hourly</field>
+        <field name="arch" type="xml">
+            <list string="Control Horario de Buses en Tránsito (CBD)"
+                  decoration-success="ifo_level == 'A' and cumple_cbd_minimo"
+                  decoration-warning="ifo_level == 'B' and cumple_cbd_minimo"
+                  decoration-danger="ifo_level == 'C' or not cumple_cbd_minimo">
+                <field name="date"/>
+                <field name="concessionaire_id"/>
+                <field name="hour_label"/>
+                <field name="franja_name"/>
+                <field name="distinct_buses_count" string="CBD Actual"/>
+                <field name="cbd_minimo_hora" string="CBD Mín. Hora"/>
+                <field name="cbd_historico" string="CBD Histórico"/>
+                <field name="adjustment_factor" string="Factor"/>
+                <field name="cbd_objetivo" string="CBD Obj. (100%)"/>
+                <field name="ifo_pct" string="IFO Actual (%)"/>
+                <field name="ifo_level" widget="badge"
+                       decoration-success="ifo_level == 'A'"
+                       decoration-warning="ifo_level == 'B'"
+                       decoration-danger="ifo_level == 'C'"/>
+                <field name="ifo_objetivo_compensado_a" string="IFO Obj. Compensado (%)"/>
+                <field name="cbd_objetivo_compensado_a" string="Buses Requeridos (A)"/>
+                <field name="buses_faltantes_a" string="Buses Faltantes"
+                       decoration-danger="buses_faltantes_a &gt; 0"/>
+                <field name="cumple_cbd_minimo" column_invisible="True"/>
+                <field name="alert_status" widget="badge"
+                       decoration-success="alert_status == 'ok'"
+                       decoration-warning="alert_status == 'warning'"
+                       decoration-danger="alert_status == 'critical'"/>
+                <field name="alert_message" optional="show"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Pivot View -->
+    <record id="view_transit_cbd_hourly_pivot" model="ir.ui.view">
+        <field name="name">transit.cbd.hourly.pivot</field>
+        <field name="model">transit.cbd.hourly</field>
+        <field name="arch" type="xml">
+            <pivot string="Análisis Horario de CBD e IFO">
+                <field name="date" type="row"/>
+                <field name="hour" type="row"/>
+                <field name="concessionaire_id" type="col"/>
+                <field name="distinct_buses_count" type="measure"/>
+                <field name="cbd_objetivo" type="measure"/>
+                <field name="cbd_objetivo_compensado_a" type="measure"/>
+                <field name="ifo_pct" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <!-- Graph View -->
+    <record id="view_transit_cbd_hourly_graph" model="ir.ui.view">
+        <field name="name">transit.cbd.hourly.graph</field>
+        <field name="model">transit.cbd.hourly</field>
+        <field name="arch" type="xml">
+            <graph string="Evolución Horaria de CBD vs Meta" type="bar">
+                <field name="hour_label"/>
+                <field name="distinct_buses_count" type="measure"/>
+                <field name="cbd_objetivo" type="measure"/>
+                <field name="cbd_objetivo_compensado_a" type="measure"/>
+            </graph>
+        </field>
+    </record>
+
+    <!-- Search View -->
+    <record id="view_transit_cbd_hourly_search" model="ir.ui.view">
+        <field name="name">transit.cbd.hourly.search</field>
+        <field name="model">transit.cbd.hourly</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Registros Horarios">
+                <field name="concessionaire_id"/>
+                <field name="date"/>
+                <field name="franja_name"/>
+                <filter string="Hoy" name="today" domain="[('date', '=', context_today())]"/>
+                <separator/>
+                <filter string="🚨 Nivel C (Déficit)" name="level_c" domain="[('ifo_level', '=', 'C')]"/>
+                <filter string="⚠️ Nivel B" name="level_b" domain="[('ifo_level', '=', 'B')]"/>
+                <filter string="✅ Nivel A" name="level_a" domain="[('ifo_level', '=', 'A')]"/>
+                <group expand="0" string="Agrupar Por">
+                    <filter string="Fecha" name="group_date" context="{'group_by': 'date'}"/>
+                    <filter string="Empresa" name="group_conc" context="{'group_by': 'concessionaire_id'}"/>
+                    <filter string="Franja" name="group_franja" context="{'group_by': 'franja_name'}"/>
+                    <filter string="Nivel IFO" name="group_ifo" context="{'group_by': 'ifo_level'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Acción: Conteo Horario CBD -->
+    <record id="action_transit_cbd_hourly" model="ir.actions.act_window">
+        <field name="name">Control de Buses por Hora (CBD e IFO Objetivo)</field>
+        <field name="res_model">transit.cbd.hourly</field>
+        <field name="view_mode">list,pivot,graph,form</field>
+        <field name="context">{}</field>
+    </record>
+
+
+    <!-- ================================================================== -->
+    <!-- 3. VISTAS: DETALLE INDIVIDUAL DE BUSES (transit.cbd.bus.detail)   -->
+    <!-- ================================================================== -->
+
+    <record id="view_transit_cbd_bus_detail_tree" model="ir.ui.view">
+        <field name="name">transit.cbd.bus.detail.tree</field>
+        <field name="model">transit.cbd.bus.detail</field>
+        <field name="arch" type="xml">
+            <list string="Auditoría de Buses en Tránsito (GPS)">
+                <field name="date"/>
+                <field name="concessionaire_id"/>
+                <field name="hour"/>
+                <field name="bus_internal_code"/>
+                <field name="first_ping"/>
+                <field name="last_ping"/>
+                <field name="message_count"/>
+                <field name="duration_min"/>
+                <field name="is_valid_transit" widget="boolean_toggle"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_transit_cbd_bus_detail" model="ir.actions.act_window">
+        <field name="name">Auditoría de Buses en Tránsito (GPS)</field>
+        <field name="res_model">transit.cbd.bus.detail</field>
+        <field name="view_mode">list</field>
+    </record>
+
+
+    <!-- ================================================================== -->
+    <!-- 4. VISTAS: DÍAS ATÍPICOS, LLUVIAS Y FERIADOS (transit.atypical.day)-->
+    <!-- ================================================================== -->
+
+    <record id="view_transit_atypical_day_tree" model="ir.ui.view">
+        <field name="name">transit.atypical.day.tree</field>
+        <field name="model">transit.atypical.day</field>
+        <field name="arch" type="xml">
+            <list string="Días Atípicos, Lluvias y Feriados (Res. 120/2025)"
+                  decoration-info="tipo_atipico == 'LLUVIA'"
+                  decoration-warning="tipo_atipico == 'PRE_POS_FERIADO'"
+                  decoration-danger="tipo_atipico in ('FERIADO_LAB', 'FERIADO_SAB', 'DISRUPTIVO')">
+                <header>
+                    <button name="action_sync_all_atypical_days"
+                            string="🌧️ Sincronizar Feriados y Lluvias (Open-Meteo)"
+                            type="object"
+                            class="btn-primary"
+                            display="always"/>
+                </header>
+                <field name="fecha"/>
+                <field name="tipo_atipico" widget="badge"
+                       decoration-info="tipo_atipico == 'LLUVIA'"
+                       decoration-warning="tipo_atipico == 'PRE_POS_FERIADO'"
+                       decoration-danger="tipo_atipico in ('FERIADO_LAB', 'FERIADO_SAB')"/>
+                <field name="factor_exigencia" string="Factor de Exigencia"/>
+                <field name="descartar_historico" string="Descartar de 4 Sem. Ref." widget="boolean_toggle"/>
+                <field name="distrito_max" optional="show"/>
+                <field name="mm_caidos" string="Lluvia (mm)" optional="show"/>
+                <field name="fuente_dato"/>
+                <field name="observacion"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_transit_atypical_day_form" model="ir.ui.view">
+        <field name="name">transit.atypical.day.form</field>
+        <field name="model">transit.atypical.day</field>
+        <field name="arch" type="xml">
+            <form string="Día Atípico / Lluvia / Feriado">
+                <header>
+                    <button name="action_sync_all_atypical_days"
+                            string="🌧️ Sincronizar Feriados y Lluvias Open-Meteo"
+                            type="object"
+                            class="btn-primary"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group string="Clasificación del Día Atípico">
+                            <field name="fecha"/>
+                            <field name="tipo_atipico"/>
+                            <field name="factor_exigencia"/>
+                            <field name="descartar_historico"/>
+                            <field name="id_tipo_dia_aplicable"/>
+                            <field name="active"/>
+                        </group>
+                        <group string="Datos Meteorológicos (Open-Meteo Central) / Origen">
+                            <field name="fuente_dato"/>
+                            <field name="distrito_max"/>
+                            <field name="mm_caidos"/>
+                            <field name="observacion"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_transit_atypical_day_search" model="ir.ui.view">
+        <field name="name">transit.atypical.day.search</field>
+        <field name="model">transit.atypical.day</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Días Atípicos">
+                <field name="fecha"/>
+                <field name="tipo_atipico"/>
+                <field name="distrito_max"/>
+                <field name="observacion"/>
+                <filter string="🌧️ Días de Lluvia (&gt; 5mm)" name="rain_days" domain="[('tipo_atipico', '=', 'LLUVIA')]"/>
+                <filter string="📅 Feriados" name="holidays" domain="[('tipo_atipico', 'in', ('FERIADO_LAB', 'FERIADO_SAB'))]"/>
+                <filter string="⏮️ Pre / Pos-Feriados" name="pre_pos_holidays" domain="[('tipo_atipico', '=', 'PRE_POS_FERIADO')]"/>
+                <group expand="0" string="Agrupar Por">
+                    <filter string="Tipo de Día Atípico" name="group_tipo" context="{'group_by': 'tipo_atipico'}"/>
+                    <filter string="Fecha (Mes)" name="group_fecha" context="{'group_by': 'fecha:month'}"/>
+                    <filter string="Fuente" name="group_fuente" context="{'group_by': 'fuente_dato'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_transit_atypical_day" model="ir.actions.act_window">
+        <field name="name">Días Atípicos, Lluvias y Feriados (Res. 120/2025)</field>
+        <field name="res_model">transit.atypical.day</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{}</field>
+    </record>
+
+
+    <!-- ================================================================== -->
+    <!-- 5. VISTAS: CASUÍSTICAS DE LLUVIA OPEN-METEO (transit.rain.casuistica) -->
+    <!-- ================================================================== -->
+
+    <record id="view_transit_rain_casuistica_tree" model="ir.ui.view">
+        <field name="name">transit.rain.casuistica.tree</field>
+        <field name="model">transit.rain.casuistica</field>
+        <field name="arch" type="xml">
+            <list string="Casuísticas de Lluvia Open-Meteo (19 Distritos Departamento Central)"
+                  decoration-primary="es_resumen_diario"
+                  decoration-danger="es_lluvia_intensa">
+                <header>
+                    <button name="action_sync_recent_rain"
+                            string="🌧️ Descargar Lluvias Open-Meteo (19 Distritos Central)"
+                            type="object"
+                            class="btn-primary"
+                            display="always"/>
+                </header>
+                <field name="fecha_evento"/>
+                <field name="hora_inicio"/>
+                <field name="hora_fin"/>
+                <field name="es_resumen_diario" widget="boolean_toggle"/>
+                <field name="distrito_max"/>
+                <field name="mm_caidos" string="Lluvia (mm)"/>
+                <field name="es_lluvia_intensa" widget="boolean_toggle"/>
+                <field name="factor_ajuste"/>
+                <field name="fuente_registro"/>
+                <field name="notas"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_transit_rain_casuistica_form" model="ir.ui.view">
+        <field name="name">transit.rain.casuistica.form</field>
+        <field name="model">transit.rain.casuistica</field>
+        <field name="arch" type="xml">
+            <form string="Casuística de Lluvia Open-Meteo">
+                <header>
+                    <button name="action_sync_recent_rain"
+                            string="🌧️ Descargar Lluvias Open-Meteo (19 Distritos Central)"
+                            type="object"
+                            class="btn-primary"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group string="Periodo del Evento">
+                            <field name="fecha_evento"/>
+                            <field name="hora_inicio"/>
+                            <field name="hora_fin"/>
+                            <field name="es_resumen_diario"/>
+                        </group>
+                        <group string="Medición Open-Meteo (Departamento Central)">
+                            <field name="distrito_max"/>
+                            <field name="latitud"/>
+                            <field name="longitud"/>
+                            <field name="mm_caidos"/>
+                            <field name="es_lluvia_intensa"/>
+                            <field name="factor_ajuste"/>
+                            <field name="fuente_registro"/>
+                            <field name="registro_comprobado"/>
+                        </group>
+                    </group>
+                    <group string="Notas y Observaciones">
+                        <field name="notas"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_transit_rain_casuistica_search" model="ir.ui.view">
+        <field name="name">transit.rain.casuistica.search</field>
+        <field name="model">transit.rain.casuistica</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Casuísticas de Lluvia">
+                <field name="fecha_evento"/>
+                <field name="distrito_max"/>
+                <field name="notas"/>
+                <filter string="📊 Acumulados Diarios (&gt; 5mm)" name="daily_summary" domain="[('es_resumen_diario', '=', True)]"/>
+                <filter string="⏱️ Eventos Horarios (&gt; 2.5mm/h)" name="hourly_events" domain="[('es_resumen_diario', '=', False)]"/>
+                <filter string="⛈️ Lluvia Intensa (&gt;= 15mm)" name="intense_rain" domain="[('es_lluvia_intensa', '=', True)]"/>
+                <group expand="0" string="Agrupar Por">
+                    <filter string="Fecha" name="group_fecha" context="{'group_by': 'fecha_evento'}"/>
+                    <filter string="Distrito (Central)" name="group_distrito" context="{'group_by': 'distrito_max'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_transit_rain_casuistica" model="ir.actions.act_window">
+        <field name="name">Casuísticas de Lluvia Open-Meteo (Departamento Central)</field>
+        <field name="res_model">transit.rain.casuistica</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{}</field>
+    </record>
+
+    <!-- Cron Diario: Descarga Automática de Lluvias Open-Meteo (script_lluvia) y Días Atípicos -->
+    <record id="ir_cron_sync_open_meteo_rain_and_atypical" model="ir.cron">
+        <field name="name">Transporte: Descargar Lluvias Open-Meteo (script_lluvia) y Días Atípicos</field>
+        <field name="model_id" ref="model_transit_atypical_day"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_sync_rain_and_atypical_days()</field>
+        <field name="interval_number">6</field>
+        <field name="interval_type">hours</field>
+        <field name="active">True</field>
+    </record>
+</odoo>

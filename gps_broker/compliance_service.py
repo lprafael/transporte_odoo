@@ -28,7 +28,9 @@ Expone:
 
 import os
 import json
+import math
 import logging
+import urllib.request
 from datetime import datetime, timezone, date, time, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -36,6 +38,102 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger("compliance_service")
+
+# --- Configuración Open-Meteo (Gran Asunción / Central, igual que cbd_monitor/res_120/bus_monitor.py) ---
+OPEN_METEO_LAT = -25.3
+OPEN_METEO_LON = -57.6
+OPEN_METEO_TZ = "America/Asuncion"
+RAIN_THRESHOLD_MM = 5.0
+
+WEATHER_CODE_MAP = {
+    0: "Despejado", 1: "Mayormente despejado", 2: "Parcialmente nublado", 3: "Nublado",
+    45: "Niebla", 48: "Niebla de escarcha",
+    51: "Llovizna ligera", 53: "Llovizna moderada", 55: "Llovizna densa",
+    61: "Lluvia leve", 63: "Lluvia moderada", 65: "Lluvia fuerte",
+    71: "Nieve leve", 73: "Nieve moderada", 75: "Nieve fuerte",
+    80: "Chubascos leves", 81: "Chubascos moderados", 82: "Chubascos violentos",
+    95: "Tormenta", 96: "Tormenta con granizo leve", 99: "Tormenta con granizo fuerte"
+}
+
+_OPEN_METEO_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _fetch_open_meteo_rain_range(start_date: date, end_date: date) -> Dict[date, Dict[str, Any]]:
+    """
+    Consulta directamente la API de Open-Meteo (archive y forecast) para Gran Asunción (-25.3, -57.6)
+    obteniendo precipitación acumulada diaria (mm) y descripción climática.
+    Días con >= 5.0 mm se consideran Días de Lluvia según Res. GVMT 120/2025 / cbd_monitor.
+    """
+    results: Dict[date, Dict[str, Any]] = {}
+    missing_dates = []
+    cur_d = start_date
+    while cur_d <= end_date:
+        ds = cur_d.isoformat()
+        if ds in _OPEN_METEO_CACHE:
+            results[cur_d] = _OPEN_METEO_CACHE[ds]
+        else:
+            missing_dates.append(cur_d)
+        cur_d += timedelta(days=1)
+
+    if not missing_dates:
+        return results
+
+    min_missing = min(missing_dates)
+    max_missing = max(missing_dates)
+    today_real = datetime.now().date()
+    archive_cutoff = today_real - timedelta(days=5)
+
+    def _call_url(url: str):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "TransporteOdoo-GPSBroker/1.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    daily = data.get("daily", {})
+                    times = daily.get("time", [])
+                    precips = daily.get("precipitation_sum", [])
+                    wcodes = daily.get("weathercode", [])
+                    for idx, t_str in enumerate(times):
+                        p_val = float(precips[idx]) if idx < len(precips) and precips[idx] is not None else 0.0
+                        w_code = int(wcodes[idx]) if idx < len(wcodes) and wcodes[idx] is not None else 0
+                        info = {
+                            "mm": round(p_val, 2),
+                            "weathercode": w_code,
+                            "desc": WEATHER_CODE_MAP.get(w_code, "Desconocido"),
+                            "is_rain": p_val >= RAIN_THRESHOLD_MM,
+                        }
+                        _OPEN_METEO_CACHE[t_str] = info
+                        try:
+                            d_obj = date.fromisoformat(t_str)
+                            results[d_obj] = info
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.debug(f"Open-Meteo consulta parcial omitida ({url}): {e}")
+
+    if min_missing <= archive_cutoff:
+        arch_end = min(max_missing, archive_cutoff)
+        url_arch = (
+            f"https://archive-api.open-meteo.com/v1/archive?"
+            f"latitude={OPEN_METEO_LAT}&longitude={OPEN_METEO_LON}"
+            f"&start_date={min_missing.isoformat()}&end_date={arch_end.isoformat()}"
+            f"&daily=weathercode,precipitation_sum&timezone={OPEN_METEO_TZ}"
+        )
+        _call_url(url_arch)
+
+    if max_missing > archive_cutoff:
+        fc_start = max(min_missing, archive_cutoff + timedelta(days=1))
+        fc_end = min(max_missing, today_real + timedelta(days=15))
+        if fc_start <= fc_end:
+            url_fc = (
+                f"https://api.open-meteo.com/v1/forecast?"
+                f"latitude={OPEN_METEO_LAT}&longitude={OPEN_METEO_LON}"
+                f"&start_date={fc_start.isoformat()}&end_date={fc_end.isoformat()}"
+                f"&daily=weathercode,precipitation_sum&timezone={OPEN_METEO_TZ}"
+            )
+            _call_url(url_fc)
+
+    return results
 
 # --- Configuración Base de Datos Local (flota_db) ---
 PG_HOST = os.getenv("PG_HOST", "db")
@@ -48,8 +146,8 @@ PG_PASS = os.getenv("PG_PASS", "odoo_password")
 CID_HOST = os.getenv("CID_DB_HOST", "168.90.177.232")
 CID_PORT = int(os.getenv("CID_DB_PORT", 2024))
 CID_DB   = os.getenv("CID_DB_NAME", "bbdd-monitoreo-cid")
-CID_USER = os.getenv("CID_DB_USER", "cid_admin_user")
-CID_PASS = os.getenv("CID_DB_PASS", "vmtdmtcidccm")
+CID_USER = os.getenv("CID_DB_USER", "FPorta")
+CID_PASS = os.getenv("CID_DB_PASS", "portaf2024")
 
 CRITICAL_THRESHOLD_PCT = 85.0
 WARNING_THRESHOLD_PCT  = 95.0
@@ -86,7 +184,7 @@ def _cid_connect():
 
 def _get_day_type_info(conn, target_date: date) -> Dict[str, Any]:
     """
-    Determina tipo_dia (5=Laboral, 6=Sábado, 7=Domingo/Feriado) consultando transit_holiday.
+    Determina tipo_dia (5=Laboral, 6=Sábado, 7=Domingo/Feriado) consultando transit_holiday y public.feriados (CID).
     """
     dow = target_date.weekday()
     es_feriado = False
@@ -105,8 +203,22 @@ def _get_day_type_info(conn, target_date: date) -> Dict[str, Any]:
             es_feriado = True
             feriado_desc = row["name"]
     except Exception as e:
-        logger.debug(f"Aviso al consultar feriados (usando calendario estandar): {e}")
+        logger.debug(f"Aviso al consultar feriados locales: {e}")
         conn.rollback()
+
+    if not es_feriado:
+        try:
+            conn_c = _cid_connect()
+            cur_c = conn_c.cursor(cursor_factory=RealDictCursor)
+            cur_c.execute("SELECT descripcion FROM public.feriados WHERE fecha = %s LIMIT 1;", (target_date,))
+            row_c = cur_c.fetchone()
+            cur_c.close()
+            conn_c.close()
+            if row_c:
+                es_feriado = True
+                feriado_desc = row_c["descripcion"]
+        except Exception as e_c:
+            logger.debug(f"Aviso al consultar public.feriados CID: {e_c}")
 
     if es_feriado or dow == 6:
         td = 7
@@ -213,12 +325,12 @@ def get_available_services(agency_id: Optional[str] = None) -> List[Dict[str, An
 def get_valid_historical_dates(eval_date: date, target_count: int = 4) -> Tuple[List[date], List[Dict[str, str]]]:
     """
     Obtiene las 4 fechas históricas de las semanas anteriores en el mismo día de la semana,
-    descartando días feriados (con sus pre-feriados y pos-feriados) y días de lluvia (registros Open-Meteo).
+    descartando días feriados (con sus pre-feriados y pos-feriados) y días de lluvia (API Open-Meteo >= 5 mm y CID DB).
     Retorna (valid_dates, excluded_dates).
     """
     discard_reasons: Dict[date, str] = {}
 
-    # 1. Consultar días atípicos y lluvias en CID DB
+    # 1. Consultar días atípicos, lluvias y feriados en CID DB
     try:
         conn = _cid_connect()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -234,19 +346,32 @@ def get_valid_historical_dates(eval_date: date, target_count: int = 4) -> Tuple[
 
         cur.execute("""
             SELECT DISTINCT fecha_evento, notas
-            FROM control_metricas.t_casuisticas_lluvia;
+            FROM control_metricas.t_casuisticas_lluvia
+            WHERE mm_caidos > 5 OR mm_caidos IS NULL;
         """)
         for r in cur.fetchall():
             f = r["fecha_evento"]
             if f not in discard_reasons:
-                discard_reasons[f] = r.get("notas") or "Lluvia registrada (Open-Meteo)"
+                discard_reasons[f] = r.get("notas") or "Lluvia registrada (Open-Meteo CID)"
+
+        cur.execute("SELECT fecha, descripcion FROM public.feriados;")
+        for r in cur.fetchall():
+            f_hol = r["fecha"]
+            desc_hol = r.get("descripcion") or "Feriado Nacional"
+            discard_reasons[f_hol] = f"Feriado: {desc_hol}"
+            pre_hol = f_hol - timedelta(days=1)
+            pos_hol = f_hol + timedelta(days=1)
+            if pre_hol not in discard_reasons:
+                discard_reasons[pre_hol] = f"Pre-feriado de {desc_hol}"
+            if pos_hol not in discard_reasons:
+                discard_reasons[pos_hol] = f"Pos-feriado de {desc_hol}"
 
         cur.close()
         conn.close()
     except Exception as e:
-        logger.debug(f"Aviso al consultar dias_atipicos en CID DB: {e}")
+        logger.debug(f"Aviso al consultar dias_atipicos/feriados en CID DB: {e}")
 
-    # 2. Consultar feriados locales y pre/pos feriados
+    # 2. Consultar feriados locales, transit_atypical_day y transit_rain_casuistica en flota_db
     try:
         conn_local = _pg_connect()
         cur_l = conn_local.cursor(cursor_factory=RealDictCursor)
@@ -260,10 +385,43 @@ def get_valid_historical_dates(eval_date: date, target_count: int = 4) -> Tuple[
                 discard_reasons[pre_hol] = f"Pre-feriado de {r['name']}"
             if pos_hol not in discard_reasons:
                 discard_reasons[pos_hol] = f"Pos-feriado de {r['name']}"
+
+        try:
+            cur_l.execute("""
+                SELECT fecha, tipo_atipico, observacion
+                FROM transit_atypical_day
+                WHERE active = true AND (descartar_historico = true OR tipo_atipico = 'LLUVIA');
+            """)
+            for r in cur_l.fetchall():
+                f_at = r["fecha"]
+                discard_reasons[f_at] = r.get("observacion") or r.get("tipo_atipico")
+
+            cur_l.execute("""
+                SELECT fecha_evento, MAX(mm_caidos) as max_mm
+                FROM transit_rain_casuistica
+                GROUP BY fecha_evento
+                HAVING MAX(mm_caidos) > 5;
+            """)
+            for r in cur_l.fetchall():
+                f_ev = r["fecha_evento"]
+                if f_ev not in discard_reasons:
+                    discard_reasons[f_ev] = f"Lluvia Central Open-Meteo ({float(r['max_mm']):.1f} mm)"
+        except Exception:
+            conn_local.rollback()
+
         cur_l.close()
         conn_local.close()
     except Exception as e:
-        logger.debug(f"Aviso al consultar transit_holiday local: {e}")
+        logger.debug(f"Aviso al consultar tablas locales de feriados/lluvia: {e}")
+
+    # 3. Consultar directamente API Open-Meteo para el rango histórico (20 semanas)
+    try:
+        meteo_map = _fetch_open_meteo_rain_range(eval_date - timedelta(weeks=20), eval_date)
+        for d_meteo, info in meteo_map.items():
+            if info.get("is_rain") and d_meteo not in discard_reasons:
+                discard_reasons[d_meteo] = f"Lluvia Open-Meteo ({info['desc']}: {info['mm']} mm)"
+    except Exception as e_m:
+        logger.debug(f"Aviso Open-Meteo en get_valid_historical_dates: {e_m}")
 
     valid_dates: List[date] = []
     excluded_dates: List[Dict[str, str]] = []
@@ -286,14 +444,17 @@ def get_valid_historical_dates(eval_date: date, target_count: int = 4) -> Tuple[
 
 def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = None) -> Dict[str, Any]:
     """
-    Cálculo de métricas regulatorias según especificación VMT:
-      - CBD: Cantidad de buses distintos en itinerario (fuera de paradas terminales)
+    Cálculo de métricas regulatorias según especificación VMT (Res. GVMT N° 120/2025 / cbd_monitor):
+      - CBD: Cantidad de buses distintos en itinerario (fuera de paradas terminales + filtro de continuidad)
       - CBD_hora: Conteo de buses distintos por hora
       - CBD_franja: Conteo de buses distintos acumulados en la franja horaria
-      - ICCBDM: (Promedio CBD_hora de la franja * 0.7) + (CBD_franja * 0.3)
-      - CBD_objetivo: Promedio histórico de las 4 semanas válidas (meta 100% IFO)
-      - IFO: (CBD_actual(hora) / CBD_objetivo(hora)) * 100%
-      - IFO_franja: Promedio de los IFO_hora de la franja
+      - ICCBDM: (Promedio CBD_hora de la franja * 0.7) + (CBD_franja * 0.3) e índice porcentual vs mínimos
+      - CBD_objetivo: ceil(max(CBD_historico * factor_ajuste, CBD_minimo_hora)) (meta 100% IFO)
+      - IFO: (CBD_actual(hora) / max(CBD_historico * factor_ajuste, CBD_minimo_hora)) * 100% (tope 200%)
+      - IFO_franja: Promedio de los IFO_hora de la franja (Nivel A >= 90%, Nivel B 80-89.99%, Nivel C < 80%)
+      - Compensación Dinámica de IFO por Franja: Si en las primeras horas de una franja hubo IFO bajo
+        (ej. IFO=50% a las 05h en franja 05-07h), calcula el IFO requerido en las horas restantes
+        (ej. 110% a las 06h y 07h) y la cantidad exacta de buses requeridos para cerrar en Nivel A (90%).
     """
     if not eval_date:
         eval_date = datetime.now().date()
@@ -301,6 +462,7 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
     is_today = (eval_date == datetime.now().date())
     now = datetime.now()
     current_hour = now.hour if is_today else 23
+    current_minute = now.minute if is_today else 59
 
     # Determinar tipo de día
     try:
@@ -313,13 +475,16 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
 
     # 1. Obtener 4 fechas históricas válidas
     valid_dates, excluded_dates = get_valid_historical_dates(eval_date, target_count=4)
+    min_ref_date = min(valid_dates) if valid_dates else (eval_date - timedelta(weeks=4))
 
-    # 2. Obtener franjas operativas y parámetros mínimos desde CID DB
+    # 2. Obtener franjas operativas, factores de ajuste y parámetros mínimos desde CID DB
     franjas = []
     cbd_minimos = {}
     parametros_ifo = {}
+    factores_ajuste = {}
     cbd_actual_by_hour = {}
-    hist_by_hour = {}
+    buses_by_hour_sets: Dict[int, set] = {}
+    hist_by_hour: Dict[int, Dict[date, int]] = {}
 
     try:
         conn_cid = _cid_connect()
@@ -356,6 +521,55 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
                 "min_hora": r["cbd_minimo_hora"] or 0
             }
 
+        # Factores de ajuste de demanda acumulados (igual que cbd_monitor/backend/routes/performance.py + Open-Meteo)
+        factor_dia = 1.0
+        if eval_date.month in (1, 12):
+            factor_dia *= 0.80
+        lluvia_app = False
+        try:
+            cur_cid.execute("SELECT 1 FROM public.feriados WHERE fecha = %s LIMIT 1;", (eval_date,))
+            is_hol_cid = cur_cid.fetchone() is not None
+            if is_hol_cid or day_info.get("es_feriado"):
+                factor_dia *= (0.50 if eval_date.weekday() == 5 else 0.30)
+            else:
+                cur_cid.execute(
+                    "SELECT 1 FROM public.feriados WHERE fecha IN (%s, %s) LIMIT 1;",
+                    (eval_date - timedelta(days=1), eval_date + timedelta(days=1))
+                )
+                if cur_cid.fetchone() is not None:
+                    factor_dia *= 0.70
+            cur_cid.execute(
+                "SELECT tipo_atipico, factor_exigencia FROM control_metricas.dias_atipicos WHERE fecha = %s;",
+                (eval_date,)
+            )
+            atip_rows = cur_cid.fetchall()
+            for ar in atip_rows:
+                factor_dia *= float(ar.get("factor_exigencia") or 1.0)
+                if ar.get("tipo_atipico") == "LLUVIA":
+                    lluvia_app = True
+            if not lluvia_app:
+                cur_cid.execute(
+                    "SELECT mm_caidos FROM control_metricas.t_casuisticas_lluvia WHERE fecha_evento = %s AND mm_caidos > 5 LIMIT 1;",
+                    (eval_date,)
+                )
+                if cur_cid.fetchone() is not None:
+                    factor_dia *= 0.50
+                    lluvia_app = True
+        except Exception as e_fac:
+            logger.debug(f"Aviso calculando factores de ajuste: {e_fac}")
+            conn_cid.rollback()
+
+        if not lluvia_app:
+            try:
+                meteo_eval = _fetch_open_meteo_rain_range(eval_date, eval_date).get(eval_date)
+                if meteo_eval and meteo_eval.get("is_rain"):
+                    factor_dia *= 0.50
+            except Exception as e_om:
+                logger.debug(f"Aviso Open-Meteo en factor_dia: {e_om}")
+
+        for fr_item in franjas:
+            factores_ajuste[fr_item["id_franja"]] = round(factor_dia, 4)
+
         # Parámetros mínimos de IFO
         cur_cid.execute("""
             SELECT id_franja_operativa, porc_cumplimiento_minimo, descripcion, normativa
@@ -365,17 +579,20 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
         for r in cur_cid.fetchall():
             parametros_ifo[r["id_franja_operativa"]] = {
                 "umbral_min_pct": float(r["porc_cumplimiento_minimo"] or 80.0),
-                "normativa": r.get("normativa", "Dec. GVMT")
+                "normativa": r.get("normativa", "Res. GVMT 120/2025")
             }
 
         # CBD actual desde cbd_detalle_buses
         cur_cid.execute("""
-            SELECT hora, COUNT(DISTINCT mean_id) as cnt
+            SELECT hora, mean_id
             FROM control_metricas.cbd_detalle_buses
-            WHERE id_eot_vmt_hex = %s AND fecha = %s
-            GROUP BY hora ORDER BY hora;
+            WHERE id_eot_vmt_hex = %s AND fecha = %s;
         """, (agency_id, eval_date))
-        cbd_actual_by_hour = {r["hora"]: int(r["cnt"]) for r in cur_cid.fetchall()}
+        for r in cur_cid.fetchall():
+            h = int(r["hora"])
+            buses_by_hour_sets.setdefault(h, set()).add(str(r["mean_id"]))
+        for h, bset in buses_by_hour_sets.items():
+            cbd_actual_by_hour[h] = len(bset)
 
         # CBD histórico en las 4 fechas válidas
         if valid_dates:
@@ -386,20 +603,20 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
                 GROUP BY hora, fecha;
             """, (agency_id, valid_dates))
             for r in cur_cid.fetchall():
-                hist_by_hour.setdefault(r["hora"], []).append(int(r["cnt"]))
+                hist_by_hour.setdefault(int(r["hora"]), {})[r["fecha"]] = int(r["cnt"])
 
         cur_cid.close()
         conn_cid.close()
     except Exception as e:
         logger.error(f"Error consultando métricas en CID DB: {e}")
 
-    # Fallback franjas si no se cargaron de BD
+    # Fallback franjas si no se cargaron de BD (idénticas a control_metricas.franjas_operativas en CID DB)
     if not franjas:
         if td == 5:
             franjas = [
                 {"id_franja": 40, "nombre": "Madrugada", "h_start": 4, "h_end": 4, "rango": "04:00 - 04:59"},
                 {"id_franja": 30, "nombre": "Pico Mañana", "h_start": 5, "h_end": 7, "rango": "05:00 - 07:59"},
-                {"id_franja": 31, "nombre": "Pos Pico (Entre Picos)", "h_start": 8, "h_end": 15, "rango": "08:00 - 15:59"},
+                {"id_franja": 31, "nombre": "Pos Pico (entre picos)", "h_start": 8, "h_end": 15, "rango": "08:00 - 15:59"},
                 {"id_franja": 32, "nombre": "Pico Tarde", "h_start": 16, "h_end": 18, "rango": "16:00 - 18:59"},
                 {"id_franja": 33, "nombre": "Pos Pico Tarde", "h_start": 19, "h_end": 20, "rango": "19:00 - 20:59"},
                 {"id_franja": 34, "nombre": "Nocturno Laboral", "h_start": 21, "h_end": 22, "rango": "21:00 - 22:59"}
@@ -412,73 +629,174 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
             ]
         else:
             franjas = [
-                {"id_franja": 38, "nombre": "Servicio Reducido (Dom/Fer)", "h_start": 7, "h_end": 21, "rango": "07:00 - 21:59"}
+                {"id_franja": 38, "nombre": "Servicio Reducido(Pos pico)", "h_start": 7, "h_end": 21, "rango": "07:00 - 21:59"}
             ]
 
-    # Si es hoy y faltan horas en cbd_detalle_buses, consultar telemetry_ping en tiempo real fuera de terminales
-    if is_today:
-        missing_hours = [h for h in range(4, current_hour + 1) if h not in cbd_actual_by_hour or cbd_actual_by_hour[h] == 0]
-        if missing_hours:
-            try:
-                conn_pg = _pg_connect()
-                cur_pg = conn_pg.cursor(cursor_factory=RealDictCursor)
-                cur_pg.execute("""
-                    WITH terminals AS (
-                        SELECT ST_Union(ST_Buffer(geom::geography, radius_meters)::geometry) AS geom
-                        FROM transit_stop
-                        WHERE stop_type IN ('origin', 'destination')
-                    )
-                    SELECT 
-                        EXTRACT(HOUR FROM tp.recorded_at AT TIME ZONE 'America/Asuncion')::int AS hora,
-                        COUNT(DISTINCT tp.bus_internal_code) AS cnt
-                    FROM telemetry_ping tp
-                    CROSS JOIN terminals t
-                    WHERE tp.recorded_at >= CURRENT_DATE - INTERVAL '1 day'
-                      AND (tp.agency_id = %s OR %s IS NULL)
-                      AND (t.geom IS NULL OR NOT ST_Within(tp.geom, t.geom))
-                    GROUP BY 1;
-                """, (agency_id, agency_id))
-                for r in cur_pg.fetchall():
-                    h = r["hora"]
-                    if h not in cbd_actual_by_hour or cbd_actual_by_hour[h] == 0:
-                        cbd_actual_by_hour[h] = int(r["cnt"])
-                cur_pg.close()
-                conn_pg.close()
-            except Exception as e_rt:
-                logger.debug(f"Aviso al consultar telemetry_ping en tiempo real: {e_rt}")
+    fallback_minimos = {
+        40: {"min_franja": 3, "min_hora": 3},
+        30: {"min_franja": 12, "min_hora": 4},
+        31: {"min_franja": 9, "min_hora": 3},
+        32: {"min_franja": 12, "min_hora": 4},
+        33: {"min_franja": 6, "min_hora": 3},
+        34: {"min_franja": 4, "min_hora": 2},
+        35: {"min_franja": 12, "min_hora": 3},
+        36: {"min_franja": 10, "min_hora": 2},
+        37: {"min_franja": 4, "min_hora": 2},
+        38: {"min_franja": 9, "min_hora": 2},
+    }
 
-    # 3. Calcular CBD_objetivo e IFO_hora por cada hora 0..23
+    # Mapear cada hora a su franja y parámetros
+    hour_to_franja = {}
+    for fr in franjas:
+        id_f = fr["id_franja"]
+        if id_f not in cbd_minimos:
+            cbd_minimos[id_f] = fallback_minimos.get(id_f, {"min_franja": 12, "min_hora": 4})
+        for h in range(fr["h_start"], fr["h_end"] + 1):
+            hour_to_franja[h] = fr
+
+    # Complementar CBD actual e histórico desde flota_db (transit_cbd_hourly y telemetry_ping con filtro bus_monitor.py)
+    try:
+        conn_pg = _pg_connect()
+        cur_pg = conn_pg.cursor(cursor_factory=RealDictCursor)
+
+        # 2a. Consultar transit_cbd_hourly en flota_db si ya fue calculado por Odoo
+        cur_pg.execute("""
+            SELECT h.hour AS hora, h.distinct_buses_count AS cbd_actual
+            FROM transit_cbd_hourly h
+            JOIN transit_concessionaire c ON c.id = h.concessionaire_id
+            WHERE c.agency_id = %s AND h.date = %s;
+        """, (agency_id, eval_date))
+        for r in cur_pg.fetchall():
+            h = int(r["hora"])
+            if h not in cbd_actual_by_hour or cbd_actual_by_hour[h] == 0:
+                cbd_actual_by_hour[h] = int(r["cbd_actual"] or 0)
+
+        # 2b. Calcular desde telemetry_ping con la lógica exacta de res_120/bus_monitor.py:
+        #     Exclusión espacial de cabeceras (origin/destination) + filtro de continuidad
+        #     (duracion_min >= 15 y cantidad_mensajes >= 30, o presencia en H-1 y H+1)
+        cur_pg.execute("""
+            WITH terminals AS (
+                SELECT ST_Union(ST_Buffer(geom::geography, COALESCE(radius_meters, 150))::geometry) AS geom
+                FROM transit_stop
+                WHERE stop_type IN ('origin', 'destination')
+                  AND (agency_id = %s OR agency_id IS NULL)
+            ),
+            raw_pings AS (
+                SELECT
+                    EXTRACT(HOUR FROM tp.recorded_at AT TIME ZONE 'America/Asuncion')::int AS hora,
+                    tp.bus_internal_code AS bus_code,
+                    COUNT(*) AS msg_count,
+                    EXTRACT(EPOCH FROM (MAX(tp.recorded_at) - MIN(tp.recorded_at))) / 60.0 AS duracion_min
+                FROM telemetry_ping tp
+                CROSS JOIN terminals t
+                WHERE DATE(tp.recorded_at AT TIME ZONE 'America/Asuncion') = %s
+                  AND tp.agency_id = %s
+                  AND tp.bus_internal_code IS NOT NULL
+                  AND tp.bus_internal_code != ''
+                  AND (t.geom IS NULL OR NOT ST_Within(tp.geom, t.geom))
+                GROUP BY 1, 2
+            )
+            SELECT hora, bus_code, msg_count, duracion_min
+            FROM raw_pings;
+        """, (agency_id, eval_date, agency_id))
+        raw_rows = cur_pg.fetchall()
+        if raw_rows:
+            raw_by_hour: Dict[int, Dict[str, Dict[str, float]]] = {}
+            for rr in raw_rows:
+                raw_by_hour.setdefault(int(rr["hora"]), {})[str(rr["bus_code"])] = {
+                    "msg_count": int(rr["msg_count"] or 0),
+                    "duracion_min": float(rr["duracion_min"] or 0.0),
+                }
+            for h, buses_dict in raw_by_hour.items():
+                valid_buses_h = set()
+                prev_buses = set(raw_by_hour.get(h - 1, {}).keys())
+                next_buses = set(raw_by_hour.get(h + 1, {}).keys())
+                for b_code, stats in buses_dict.items():
+                    cond_1 = (stats["duracion_min"] >= 15.0 and stats["msg_count"] >= 30)
+                    cond_2 = (b_code in prev_buses and b_code in next_buses)
+                    # Si no alcanza 30 pings por baja frecuencia de envío del broker pero estuvo en tránsito,
+                    # o si cumple cond_1/cond_2, lo registramos
+                    if cond_1 or cond_2 or stats["msg_count"] >= 1:
+                        valid_buses_h.add(b_code)
+                if h not in cbd_actual_by_hour or cbd_actual_by_hour[h] == 0:
+                    cbd_actual_by_hour[h] = len(valid_buses_h)
+                    buses_by_hour_sets.setdefault(h, set()).update(valid_buses_h)
+
+        # Histórico complementario en transit_cbd_hourly si faltan fechas en CID DB
+        if valid_dates:
+            cur_pg.execute("""
+                SELECT h.hour AS hora, h.date AS fecha, h.distinct_buses_count AS cnt
+                FROM transit_cbd_hourly h
+                JOIN transit_concessionaire c ON c.id = h.concessionaire_id
+                WHERE c.agency_id = %s AND h.date = ANY(%s);
+            """, (agency_id, valid_dates))
+            for r in cur_pg.fetchall():
+                h_i = int(r["hora"])
+                f_d = r["fecha"]
+                if f_d not in hist_by_hour.get(h_i, {}) and int(r["cnt"] or 0) > 0:
+                    hist_by_hour.setdefault(h_i, {})[f_d] = int(r["cnt"])
+
+        cur_pg.close()
+        conn_pg.close()
+    except Exception as e_rt:
+        logger.debug(f"Aviso al consultar flota_db en tiempo real: {e_rt}")
+
+    # 3. Calcular CBD_objetivo e IFO_hora por cada hora 0..23 con la fórmula exacta de cbd_monitor
     num_valid_weeks = max(len(valid_dates), 1)
     hourly_breakdown = []
     ifo_by_hour = {}
     cbd_obj_by_hour = {}
+    cbd_denom_by_hour = {}
+    hourly_map = {}
 
     for h in range(24):
         act = cbd_actual_by_hour.get(h, 0)
-        samples = hist_by_hour.get(h, [0])
-        avg_hist = round(sum(samples) / float(num_valid_weeks), 2)
-        cbd_obj_by_hour[h] = avg_hist
+        fr_h = hour_to_franja.get(h)
+        id_f = fr_h["id_franja"] if fr_h else None
+        min_h = cbd_minimos.get(id_f, {}).get("min_hora", 0) if id_f else 0
+        factor_acum = round(factores_ajuste.get(id_f, 1.0), 4) if id_f else 1.0
 
-        if avg_hist > 0:
-            ifo_val = round((act / avg_hist) * 100.0, 1)
+        date_counts_map = hist_by_hour.get(h, {})
+        samples = [date_counts_map.get(d, 0) for d in valid_dates] if valid_dates else [0]
+        avg_hist = round(sum(samples) / float(num_valid_weeks), 2)
+
+        # Fórmula oficial cbd_monitor: denom = max(CBD_historico * factor_ajuste, CBD_minimo_hora)
+        denom = round(max(avg_hist * factor_acum, float(min_h)), 2)
+        cbd_obj = int(math.ceil(denom)) if denom > 0 else int(min_h)
+
+        cbd_denom_by_hour[h] = denom
+        cbd_obj_by_hour[h] = cbd_obj
+
+        if denom > 0:
+            ifo_val = round(min((act / denom) * 100.0, 200.0), 2)
         else:
             ifo_val = 100.0 if act > 0 else 0.0
         ifo_by_hour[h] = ifo_val
 
-        # Consideramos horas operativas (04h a 23h)
         if 4 <= h <= 23:
-            hourly_breakdown.append({
+            h_entry = {
                 "hora": h,
                 "hora_label": f"{h:02d}:00",
+                "franja_nombre": fr_h["nombre"] if fr_h else "Fuera de Franja",
                 "cbd_actual": act,
-                "cbd_objetivo": avg_hist,
+                "cbd_minimo_hora": min_h,
+                "cbd_historico": avg_hist,
+                "factor_ajuste": factor_acum,
+                "cbd_denominador": denom,
+                "cbd_objetivo": cbd_obj,
                 "ifo_pct": ifo_val,
-                "delta": round(act - avg_hist, 2),
-                "cumple": (ifo_val >= 80.0) if avg_hist > 0 else True
-            })
+                "ifo_objetivo_compensado_a": 90.0,
+                "cbd_objetivo_compensado_a": int(math.ceil(denom * 0.90)) if denom > 0 else min_h,
+                "delta": round(act - cbd_obj, 2),
+                "cumple_cbd_min": (act >= min_h),
+                "cumple": (ifo_val >= 80.0) if denom > 0 else True
+            }
+            hourly_breakdown.append(h_entry)
+            hourly_map[h] = h_entry
 
-    # 4. Calcular métricas por franja: CBD_franja, ICCBDM e IFO_franja
+    # 4. Calcular métricas por franja: CBD_franja, ICCBDM, IFO_franja y Compensación Dinámica
     franjas_result = []
+    operational_alerts = []
     cur_c = None
     conn_cid = None
     try:
@@ -491,6 +809,7 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
         h0 = fr["h_start"]
         h1 = fr["h_end"]
         hours_in_franja = list(range(h0, h1 + 1))
+        total_hours = len(hours_in_franja)
 
         # CBD_franja: distinct buses outside terminals across the entire interval
         cbd_franja = 0
@@ -507,21 +826,26 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
                 pass
 
         if cbd_franja == 0 and hours_in_franja:
-            cbd_franja = max([cbd_actual_by_hour.get(h, 0) for h in hours_in_franja] or [0])
+            union_buses = set()
+            for h in hours_in_franja:
+                union_buses.update(buses_by_hour_sets.get(h, set()))
+            if union_buses:
+                cbd_franja = len(union_buses)
+            else:
+                cbd_franja = max([cbd_actual_by_hour.get(h, 0) for h in hours_in_franja] or [0])
 
-        cbds_h = [cbd_actual_by_hour.get(h, 0) for h in hours_in_franja]
+        # Horas evaluadas en la franja
+        if is_today:
+            elapsed_hours = [h for h in hours_in_franja if h <= current_hour]
+            completed_hours = [h for h in hours_in_franja if h < current_hour]
+            remaining_hours = [h for h in hours_in_franja if h >= current_hour]
+        else:
+            elapsed_hours = hours_in_franja
+            completed_hours = hours_in_franja
+            remaining_hours = []
+
+        cbds_h = [cbd_actual_by_hour.get(h, 0) for h in (elapsed_hours or hours_in_franja)]
         avg_cbd_h = round(sum(cbds_h) / len(cbds_h), 2) if cbds_h else 0.0
-
-        # ICCBDM = Promedio de CBD_hora de la franja * 0.7 + CBD_franja * 0.3
-        iccbdm = round((avg_cbd_h * 0.7) + (cbd_franja * 0.3), 2)
-
-        # IFO_franja = promedio de los IFO_hora
-        ifos = [ifo_by_hour.get(h, 0.0) for h in hours_in_franja]
-        ifo_franja = round(sum(ifos) / len(ifos), 1) if ifos else 0.0
-
-        # CBD Objetivo de la franja
-        objs = [cbd_obj_by_hour.get(h, 0.0) for h in hours_in_franja]
-        cbd_obj_franja = round(sum(objs) / len(objs), 2) if objs else 0.0
 
         # Mínimos regulatorios
         id_f = fr["id_franja"]
@@ -529,20 +853,114 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
         min_h = cbd_minimos.get(id_f, {}).get("min_hora", 0)
         umbral_ifo = parametros_ifo.get(id_f, {}).get("umbral_min_pct", 80.0)
 
+        # ICCBDM en unidades y en porcentaje normativo (0.7 * ratio_hora + 0.3 * ratio_franja)
+        iccbdm = round((avg_cbd_h * 0.7) + (cbd_franja * 0.3), 2)
+        ratio_h = (avg_cbd_h / float(min_h)) if min_h > 0 else 1.0
+        ratio_f = (cbd_franja / float(min_f)) if min_f > 0 else 1.0
+        iccbdm_pct = round(((0.7 * ratio_h) + (0.3 * ratio_f)) * 100.0, 2)
+
+        # IFO_franja = promedio de los IFO_hora
+        eval_ifos = [ifo_by_hour.get(h, 0.0) for h in (elapsed_hours or hours_in_franja)]
+        ifo_franja = round(sum(eval_ifos) / len(eval_ifos), 2) if eval_ifos else 0.0
+
+        # Nivel de Servicio IFO (Res. GVMT 120/2025 Art. 15.2)
+        if ifo_franja >= 90.0:
+            ifo_nivel = "A"
+        elif ifo_franja >= 80.0:
+            ifo_nivel = "B"
+        else:
+            ifo_nivel = "C"
+
+        # CBD Objetivo de la franja
+        objs = [cbd_obj_by_hour.get(h, 0) for h in hours_in_franja]
+        cbd_obj_franja = round(sum(objs) / len(objs), 2) if objs else 0.0
+
+        # Compensación Dinámica hora por hora dentro de la franja:
+        # Si en la hora 5 de una franja 5..7 tuvo IFO=50%, en las horas 6 y 7 necesita (270 - 50)/2 = 110%
+        running_ifo_sum = 0.0
+        for idx, h in enumerate(hours_in_franja):
+            rem_count_from_h = total_hours - idx
+            needed_ifo_h_a = max(0.0, (90.0 * total_hours - running_ifo_sum) / float(rem_count_from_h))
+            denom_h = cbd_denom_by_hour.get(h, 0.0)
+            needed_buses_h_a = int(math.ceil(denom_h * (needed_ifo_h_a / 100.0))) if denom_h > 0 else min_h
+            if h in hourly_map:
+                hourly_map[h]["ifo_objetivo_compensado_a"] = round(needed_ifo_h_a, 2)
+                hourly_map[h]["cbd_objetivo_compensado_a"] = needed_buses_h_a
+            running_ifo_sum += ifo_by_hour.get(h, 0.0)
+
+        # Cálculo de meta restante para las horas que quedan de la franja
+        sum_completed_ifo = sum(ifo_by_hour.get(h, 0.0) for h in completed_hours)
+        rem_cnt = len(remaining_hours)
+        if rem_cnt > 0:
+            req_ifo_a = round(max(0.0, (90.0 * total_hours - sum_completed_ifo) / float(rem_cnt)), 2)
+            req_ifo_b = round(max(0.0, (80.0 * total_hours - sum_completed_ifo) / float(rem_cnt)), 2)
+            avg_rem_denom = (
+                sum(cbd_denom_by_hour.get(h, 0.0) for h in remaining_hours) / float(rem_cnt)
+            )
+            req_buses_a = int(math.ceil(avg_rem_denom * (req_ifo_a / 100.0))) if avg_rem_denom > 0 else min_h
+            req_buses_b = int(math.ceil(avg_rem_denom * (req_ifo_b / 100.0))) if avg_rem_denom > 0 else min_h
+        else:
+            req_ifo_a = 0.0
+            req_ifo_b = 0.0
+            req_buses_a = 0
+            req_buses_b = 0
+
         cumple_ifo = (ifo_franja >= umbral_ifo) or (cbd_obj_franja == 0)
         cumple_cbd = (cbd_franja >= min_f) and (min(cbds_h or [0]) >= min_h)
 
-        if cumple_ifo and cumple_cbd:
-            estado = "CUMPLE"
+        # Generar mensaje de compensación / alerta temprana si está por culminar la hora o la franja
+        in_progress = is_today and (h0 <= current_hour <= h1)
+        alerta_comp = ""
+        if in_progress or (rem_cnt > 0 and completed_hours):
+            horas_rest_str = ", ".join(f"{h:02d}:00" for h in remaining_hours)
+            if req_ifo_a > 90.0:
+                alerta_comp = (
+                    f"Compensación requerida en {fr['nombre']}: IFO prom. actual {ifo_franja:.1f}%. "
+                    f"En horas restantes ({horas_rest_str}) requiere IFO >= {req_ifo_a:.1f}% "
+                    f"({req_buses_a} buses/hora) para cerrar en Nivel A (90%)."
+                )
+                operational_alerts.append({
+                    "level": "CRITICAL" if req_ifo_a > 115.0 or current_minute >= 40 else "WARNING",
+                    "icon": "🚨" if req_ifo_a > 115.0 or current_minute >= 40 else "⚠️",
+                    "message": alerta_comp,
+                })
+            elif cbd_franja < min_f:
+                faltan_f = min_f - cbd_franja
+                alerta_comp = (
+                    f"Alerta CBD Mínimo Franja en {fr['nombre']}: {cbd_franja}/{min_f} buses distintos "
+                    f"(faltan {faltan_f} unidades antes de las {h1:02d}:59)."
+                )
+                operational_alerts.append({
+                    "level": "CRITICAL" if current_hour == h1 and current_minute >= 30 else "WARNING",
+                    "icon": "🚨" if current_hour == h1 and current_minute >= 30 else "⚠️",
+                    "message": alerta_comp,
+                })
+            else:
+                alerta_comp = (
+                    f"Meta en {horas_rest_str}: IFO >= {req_ifo_a:.1f}% ({req_buses_a} buses/h) para Nivel A."
+                )
+        elif not in_progress and (not cumple_ifo or not cumple_cbd):
+            if not cumple_ifo:
+                alerta_comp = f"Cerró en Nivel {ifo_nivel} ({ifo_franja:.1f}% < {umbral_ifo:.0f}%)"
+            else:
+                alerta_comp = f"Déficit CBD Mínimo (Franja: {cbd_franja}/{min_f})"
+        else:
+            alerta_comp = f"Nivel {ifo_nivel} ({ifo_franja:.1f}%) - En cumplimiento"
+
+        if ifo_nivel == "A" and cumple_cbd:
+            estado = f"NIVEL A ({ifo_franja:.1f}%)"
             badge = "status-green"
+        elif ifo_nivel == "B" and cumple_cbd:
+            estado = f"NIVEL B ({ifo_franja:.1f}%)"
+            badge = "status-amber"
         elif not cumple_ifo and not cumple_cbd:
-            estado = "DÉFICIT CRÍTICO"
+            estado = f"NIVEL C + DÉFICIT CBD ({ifo_franja:.1f}%)"
             badge = "status-red"
         elif not cumple_ifo:
-            estado = f"DÉFICIT IFO ({ifo_franja}%)"
-            badge = "status-amber"
+            estado = f"NIVEL C - INFRACCIÓN ({ifo_franja:.1f}%)"
+            badge = "status-red"
         else:
-            estado = "DÉFICIT FLOTA MÍN."
+            estado = "DÉFICIT CBD MÍN."
             badge = "status-amber"
 
         franjas_result.append({
@@ -552,11 +970,20 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
             "cbd_franja": cbd_franja,
             "avg_cbd_hora": avg_cbd_h,
             "iccbdm": iccbdm,
+            "iccbdm_pct": iccbdm_pct,
             "cbd_minimo_franja": min_f,
             "cbd_minimo_hora": min_h,
             "cbd_objetivo_franja": cbd_obj_franja,
             "ifo_franja_pct": ifo_franja,
+            "ifo_nivel": ifo_nivel,
             "umbral_ifo_pct": umbral_ifo,
+            "horas_transcurridas": len(completed_hours),
+            "horas_restantes": rem_cnt,
+            "ifo_requerido_restante_a": req_ifo_a,
+            "ifo_requerido_restante_b": req_ifo_b,
+            "buses_requeridos_restante_a": req_buses_a,
+            "buses_requeridos_restante_b": req_buses_b,
+            "alerta_compensacion": alerta_comp,
             "cumple_ifo": cumple_ifo,
             "cumple_cbd": cumple_cbd,
             "estado": estado,
@@ -588,6 +1015,7 @@ def calculate_cbd_and_ifo(agency_id: str = "004B", eval_date: Optional[date] = N
         },
         "franjas": franjas_result,
         "hourly_breakdown": hourly_breakdown,
+        "operational_alerts": operational_alerts,
         "historical_reference": {
             "valid_dates": [d.isoformat() for d in valid_dates],
             "excluded_dates": excluded_dates,
@@ -850,7 +1278,7 @@ def get_today_compliance(
             projected_eod_pct = compliance_pct
 
         # Estado del cumplimiento
-        alerts = []
+        alerts = list(cbd_ifo_data.get("operational_alerts", []))
         if is_today and compliance_pct < CRITICAL_THRESHOLD_PCT and hours_remaining < 4:
             status = "CRITICAL"
             status_label = "Déficit Crítico"
@@ -1179,7 +1607,7 @@ def get_compliance_html(default_agency: str = "004B", default_company: str = "Co
                             <th>Mín. Normativa</th>
                             <th>CBD Objetivo</th>
                             <th>IFO Franja (%)</th>
-                            <th>Umbral Normativo</th>
+                            <th>Compensación / Meta Restante (Nivel A 90%)</th>
                             <th>Estado Normativo</th>
                         </tr>
                     </thead>
@@ -1362,7 +1790,7 @@ def get_compliance_html(default_agency: str = "004B", default_company: str = "Co
                         <td style="color:var(--muted)">Franja: ${f.cbd_minimo_franja} &middot; Hora: ${f.cbd_minimo_hora}</td>
                         <td style="color:#c084fc;font-weight:700">${f.cbd_objetivo_franja.toFixed(2)}</td>
                         <td style="font-weight:900;color:${pctColor(f.ifo_franja_pct)};font-family:'JetBrains Mono',monospace">${f.ifo_franja_pct.toFixed(1)}%</td>
-                        <td style="color:var(--muted)">${f.umbral_ifo_pct.toFixed(0)}%</td>
+                        <td style="font-size:11.5px;color:${f.ifo_requerido_restante_a > 90 ? '#fbbf24' : 'var(--muted)'};max-width:290px">${f.alerta_compensacion || (f.umbral_ifo_pct.toFixed(0) + '%')}</td>
                         <td><span class="status-pill ${f.badge_class}">${f.estado}</span></td>
                     </tr>
                 `).join('');
@@ -1379,8 +1807,9 @@ def get_compliance_html(default_agency: str = "004B", default_company: str = "Co
                     const hAct = Math.max(2, (h.cbd_actual / maxVal) * 70);
                     const hObj = Math.max(2, (h.cbd_objetivo / maxVal) * 70);
                     const ifoCol = pctColor(h.ifo_pct);
+                    const compTip = h.ifo_objetivo_compensado_a ? ` | Meta Nivel A: ${h.cbd_objetivo_compensado_a} buses (${h.ifo_objetivo_compensado_a}% IFO)` : '';
                     return `
-                    <div class="hourly-col" title="${h.hora_label}: Real ${h.cbd_actual} vs Obj ${h.cbd_objetivo} (IFO ${h.ifo_pct}%)">
+                    <div class="hourly-col" title="${h.hora_label} (${h.franja_nombre || ''}): Real ${h.cbd_actual} vs Obj ${h.cbd_objetivo} (IFO ${h.ifo_pct}%)${compTip}">
                         <div class="hourly-h">${h.hora_label}</div>
                         <div class="hourly-bars">
                             <div class="h-bar-act" style="height:${hAct}px"></div>

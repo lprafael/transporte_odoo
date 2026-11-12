@@ -71,6 +71,8 @@ Sistema Integral de Transporte de Pasajeros y Flota de Buses:
         'views/transit_requirement_views.xml',
         'views/transit_driver_roster_views.xml',
         'views/transit_driver_roster_report.xml',
+        'views/transit_monitoring_audit_views.xml',
+        'views/transit_cbd_control_views.xml',
         'views/transit_menus.xml',
     ],
     'assets': {
