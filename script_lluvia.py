@@ -548,8 +548,8 @@ def sync_holidays_and_cid_atypical_days(conn=None) -> Dict[str, int]:
                     cur.execute("SELECT id FROM transit_holiday WHERE date = %s LIMIT 1;", (f_dt,))
                     if not cur.fetchone():
                         cur.execute("""
-                            INSERT INTO transit_holiday (name, date, is_recurring, active, create_date, write_date)
-                            VALUES (%s, %s, FALSE, TRUE, NOW(), NOW());
+                            INSERT INTO transit_holiday (name, date, is_national, active, create_date, write_date)
+                            VALUES (%s, %s, TRUE, TRUE, NOW(), NOW());
                         """, (f_desc, f_dt))
 
             # 2b. Días atípicos de control_metricas.dias_atipicos
@@ -629,8 +629,10 @@ def sync_holidays_and_cid_atypical_days(conn=None) -> Dict[str, int]:
 
             cur_cid.close()
             conn_cid.close()
+            conn.commit()
         except Exception as e:
             logger.warning("Aviso durante sincronización con CID DB: %s", e)
+            conn.rollback()
 
     # 3. Generar días atípicos por Feriados, Pre-Feriados y Pos-Feriados en transit_atypical_day
     count_hol_atypical = 0
