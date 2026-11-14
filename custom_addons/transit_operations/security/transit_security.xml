@@ -48,7 +48,7 @@
         <field name="model_id" ref="fleet.model_fleet_vehicle"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 2. Despachos Diarios: transit.dispatch -->
@@ -57,7 +57,7 @@
         <field name="model_id" ref="model_transit_dispatch"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 3. Rutas e Itinerarios: transit.route -->
@@ -66,7 +66,7 @@
         <field name="model_id" ref="model_transit_route"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 4. Cuadro de Marchas y Horarios: transit.timetable -->
@@ -75,7 +75,7 @@
         <field name="model_id" ref="model_transit_timetable"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 5. Servicios / Concesiones: transit.service -->
@@ -84,7 +84,7 @@
         <field name="model_id" ref="model_transit_service"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 6. Hojas de Ruta de Buses: transit.bus.schedule -->
@@ -93,7 +93,7 @@
         <field name="model_id" ref="model_transit_bus_schedule"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 7. Empleados de Transporte: hr.employee -->
@@ -102,7 +102,7 @@
         <field name="model_id" ref="hr.model_hr_employee"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 8. Choferes y Contactos de Empresa: res.partner -->
@@ -129,7 +129,7 @@
         <field name="model_id" ref="model_transit_ticket"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 11. Patios y Estaciones de Carga EV: transit.charging.station -->
@@ -138,7 +138,7 @@
         <field name="model_id" ref="model_transit_charging_station"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 12. Solicitudes de Ajustes y Requerimientos: transit.requirement -->
@@ -147,7 +147,7 @@
         <field name="model_id" ref="model_transit_requirement"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 13. Monitoreo por Franjas CBD/IFO: transit.cbd.franja -->
@@ -156,7 +156,7 @@
         <field name="model_id" ref="model_transit_cbd_franja"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 14. Monitoreo Horario CBD/IFO: transit.cbd.hourly -->
@@ -165,7 +165,7 @@
         <field name="model_id" ref="model_transit_cbd_hourly"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 
     <!-- 15. Detalle de Buses en Tránsito: transit.cbd.bus.detail -->
@@ -174,6 +174,6 @@
         <field name="model_id" ref="model_transit_cbd_bus_detail"/>
         <field name="global" eval="True"/>
         <field name="groups" eval="[(5, 0, 0)]"/>
-        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else [('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
+        <field name="domain_force">[] if user.has_group('transit_operations.group_transit_manager') else ['|', ('concessionaire_id', '=', False), ('concessionaire_id', 'in', user.concessionaire_ids.ids)]</field>
     </record>
 </odoo>

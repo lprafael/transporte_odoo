@@ -198,11 +198,13 @@ class TransitDriverRoster(models.Model):
         created_count = 0
 
         # 1. Cargar desde transit.bus.schedule (Hojas de ruta por bus)
-        sched_lines = self.env['transit.bus.schedule.line'].search([
+        sched_domain = [
             ('schedule_id.date', '>=', start_d),
             ('schedule_id.date', '<=', end_d),
-            ('schedule_id.concessionaire_id', '=', self.concessionaire_id.id) if self.concessionaire_id else (1, '=', 1)
-        ])
+        ]
+        if self.concessionaire_id:
+            sched_domain.append(('schedule_id.concessionaire_id', '=', self.concessionaire_id.id))
+        sched_lines = self.env['transit.bus.schedule.line'].search(sched_domain)
 
         for line in sched_lines:
             # Verificar si ya existe este tramo en el cuadrante
@@ -240,11 +242,13 @@ class TransitDriverRoster(models.Model):
 
         # 2. Si no habían hojas de ruta de buses pero sí redondos en transit.service.roundtrip
         if not sched_lines:
-            roundtrips = self.env['transit.service.roundtrip'].search([
+            rt_domain = [
                 ('date', '>=', start_d),
                 ('date', '<=', end_d),
-                ('concessionaire_id', '=', self.concessionaire_id.id) if self.concessionaire_id else (1, '=', 1)
-            ])
+            ]
+            if self.concessionaire_id:
+                rt_domain.append(('concessionaire_id', '=', self.concessionaire_id.id))
+            roundtrips = self.env['transit.service.roundtrip'].search(rt_domain)
             for rt in roundtrips:
                 d_val = rt.date
                 day_idx = str(d_val.weekday())
@@ -665,27 +669,41 @@ class TransitDriverRoster(models.Model):
     # =========================================================================
     @api.model
     def get_or_create_current_roster(self):
-        """Busca el cuadrante más reciente o crea automáticamente el de la semana en curso"""
-        roster = self.search([], order='date_start desc, id desc', limit=1)
+        """Busca el cuadrante más reciente o crea automáticamente el de la semana en curso respetando multi-tenant"""
+        user = self.env.user
+        conc_id = user.concessionaire_id.id if user.concessionaire_id else (user.concessionaire_ids[0].id if user.concessionaire_ids else False)
+        if not conc_id:
+            first_conc = self.env['transit.concessionaire'].sudo().search([], limit=1)
+            conc_id = first_conc.id if first_conc else False
+
+        domain = []
+        if conc_id and not user.has_group('transit_operations.group_transit_manager'):
+            domain.append(('concessionaire_id', '=', conc_id))
+
+        roster = self.search(domain, order='date_start desc, id desc', limit=1)
         if roster:
             if not roster.shift_ids:
                 try:
                     roster.action_load_from_operational_schedules()
                 except Exception as e:
-                    _logger.warning(f"No se pudieron precargar schedules: {e}")
+                    _logger.warning("No se pudieron precargar schedules: %s", e)
             return roster.id
 
         today = fields.Date.today()
         monday = today - timedelta(days=today.weekday())
         w_num = monday.isocalendar()[1]
-        new_roster = self.create({
+        vals = {
             'name': f"CUADRANTE-S{w_num:02d}-{monday.year}",
             'date_start': monday,
-        })
+        }
+        if conc_id:
+            vals['concessionaire_id'] = conc_id
+
+        new_roster = self.sudo().create(vals)
         try:
             new_roster.action_load_from_operational_schedules()
         except Exception as e:
-            _logger.warning(f"No se pudieron precargar schedules para el nuevo cuadrante: {e}")
+            _logger.warning("No se pudieron precargar schedules para el nuevo cuadrante: %s", e)
         return new_roster.id
 
     @api.model

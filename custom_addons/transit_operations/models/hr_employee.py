@@ -7,7 +7,7 @@ class HrEmployee(models.Model):
     concessionaire_id = fields.Many2one(
         'transit.concessionaire',
         string='Empresa de Transporte',
-        required=True,
+        required=False,
         index=True,
         tracking=True,
         default=lambda self: self._default_concessionaire_id(),
@@ -20,7 +20,7 @@ class HrEmployee(models.Model):
         ('dispatcher', 'Despachador / Jefe de Tráfico'),
         ('inspector', 'Inspector de Línea'),
         ('admin', 'Administrativo / Finanzas'),
-    ], string='Rol Operativo en Transporte', default='driver', required=True, tracking=True)
+    ], string='Rol Operativo en Transporte', default='driver', required=False, tracking=True)
 
     # Datos específicos si es chofer
     driver_code = fields.Char(string='Código de Ficha / Chofer', tracking=True)
@@ -43,19 +43,21 @@ class HrEmployee(models.Model):
             return user.concessionaire_id.id
         if user.concessionaire_ids:
             return user.concessionaire_ids[0].id
-        return False
+        conc = self.env['transit.concessionaire'].sudo().search([], limit=1)
+        return conc.id if conc else False
 
     @api.model_create_multi
     def create(self, vals_list):
         employees = super(HrEmployee, self).create(vals_list)
         for emp in employees:
             if emp.transit_role == 'driver':
+                conc_id = emp.concessionaire_id.id if emp.concessionaire_id else False
                 partner = emp.work_contact_id
                 if not partner:
                     partner = self.env['res.partner'].sudo().create({
                         'name': emp.name,
                         'is_driver': True,
-                        'concessionaire_id': emp.concessionaire_id.id,
+                        'concessionaire_id': conc_id,
                         'driver_code': emp.driver_code,
                         'driver_license_number': emp.driver_license_number,
                         'driver_license_category': emp.driver_license_category,
@@ -68,7 +70,7 @@ class HrEmployee(models.Model):
                 else:
                     partner.sudo().write({
                         'is_driver': True,
-                        'concessionaire_id': emp.concessionaire_id.id,
+                        'concessionaire_id': conc_id,
                         'driver_code': emp.driver_code,
                         'driver_license_number': emp.driver_license_number,
                         'driver_license_category': emp.driver_license_category,
