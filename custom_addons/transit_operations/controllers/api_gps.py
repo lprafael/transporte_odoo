@@ -474,7 +474,7 @@ class TransitGpsApiController(http.Controller):
     def proxy_broker_view(self, target=None, **kwargs):
         """Muestra los tableros en vivo (Headway, Radar GPS, Cumplimiento) a través del puerto estándar HTTPS."""
         public_url = (request.env['ir.config_parameter'].sudo().get_param('transit.gps_broker_public_url') or '').strip().rstrip('/')
-        if public_url:
+        if public_url and 'gps.agsrl.com.py' not in public_url:
             resolved_target = target or request.httprequest.path.strip('/')
             query = request.httprequest.query_string.decode('utf-8')
             url = f"{public_url}/{resolved_target}"
