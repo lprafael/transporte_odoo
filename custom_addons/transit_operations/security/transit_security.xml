@@ -19,12 +19,12 @@
         <field name="comment">Acceso a registro de despachos, control de salidas y emisión de boletos de su propia empresa.</field>
     </record>
 
-    <!-- 2. Jefe de Tráfico de Empresa -->
+    <!-- 2. Jefe de Tráfico / Administrador de Empresa -->
     <record id="group_transit_company_manager" model="res.groups">
-        <field name="name">Jefe de Tráfico (Empresa)</field>
+        <field name="name">Jefe de Tráfico / Administrador de Empresa</field>
         <field name="category_id" ref="module_category_transit"/>
         <field name="implied_ids" eval="[(4, ref('group_transit_user')), (4, ref('fleet.fleet_group_user'))]"/>
-        <field name="comment">Control de flota, conductores, rutas, cuadros de marcha y evaluaciones de su empresa concesionaria.</field>
+        <field name="comment">Control de flota, conductores, rutas, cuadros de marcha, evaluaciones y gestión de operadores de su empresa concesionaria.</field>
     </record>
 
     <!-- 3. Administrador Global / Ente Regulador (Torre de Control / VMT) -->

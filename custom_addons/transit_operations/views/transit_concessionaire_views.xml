@@ -30,6 +30,9 @@
                                 context="{'search_default_concessionaire_id': id}">
                             <field string="Unidades" name="vehicle_count" widget="statinfo"/>
                         </button>
+                        <button class="oe_stat_button" type="object" name="action_view_users" icon="fa-users">
+                            <field string="Operadores" name="user_count" widget="statinfo"/>
+                        </button>
                     </div>
                     <div class="oe_title">
                         <label for="name" string="Nombre Comercial"/>
@@ -88,12 +91,24 @@
                                 </list>
                             </field>
                         </page>
-                        <page string="Usuarios de la Empresa" name="users">
-                            <field name="user_ids">
-                                <list>
-                                    <field name="name"/>
-                                    <field name="login"/>
-                                    <field name="email"/>
+                        <page string="Usuarios / Operadores" name="users">
+                            <div class="mb-3">
+                                <button name="action_open_create_user_wizard"
+                                        string="➕ Crear Nuevo Operador"
+                                        type="object"
+                                        class="btn-primary"
+                                        icon="fa-user-plus"/>
+                            </div>
+                            <field name="user_ids" readonly="1">
+                                <list string="Usuarios de la Empresa">
+                                    <field name="name" string="Nombre"/>
+                                    <field name="login" string="Usuario / Email"/>
+                                    <field name="transit_role_name" string="Rol Operativo"/>
+                                    <field name="phone" string="Teléfono"/>
+                                    <button name="action_reset_password_wizard"
+                                            string="🔑 Cambiar Clave"
+                                            type="object"
+                                            class="btn-sm btn-secondary"/>
                                 </list>
                             </field>
                         </page>

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Vista Formulario del Wizard de Creación de Operadores -->
+    <record id="view_transit_user_create_wizard_form" model="ir.ui.view">
+        <field name="name">transit.user.create.wizard.form</field>
+        <field name="model">transit.user.create.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Alta de Operador / Usuario de Empresa">
+                <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
+                    <i class="fa fa-info-circle fa-2x me-3"></i>
+                    <div>
+                        <strong>Aislamiento Multi-Tenant Estricto:</strong>
+                        El nuevo usuario creado únicamente podrá visualizar la flota, los despachos, rutas y reportes de la <strong>Empresa Concesionaria</strong> asignada.
+                    </div>
+                </div>
+
+                <field name="is_global_manager" invisible="1"/>
+
+                <group>
+                    <group string="1. Empresa Concesionaria">
+                        <field name="concessionaire_id"
+                               options="{'no_create': True, 'no_open': True}"
+                               readonly="not is_global_manager"
+                               force_save="1"/>
+                    </group>
+                    <group string="2. Nivel de Permisos en la Empresa">
+                        <field name="user_role" widget="radio"/>
+                    </group>
+                </group>
+
+                <group string="3. Credenciales de Acceso">
+                    <group>
+                        <field name="name"/>
+                        <field name="login"/>
+                    </group>
+                    <group>
+                        <field name="password" password="True"/>
+                        <field name="phone"/>
+                    </group>
+                </group>
+
+                <footer>
+                    <button name="action_create_user"
+                            string="Crear Operador"
+                            type="object"
+                            class="btn-primary"
+                            icon="fa-user-plus"/>
+                    <button string="Cancelar"
+                            class="btn-secondary"
+                            special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción de Ventana para el Wizard -->
+    <record id="action_transit_user_create_wizard" model="ir.actions.act_window">
+        <field name="name">Crear Operador de Empresa</field>
+        <field name="res_model">transit.user.create.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="groups_id" eval="[(4, ref('group_transit_company_manager')), (4, ref('group_transit_manager'))]"/>
+    </record>
+</odoo>

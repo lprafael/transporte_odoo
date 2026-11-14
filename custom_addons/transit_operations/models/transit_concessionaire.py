@@ -42,6 +42,7 @@ class TransitConcessionaire(models.Model):
         'user_id',
         string='Usuarios Asignados'
     )
+    user_count = fields.Integer(string='Total Operadores', compute='_compute_user_count')
 
     evaluation_ids = fields.One2many('transit.concessionaire.evaluation', 'concessionaire_id', string='Historial de Evaluaciones')
     settlement_ids = fields.One2many('transit.clearing.settlement', 'concessionaire_id', string='Liquidaciones de Compensación')
@@ -66,6 +67,45 @@ class TransitConcessionaire(models.Model):
     def _compute_route_count(self):
         for rec in self:
             rec.route_count = len(rec.route_ids)
+
+    @api.depends('user_ids')
+    def _compute_user_count(self):
+        for rec in self:
+            rec.user_count = len(rec.user_ids)
+
+    def action_view_users(self):
+        self.ensure_one()
+        list_view = self.env.ref('transit_operations.view_transit_company_users_list', raise_if_not_found=False)
+        form_view = self.env.ref('transit_operations.view_transit_company_users_form', raise_if_not_found=False)
+        views = []
+        if list_view:
+            views.append((list_view.id, 'list'))
+        if form_view:
+            views.append((form_view.id, 'form'))
+        return {
+            'name': f'Operadores de {self.name}',
+            'type': 'ir.actions.act_window',
+            'res_model': 'res.users',
+            'view_mode': 'list,form',
+            'views': views or [(False, 'list'), (False, 'form')],
+            'domain': [('concessionaire_id', '=', self.id)],
+            'context': {
+                'default_concessionaire_id': self.id,
+            }
+        }
+
+    def action_open_create_user_wizard(self):
+        self.ensure_one()
+        return {
+            'name': f'Crear Operador para {self.name}',
+            'type': 'ir.actions.act_window',
+            'res_model': 'transit.user.create.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {
+                'default_concessionaire_id': self.id,
+            }
+        }
 
     def name_get(self):
         res = []

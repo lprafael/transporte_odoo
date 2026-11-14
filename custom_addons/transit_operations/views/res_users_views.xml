@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Extensión de Formulario de Usuarios (res.users) para Multi-Tenancy de Transporte -->
+    <!-- Extensión de Formulario de Usuarios Base (res.users) para Multi-Tenancy -->
     <record id="view_users_form_inherit_transit" model="ir.ui.view">
         <field name="name">res.users.form.inherit.transit</field>
         <field name="model">res.users</field>
@@ -18,6 +18,80 @@
                     </group>
                 </page>
             </xpath>
+        </field>
+    </record>
+
+    <!-- Vista de Lista Simplificada para Operadores de Empresa -->
+    <record id="view_transit_company_users_list" model="ir.ui.view">
+        <field name="name">transit.company.users.list</field>
+        <field name="model">res.users</field>
+        <field name="priority">50</field>
+        <field name="arch" type="xml">
+            <list string="Operadores de Empresa" create="0">
+                <header>
+                    <button name="%(action_transit_user_create_wizard)d"
+                            string="➕ Crear Nuevo Operador"
+                            type="action"
+                            class="btn-primary"
+                            icon="fa-user-plus"/>
+                </header>
+                <field name="name" string="Nombre del Operador"/>
+                <field name="login" string="Usuario / Email"/>
+                <field name="concessionaire_id" string="Empresa Concesionaria"/>
+                <field name="transit_role_name" string="Rol Asignado" widget="badge"/>
+                <field name="phone" string="Teléfono"/>
+                <field name="active" widget="boolean_toggle" string="Activo"/>
+                <button name="action_reset_password_wizard"
+                        string="🔑 Cambiar Contraseña"
+                        type="object"
+                        class="btn-sm btn-outline-secondary"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista de Formulario Simplificada para Operadores de Empresa -->
+    <record id="view_transit_company_users_form" model="ir.ui.view">
+        <field name="name">transit.company.users.form</field>
+        <field name="model">res.users</field>
+        <field name="priority">50</field>
+        <field name="arch" type="xml">
+            <form string="Ficha de Operador" create="0">
+                <header>
+                    <button name="action_reset_password_wizard"
+                            string="🔑 Restablecer Contraseña"
+                            type="object"
+                            class="btn-secondary"
+                            icon="fa-key"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" string="Nombre Completo"/>
+                        <h1><field name="name"/></h1>
+                    </div>
+                    <group>
+                        <group string="Credenciales">
+                            <field name="login" readonly="1"/>
+                            <field name="email"/>
+                            <field name="phone"/>
+                            <field name="active" widget="boolean_toggle"/>
+                        </group>
+                        <group string="Asignación Operativa">
+                            <field name="concessionaire_id" readonly="1" options="{'no_open': True}"/>
+                            <field name="transit_role_name" readonly="1"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción de Servidor Dinámica para Abrir Usuarios de la Empresa -->
+    <record id="action_transit_company_users_server" model="ir.actions.server">
+        <field name="name">👥 Operadores y Usuarios de Empresa</field>
+        <field name="model_id" ref="base.model_res_users"/>
+        <field name="state">code</field>
+        <field name="code">
+action = model.action_open_company_users()
         </field>
     </record>
 </odoo>

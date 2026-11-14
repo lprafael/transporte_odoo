@@ -234,6 +234,20 @@
               groups="group_transit_manager"
               sequence="6"/>
 
+    <menuitem id="menu_transit_company_users"
+              name="👥 Operadores y Usuarios de Empresa"
+              parent="menu_transit_fleet_drivers"
+              action="action_transit_company_users_server"
+              groups="group_transit_company_manager,group_transit_manager"
+              sequence="7"/>
+
+    <menuitem id="menu_transit_create_user_wizard"
+              name="➕ Crear Operador de Empresa"
+              parent="menu_transit_fleet_drivers"
+              action="action_transit_user_create_wizard"
+              groups="group_transit_company_manager,group_transit_manager"
+              sequence="8"/>
+
     <menuitem id="menu_transit_vehicle"
               name="Buses y Unidades"
               parent="menu_transit_fleet_drivers"
