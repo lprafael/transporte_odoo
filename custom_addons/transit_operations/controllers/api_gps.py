@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import json
 import logging
+import requests
 from odoo import http, fields
 from odoo.http import request, Response
 
@@ -374,25 +375,129 @@ class TransitGpsApiController(http.Controller):
             content_type='application/json'
         )
 
-    @http.route(['/transit/redirect/<string:target>'], type='http', auth='public', methods=['GET'])
-    def redirect_broker_target(self, target, **kwargs):
-        """Redirige al microservicio FastAPI (gps_broker).
-
-        Si existe el parámetro de sistema `transit.gps_broker_public_url` (ej.
-        https://gps.agsrl.com.py, publicado por el proxy inverso sin puerto) se usa esa URL.
-        Si no, se mantiene el comportamiento anterior: mismo host del cliente + puerto 8088.
+    def _get_broker_base_url(self):
+        """Resuelve la URL interna del microservicio GPS Broker.
+        Orden de prioridad:
+        1. Parámetro de sistema 'transit.gps_broker_internal_url' si está definido.
+        2. Hostnames internos conocidos de Docker ('http://gps_broker:8088', 'http://odoo_transporte_gps_broker:8088')
+        3. Host local de desarrollo 'http://127.0.0.1:8088' o 'http://host.docker.internal:8088'
         """
-        allowed_targets = {'headway', 'map', 'compliance'}
-        if target not in allowed_targets:
-            return request.not_found()
-        query = request.httprequest.query_string.decode('utf-8')
-        base_url = (request.env['ir.config_parameter'].sudo().get_param('transit.gps_broker_public_url') or '').strip().rstrip('/')
-        if base_url:
-            url = f'{base_url}/{target}'
-        else:
-            host = request.httprequest.host.split(':')[0]
-            url = f'http://{host}:8088/{target}'
-        if query:
-            url += f'?{query}'
-        return request.redirect(url, local=False)
+        param = request.env['ir.config_parameter'].sudo().get_param('transit.gps_broker_internal_url')
+        if param and param.strip():
+            return param.strip().rstrip('/')
+
+        # Detección dinámica de conectividad interna con timeout ultra bajo
+        candidates = [
+            'http://gps_broker:8088',
+            'http://odoo_transporte_gps_broker:8088',
+            'http://127.0.0.1:8088',
+            'http://host.docker.internal:8088',
+        ]
+        for candidate in candidates:
+            try:
+                r = requests.get(f"{candidate}/health", timeout=0.5)
+                if r.status_code == 200:
+                    return candidate
+            except Exception:
+                continue
+
+        return 'http://gps_broker:8088'
+
+    def _proxy_to_broker(self, path):
+        """Reenvía peticiones HTTP internamente al microservicio GPS Broker y retorna la respuesta.
+        Permite acceder a los tableros y sus APIs a través del puerto HTTPS estándar (443)
+        sin requerir abrir el puerto 8088 en el firewall externo.
+        """
+        broker_base = self._get_broker_base_url()
+        target_url = f"{broker_base}{path}"
+        query_string = request.httprequest.query_string.decode('utf-8')
+        if query_string:
+            target_url += f"?{query_string}"
+
+        forward_headers = {}
+        for h in ['User-Agent', 'Accept', 'Accept-Language', 'Content-Type', 'Authorization']:
+            val = request.httprequest.headers.get(h)
+            if val:
+                forward_headers[h] = val
+
+        # Forward session cookies (incluyendo session_id de Odoo para Single Sign-On transparente)
+        req_cookies = dict(request.httprequest.cookies)
+        if getattr(request, 'session', None) and getattr(request.session, 'sid', None):
+            req_cookies['session_id'] = request.session.sid
+
+        data = request.httprequest.get_data() if request.httprequest.method in ['POST', 'PUT', 'PATCH'] else None
+
+        try:
+            resp = requests.request(
+                method=request.httprequest.method,
+                url=target_url,
+                headers=forward_headers,
+                cookies=req_cookies,
+                data=data,
+                timeout=15,
+                allow_redirects=False,
+            )
+
+            # Si el broker intenta redirigir a un login separado, redirigir a /web/login de Odoo
+            if resp.status_code in (301, 302, 303, 307, 308) and 'Location' in resp.headers:
+                loc = resp.headers['Location']
+                if loc.startswith('/login'):
+                    return request.redirect(f'/web/login?redirect={path}', local=True)
+                return request.redirect(loc, local=True)
+
+            out_headers = {}
+            for h in ['Content-Type', 'Cache-Control', 'ETag', 'Last-Modified']:
+                if h in resp.headers:
+                    out_headers[h] = resp.headers[h]
+
+            return Response(resp.content, status=resp.status_code, headers=out_headers)
+
+        except Exception as e:
+            _logger.exception("Error proxying to GPS broker at %s: %s", target_url, e)
+            return Response(
+                f"<html><head><title>GPS Broker No Disponible</title></head><body style='font-family:sans-serif;padding:40px;background:#0f172a;color:#f8fafc;'>"
+                f"<h2>El servicio GPS Broker interno no está respondiendo en {broker_base}.</h2>"
+                f"<p style='color:#94a3b8;'>Error de comunicación interna: {str(e)}</p>"
+                f"<p><a href='/web' style='color:#38bdf8;'>← Volver a Odoo ERP</a></p>"
+                f"</body></html>",
+                status=502,
+                content_type='text/html; charset=utf-8'
+            )
+
+    @http.route([
+        '/headway',
+        '/map',
+        '/compliance',
+        '/transit/live/<string:target>',
+        '/transit/redirect/<string:target>',
+    ], type='http', auth='user', methods=['GET'])
+    def proxy_broker_view(self, target=None, **kwargs):
+        """Muestra los tableros en vivo (Headway, Radar GPS, Cumplimiento) a través del puerto estándar HTTPS."""
+        public_url = (request.env['ir.config_parameter'].sudo().get_param('transit.gps_broker_public_url') or '').strip().rstrip('/')
+        if public_url:
+            resolved_target = target or request.httprequest.path.strip('/')
+            query = request.httprequest.query_string.decode('utf-8')
+            url = f"{public_url}/{resolved_target}"
+            if query:
+                url += f"?{query}"
+            return request.redirect(url, local=False)
+
+        path = request.httprequest.path
+        if target and path.startswith('/transit/'):
+            path = f"/{target}"
+        return self._proxy_to_broker(path)
+
+    @http.route([
+        '/api/v1/live',
+        '/api/v1/headway/<path:subpath>',
+        '/api/v1/compliance/<path:subpath>',
+        '/api/v1/shapes/<path:subpath>',
+        '/api/v1/waze/<path:subpath>',
+        '/api/v1/bunching/<path:subpath>',
+        '/api/v1/eta/<path:subpath>',
+        '/parada/<path:subpath>',
+    ], type='http', auth='public', csrf=False, methods=['GET', 'POST', 'OPTIONS'])
+    def proxy_broker_api(self, subpath=None, **kwargs):
+        """Proxy transparente para las llamadas API del frontend de los tableros en tiempo real."""
+        return self._proxy_to_broker(request.httprequest.path)
 

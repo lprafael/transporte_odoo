@@ -2183,7 +2183,7 @@ async def live_map_view(request: Request):
                 </div>
             </div>
             <a href="/headway" style="background: linear-gradient(135deg, #0284c7, #6366f1); color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);">📊 Tablero Lineal</a>
-            <a href="http://187.77.247.23:8069/web#action=transit_operations.action_transit_requirement" target="_blank" style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;" title="Enviar requerimiento o sugerencia de ajuste técnico">🛠️ Solicitar Ajuste</a>
+            <a href="/web#action=transit_operations.action_transit_requirement" target="_blank" style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;" title="Enviar requerimiento o sugerencia de ajuste técnico">🛠️ Solicitar Ajuste</a>
         </div>
     </header>
 
