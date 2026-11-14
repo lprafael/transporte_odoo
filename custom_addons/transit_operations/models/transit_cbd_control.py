@@ -834,9 +834,13 @@ class TransitCBDFranja(models.Model):
         """Recalcula silenciosamente las métricas desde telemetría GPS para actualización automática en pantalla."""
         for rec in self:
             if rec.date and rec.concessionaire_id:
-                self.env['transit.cbd.hourly'].compute_cbd_for_date_and_company(
-                    rec.date, rec.concessionaire_id.id
-                )
+                try:
+                    with self.env.cr.savepoint():
+                        self.env['transit.cbd.hourly'].sudo().compute_cbd_for_date_and_company(
+                            rec.date, rec.concessionaire_id.id
+                        )
+                except Exception as e:
+                    _logger.warning("Aviso en action_recalculate_silent: %s", e)
         return True
 
     def action_recalculate(self):
@@ -1226,7 +1230,8 @@ class TransitCBDHourly(models.Model):
     def action_recalculate_day(self):
         """Acción desde botón para recalcular todo el día de la empresa."""
         for rec in self:
-            self.compute_cbd_for_date_and_company(rec.date, rec.concessionaire_id.id)
+            with self.env.cr.savepoint():
+                self.sudo().compute_cbd_for_date_and_company(rec.date, rec.concessionaire_id.id)
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
@@ -1240,7 +1245,18 @@ class TransitCBDHourly(models.Model):
 
     def action_sync_today_live(self):
         """Sincroniza el día actual desde VMT / CID / GPS Broker desde el botón de cabecera en lista."""
-        self.cron_update_today_cbd_ifo()
+        today = _get_paraguay_now().date()
+        user = self.env.user
+        if self.env.is_superuser() or user.has_group('transit_operations.group_transit_manager'):
+            self.sudo().cron_update_today_cbd_ifo()
+        else:
+            allowed_ids = list(set(user.concessionaire_ids.ids + ([user.concessionaire_id.id] if user.concessionaire_id else [])))
+            for cid in allowed_ids:
+                try:
+                    with self.env.cr.savepoint():
+                        self.sudo().compute_cbd_for_date_and_company(today, cid)
+                except Exception as e:
+                    _logger.error("Error sincronizando CBD/IFO para empresa id=%s: %s", cid, e)
         return {
             'type': 'ir.actions.client',
             'tag': 'reload',
@@ -1265,9 +1281,9 @@ class TransitCBDHourly(models.Model):
             target_date = fields.Date.from_string(target_date)
 
         if concessionaire_id:
-            concessionaires = self.env['transit.concessionaire'].browse([concessionaire_id])
+            concessionaires = self.env['transit.concessionaire'].sudo().browse([concessionaire_id])
         else:
-            concessionaires = self.env['transit.concessionaire'].search([('active', '=', True)])
+            concessionaires = self.env['transit.concessionaire'].sudo().search([('active', '=', True)])
 
         for conc in concessionaires:
             agency_id = (conc.agency_id or conc.code or '').strip()
@@ -1277,7 +1293,7 @@ class TransitCBDHourly(models.Model):
                 "Procesando CBD/IFO para empresa %s (agency_id=%s) en fecha %s",
                 conc.name, agency_id, target_date
             )
-            self._process_single_company(conc, target_date, min_duracion_min=min_duracion_min, min_mensajes=min_mensajes)
+            self.sudo()._process_single_company(conc, target_date, min_duracion_min=min_duracion_min, min_mensajes=min_mensajes)
 
     @api.model
     def _process_single_company(

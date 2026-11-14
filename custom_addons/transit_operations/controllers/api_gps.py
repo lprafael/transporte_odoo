@@ -376,10 +376,22 @@ class TransitGpsApiController(http.Controller):
 
     @http.route(['/transit/redirect/<string:target>'], type='http', auth='public', methods=['GET'])
     def redirect_broker_target(self, target, **kwargs):
-        """Redirige dinámicamente al microservicio FastAPI (puerto 8088) usando el mismo host que el cliente"""
-        host = request.httprequest.host.split(':')[0]
+        """Redirige al microservicio FastAPI (gps_broker).
+
+        Si existe el parámetro de sistema `transit.gps_broker_public_url` (ej.
+        https://gps.agsrl.com.py, publicado por el proxy inverso sin puerto) se usa esa URL.
+        Si no, se mantiene el comportamiento anterior: mismo host del cliente + puerto 8088.
+        """
+        allowed_targets = {'headway', 'map', 'compliance'}
+        if target not in allowed_targets:
+            return request.not_found()
         query = request.httprequest.query_string.decode('utf-8')
-        url = f'http://{host}:8088/{target}'
+        base_url = (request.env['ir.config_parameter'].sudo().get_param('transit.gps_broker_public_url') or '').strip().rstrip('/')
+        if base_url:
+            url = f'{base_url}/{target}'
+        else:
+            host = request.httprequest.host.split(':')[0]
+            url = f'http://{host}:8088/{target}'
         if query:
             url += f'?{query}'
         return request.redirect(url, local=False)
