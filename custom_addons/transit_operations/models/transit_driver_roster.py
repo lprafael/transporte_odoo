@@ -1216,10 +1216,10 @@ class TransitDriverShift(models.Model):
     ], string='Turno Operativo', compute='_compute_operational_times', store=True, index=True)
     shift_turn_label = fields.Char(string='Etiqueta Turno', compute='_compute_operational_times', store=True)
 
-    # Tolerancias de Monitoreo VMT (GVMT CID)
+    # Tolerancias de Monitoreo
     tolerance_early_min = fields.Integer(string='Tolerancia Adelanto (min)', default=5)
     tolerance_late_min = fields.Integer(string='Tolerancia Atraso (min)', default=10)
-    tolerance_window_str = fields.Char(string='Ventana de Salida VMT', compute='_compute_tolerance_window', store=True)
+    tolerance_window_str = fields.Char(string='Ventana de Salida Oficial', compute='_compute_tolerance_window', store=True)
 
     start_time_str = fields.Char(string='Salida', compute='_compute_times_str', store=True)
     end_time_str = fields.Char(string='Llegada', compute='_compute_times_str', store=True)
@@ -1303,7 +1303,7 @@ class TransitDriverShift(models.Model):
             w_end = st + t_late
             if w_start < 0:
                 w_start += 24.0
-            rec.tolerance_window_str = f"Ventana VMT: {float_to_hhmm(w_start)} - {float_to_hhmm(w_end)} (-{rec.tolerance_early_min}/+{rec.tolerance_late_min}m)"
+            rec.tolerance_window_str = f"Ventana: {float_to_hhmm(w_start)} - {float_to_hhmm(w_end)} (-{rec.tolerance_early_min}/+{rec.tolerance_late_min}m)"
 
     def _validate_shift_conflicts(self):
         """Valida si este turno tiene superposición de bus o de chofer considerando la jornada 04:00 - 03:30"""

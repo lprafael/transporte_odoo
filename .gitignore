@@ -29,3 +29,9 @@ Thumbs.db
 *.tmp
 scratch/
 backups/
+
+# Archivos comprimidos y proyectos externos pesados
+*.rar
+*.zip
+monitoreo_servicios_especiales/
+monitoreo_servicios_especiales.rar

@@ -84,7 +84,7 @@ class TransitTimetable(models.Model):
 
     valid_from = fields.Date(string='Inicio Vigencia')
     valid_until = fields.Date(string='Fin Vigencia')
-    cid_programacion_id = fields.Integer(string='ID Programación CID', index=True)
+    cid_programacion_id = fields.Integer(string='ID Programación', index=True)
 
     active = fields.Boolean(default=True)
 

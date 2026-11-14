@@ -542,7 +542,7 @@ def sync_holidays_and_cid_atypical_days(conn=None) -> Dict[str, int]:
             cur_cid.execute("SELECT fecha, descripcion FROM public.feriados WHERE fecha IS NOT NULL;")
             for r in cur_cid.fetchall():
                 f_dt = r["fecha"]
-                f_desc = r.get("descripcion") or "Feriado Oficial VMT"
+                f_desc = r.get("descripcion") or "Feriado Oficial"
                 feriados_map[f_dt] = f_desc
                 if 2024 <= f_dt.year <= 2030:
                     cur.execute("SELECT id FROM transit_holiday WHERE date = %s LIMIT 1;", (f_dt,))
@@ -564,6 +564,8 @@ def sync_holidays_and_cid_atypical_days(conn=None) -> Dict[str, int]:
                 tipo = r.get("tipo_atipico") or "OTRO"
                 # Para lluvias > 5mm, siempre descartar del histórico de las 4 semanas de referencia
                 descartar = True if tipo == "LLUVIA" else bool(r.get("descartar_historico", True))
+                raw_fuente = (r.get("fuente_dato") or "").strip()
+                clean_fuente = "Monitoreo Operativo" if raw_fuente.upper() in ("", "CID", "CID DB", "VMT", "CCM") else raw_fuente
                 cur.execute("""
                     INSERT INTO transit_atypical_day (
                         fecha, tipo_atipico, factor_exigencia, descartar_historico,
@@ -583,7 +585,7 @@ def sync_holidays_and_cid_atypical_days(conn=None) -> Dict[str, int]:
                     tipo,
                     float(r.get("factor_exigencia") or 0.50),
                     descartar,
-                    r.get("fuente_dato") or "CID DB",
+                    clean_fuente,
                     obs,
                     r.get("id_tipo_dia_aplicable"),
                 ))

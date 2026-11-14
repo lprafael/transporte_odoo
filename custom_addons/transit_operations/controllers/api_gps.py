@@ -273,7 +273,7 @@ class TransitGpsApiController(http.Controller):
                 write_vals['current_geofence_status'] = f'Desviado ({round(dev_m)}m de traza oficial)'
                 dispatch.write(write_vals)
                 dispatch.message_post(
-                    body=f"⚠️ <strong>Alerta de Desvío VMT:</strong> Bus {vehicle.name} desviado de la traza oficial por {round(dev_m)} metros a las {event_dt.strftime('%H:%M:%S')}."
+                    body=f"⚠️ <strong>Alerta de Desvío:</strong> Bus {vehicle.name} desviado de la traza oficial por {round(dev_m)} metros a las {event_dt.strftime('%H:%M:%S')}."
                 )
 
             elif event_type == 'speeding_alert':

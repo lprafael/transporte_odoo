@@ -352,7 +352,7 @@ def get_valid_historical_dates(eval_date: date, target_count: int = 4) -> Tuple[
         for r in cur.fetchall():
             f = r["fecha_evento"]
             if f not in discard_reasons:
-                discard_reasons[f] = r.get("notas") or "Lluvia registrada (Open-Meteo CID)"
+                discard_reasons[f] = r.get("notas") or "Lluvia registrada (Open-Meteo)"
 
         cur.execute("SELECT fecha, descripcion FROM public.feriados;")
         for r in cur.fetchall():

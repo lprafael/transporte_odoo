@@ -33,10 +33,38 @@
                         <h1>
                             <field name="name" readonly="1"/>
                         </h1>
-                        <h3>
-                            <field name="range_label" readonly="1"/>
-                        </h3>
+                        <div class="d-flex flex-wrap align-items-center gap-3">
+                            <h3 class="mb-0">
+                                <field name="range_label" readonly="1"/>
+                            </h3>
+                            <widget name="cbd_auto_refresh"/>
+                        </div>
                     </div>
+
+                    <group string="🚦 Control al Instante: Buses en Calle vs Meta 100% IFO">
+                        <group>
+                            <field name="active_hour_label" string="Hora Analizada" readonly="1"/>
+                            <field name="buses_en_calle_actual" string="Buses en Calle (Hora Actual)" readonly="1"
+                                   class="fw-bold"/>
+                            <field name="buses_en_calle_vivo" string="Activos en Ruta (Últ. 15 min)" readonly="1"/>
+                            <field name="cbd_objetivo_hora_actual" string="Meta 100% IFO (Hora Actual)" readonly="1"/>
+                            <field name="ifo_hora_actual" string="IFO Hora Actual (%)" readonly="1"/>
+                        </group>
+                        <group>
+                            <field name="buses_faltantes_hora_100" string="Faltan para IFO 100% (Hora)" readonly="1"
+                                   class="fw-bold"
+                                   decoration-danger="buses_faltantes_hora_100 &gt; 0"
+                                   decoration-success="buses_faltantes_hora_100 == 0"/>
+                            <field name="cbd_objetivo_comp_100_actual" string="Meta 100% Compensada (Hora)" readonly="1"/>
+                            <field name="buses_faltantes_comp_100" string="Faltan para IFO 100% Franja (Comp.)" readonly="1"
+                                   decoration-danger="buses_faltantes_comp_100 &gt; 0"
+                                   decoration-success="buses_faltantes_comp_100 == 0"/>
+                            <field name="buses_faltantes_ifo_100_franja" string="Faltan Flota Distinta (100% Franja)" readonly="1"
+                                   decoration-danger="buses_faltantes_ifo_100_franja &gt; 0"
+                                   decoration-success="buses_faltantes_ifo_100_franja == 0"/>
+                            <field name="last_sync_at" string="Última Sincronización GPS" readonly="1"/>
+                        </group>
+                    </group>
 
                     <group>
                         <group string="Identificación, Régimen y Clima (Open-Meteo)">
@@ -78,6 +106,8 @@
                             <field name="cbd_minimo_franja" readonly="1"/>
                             <field name="cbd_minimo_hora" readonly="1"/>
                             <field name="cbd_objetivo_franja" readonly="1"/>
+                            <field name="buses_faltantes_ifo_100_franja" readonly="1"
+                                   decoration-danger="buses_faltantes_ifo_100_franja &gt; 0"/>
                             <field name="buses_faltantes_franja" readonly="1"
                                    decoration-danger="buses_faltantes_franja &gt; 0"/>
                             <field name="iccbdm_pct" widget="progressbar" readonly="1"/>
@@ -95,6 +125,11 @@
                                    decoration-danger="ifo_level == 'C'"
                                    readonly="1"/>
                             <field name="ifo_acumulado_transcurrido" readonly="1"/>
+                            <field name="ifo_requerido_restante_100" readonly="1"
+                                   decoration-danger="ifo_requerido_restante_100 &gt; 105.0"
+                                   decoration-warning="ifo_requerido_restante_100 &gt; 100.0"
+                                   decoration-success="ifo_requerido_restante_100 &lt;= 100.0"/>
+                            <field name="buses_requeridos_restante_100" readonly="1"/>
                             <field name="ifo_requerido_restante_a" readonly="1"
                                    decoration-danger="ifo_requerido_restante_a &gt; 100.0"
                                    decoration-warning="ifo_requerido_restante_a &gt; 90.0"
@@ -118,16 +153,22 @@
                                     <field name="cbd_historico" string="CBD Histórico" readonly="1"/>
                                     <field name="adjustment_factor" string="Factor" readonly="1"/>
                                     <field name="cbd_objetivo" string="CBD Obj. (100%)" readonly="1"/>
+                                    <field name="buses_faltantes_100" string="Faltan p/ 100%" readonly="1"
+                                           decoration-danger="buses_faltantes_100 &gt; 0"
+                                           decoration-success="buses_faltantes_100 == 0"/>
                                     <field name="ifo_pct" string="IFO Actual (%)" readonly="1"/>
                                     <field name="ifo_level" widget="badge" readonly="1"
                                            decoration-success="ifo_level == 'A'"
                                            decoration-warning="ifo_level == 'B'"
                                            decoration-danger="ifo_level == 'C'"/>
+                                    <field name="cbd_objetivo_compensado_100" string="Req. Comp. (100%)" readonly="1" optional="show"/>
+                                    <field name="buses_faltantes_comp_100" string="Faltan Comp. (100%)" readonly="1" optional="show"
+                                           decoration-danger="buses_faltantes_comp_100 &gt; 0"/>
                                     <field name="ifo_objetivo_compensado_a" string="IFO Obj. Compensado (%)" readonly="1"
                                            decoration-danger="ifo_objetivo_compensado_a &gt; 100.0"
                                            decoration-warning="ifo_objetivo_compensado_a &gt; 90.0"/>
                                     <field name="cbd_objetivo_compensado_a" string="Buses Requeridos (Nivel A)" readonly="1"/>
-                                    <field name="buses_faltantes_a" string="Buses Faltantes" readonly="1"
+                                    <field name="buses_faltantes_a" string="Faltan (Nivel A)" readonly="1"
                                            decoration-danger="buses_faltantes_a &gt; 0"/>
                                     <field name="cumple_cbd_minimo" column_invisible="True"/>
                                     <field name="alert_status" widget="badge" readonly="1"
@@ -154,6 +195,13 @@
                   decoration-success="ifo_level == 'A' and cumple_cbd_franja"
                   decoration-warning="ifo_level == 'B' and cumple_cbd_franja"
                   decoration-danger="ifo_level == 'C' or not cumple_cbd_franja">
+                <header>
+                    <button name="action_sync_today_live"
+                            string="🔄 Sincronizar CBD / IFO en Vivo"
+                            type="object"
+                            class="btn-primary"
+                            display="always"/>
+                </header>
                 <field name="date"/>
                 <field name="concessionaire_id"/>
                 <field name="tipo_dia" optional="show"/>
@@ -163,6 +211,19 @@
                 <field name="holiday_info" string="Calendario / Feriado" optional="hide"/>
                 <field name="adjustment_factor" string="Factor Ajuste" optional="show"/>
                 <field name="cbd_franja_distinct" string="CBD Franja"/>
+                <field name="cbd_objetivo_franja" string="CBD Obj. 100% Franja"/>
+                <field name="buses_faltantes_ifo_100_franja" string="Faltan 100% Franja" optional="show"
+                       decoration-danger="buses_faltantes_ifo_100_franja &gt; 0"
+                       decoration-success="buses_faltantes_ifo_100_franja == 0"/>
+                <field name="active_hour_label" string="Hora Actual"/>
+                <field name="buses_en_calle_actual" string="En Calle (Hora)"/>
+                <field name="buses_en_calle_vivo" string="Activos 15m" optional="show"/>
+                <field name="cbd_objetivo_hora_actual" string="Meta 100% Hora"/>
+                <field name="buses_faltantes_hora_100" string="Faltan p/ 100% IFO"
+                       decoration-danger="buses_faltantes_hora_100 &gt; 0"
+                       decoration-success="buses_faltantes_hora_100 == 0"/>
+                <field name="buses_faltantes_comp_100" string="Faltan Comp. 100%" optional="show"
+                       decoration-danger="buses_faltantes_comp_100 &gt; 0"/>
                 <field name="cbd_minimo_franja" string="CBD Mín. Franja"/>
                 <field name="cbd_minimo_hora" string="CBD Mín. Hora"/>
                 <field name="iccbdm_pct" string="ICCBDM (%)"/>
@@ -191,13 +252,32 @@
         <field name="model">transit.cbd.franja</field>
         <field name="arch" type="xml">
             <kanban default_group_by="state" class="o_kanban_dashboard" sample="1">
+                <header>
+                    <button name="action_sync_today_live"
+                            string="🔄 Sincronizar en Vivo"
+                            type="object"
+                            class="btn-primary"
+                            display="always"/>
+                </header>
                 <field name="id"/>
                 <field name="name"/>
                 <field name="date"/>
                 <field name="range_label"/>
                 <field name="concessionaire_id"/>
+                <field name="active_hour_label"/>
+                <field name="buses_en_calle_actual"/>
+                <field name="buses_en_calle_vivo"/>
+                <field name="cbd_objetivo_hora_actual"/>
+                <field name="ifo_hora_actual"/>
+                <field name="buses_faltantes_hora_100"/>
+                <field name="cbd_objetivo_comp_100_actual"/>
+                <field name="buses_faltantes_comp_100"/>
+                <field name="ifo_requerido_restante_100"/>
+                <field name="buses_requeridos_restante_100"/>
                 <field name="cbd_franja_distinct"/>
+                <field name="cbd_objetivo_franja"/>
                 <field name="cbd_minimo_franja"/>
+                <field name="buses_faltantes_ifo_100_franja"/>
                 <field name="iccbdm_pct"/>
                 <field name="ifo_promedio"/>
                 <field name="ifo_level"/>
@@ -219,23 +299,71 @@
                                 </span>
                             </div>
                             <div class="o_kanban_record_body my-2">
+                                <t t-if="record.state.raw_value == 'in_progress'">
+                                    <div class="border rounded p-2 mb-2 bg-light">
+                                        <div class="d-flex justify-content-between align-items-center mb-1">
+                                            <small class="text-uppercase fw-bold text-primary">
+                                                ⏱️ En Curso (<t t-esc="record.active_hour_label.value"/>)
+                                            </small>
+                                            <small class="text-muted">
+                                                IFO Hora: <strong><t t-esc="record.ifo_hora_actual.value"/>%</strong>
+                                            </small>
+                                        </div>
+                                        <div class="row text-center g-1">
+                                            <div class="col-4">
+                                                <small class="text-muted d-block">En Calle</small>
+                                                <h4 class="mb-0 fw-bold text-dark"><t t-esc="record.buses_en_calle_actual.value"/></h4>
+                                                <small class="text-muted" style="font-size: 10px;">
+                                                    Act. 15m: <t t-esc="record.buses_en_calle_vivo.value"/>
+                                                </small>
+                                            </div>
+                                            <div class="col-4">
+                                                <small class="text-muted d-block">Meta 100% IFO</small>
+                                                <h4 class="mb-0 fw-bold text-primary"><t t-esc="record.cbd_objetivo_hora_actual.value"/></h4>
+                                                <small class="text-muted" style="font-size: 10px;">buses/h</small>
+                                            </div>
+                                            <div class="col-4">
+                                                <small class="text-muted d-block">Faltan 100%</small>
+                                                <t t-if="record.buses_faltantes_hora_100.raw_value &gt; 0">
+                                                    <h4 class="mb-0 fw-bold text-danger"><t t-esc="record.buses_faltantes_hora_100.value"/></h4>
+                                                    <small class="text-danger fw-semibold" style="font-size: 10px;">buses a sacar</small>
+                                                </t>
+                                                <t t-else="">
+                                                    <h4 class="mb-0 fw-bold text-success">0</h4>
+                                                    <small class="text-success fw-semibold" style="font-size: 10px;">¡IFO 100%!</small>
+                                                </t>
+                                            </div>
+                                        </div>
+                                        <t t-if="record.buses_faltantes_comp_100.raw_value &gt; record.buses_faltantes_hora_100.raw_value">
+                                            <div class="text-center mt-1 pt-1 border-top" style="font-size: 11px;">
+                                                📈 Para cerrar franja en 100%: req. <strong><t t-esc="record.cbd_objetivo_comp_100_actual.value"/></strong>
+                                                (faltan <strong class="text-danger"><t t-esc="record.buses_faltantes_comp_100.value"/></strong> buses)
+                                            </div>
+                                        </t>
+                                    </div>
+                                </t>
                                 <div class="row text-center">
                                     <div class="col-4">
-                                        <small class="text-muted">CBD Franja</small>
-                                        <h5><t t-esc="record.cbd_franja_distinct.value"/> / <small><t t-esc="record.cbd_minimo_franja.value"/></small></h5>
+                                        <small class="text-muted d-block">CBD Franja</small>
+                                        <h5 class="mb-0">
+                                            <t t-esc="record.cbd_franja_distinct.value"/> / <small><t t-esc="record.cbd_objetivo_franja.value"/></small>
+                                        </h5>
+                                        <small class="text-muted" style="font-size: 10px;">
+                                            Mín: <t t-esc="record.cbd_minimo_franja.value"/> · Faltan: <t t-esc="record.buses_faltantes_ifo_100_franja.value"/>
+                                        </small>
                                     </div>
                                     <div class="col-4">
-                                        <small class="text-muted">ICCBDM</small>
-                                        <h5><t t-esc="record.iccbdm_pct.value"/>%</h5>
+                                        <small class="text-muted d-block">ICCBDM</small>
+                                        <h5 class="mb-0"><t t-esc="record.iccbdm_pct.value"/>%</h5>
                                     </div>
                                     <div class="col-4">
-                                        <small class="text-muted">IFO Promedio</small>
-                                        <h5><t t-esc="record.ifo_promedio.value"/>%</h5>
+                                        <small class="text-muted d-block">IFO Franja</small>
+                                        <h5 class="mb-0"><t t-esc="record.ifo_promedio.value"/>%</h5>
                                     </div>
                                 </div>
-                                <t t-if="record.ifo_requerido_restante_a.raw_value &gt; 0">
+                                <t t-if="record.state.raw_value != 'closed' and record.ifo_requerido_restante_a.raw_value &gt; 0">
                                     <div class="alert alert-warning p-1 my-1 text-center small" role="alert">
-                                        🎯 Meta Nivel A: <strong class="text-danger"><t t-esc="record.ifo_requerido_restante_a.value"/>% IFO</strong> (~<t t-esc="record.buses_requeridos_restante_a.value"/> buses/h)
+                                        🎯 Meta Nivel A (90%): <strong class="text-danger"><t t-esc="record.ifo_requerido_restante_a.value"/>% IFO</strong> (~<t t-esc="record.buses_requeridos_restante_a.value"/> buses/h)
                                     </div>
                                 </t>
                             </div>
@@ -284,7 +412,7 @@
         <field name="name">Monitoreo de Franjas y Alertas IFO</field>
         <field name="res_model">transit.cbd.franja</field>
         <field name="view_mode">kanban,list,form</field>
-        <field name="context">{}</field>
+        <field name="context">{'search_default_today': 1}</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
                 Monitorea en tiempo real el cumplimiento del CBD e IFO por franja operativa.
@@ -360,6 +488,16 @@
                     </group>
 
                     <group string="🎯 Metas Operativas y Compensación Horaria">
+                        <group string="Meta 100% IFO (Operación Ideal)">
+                            <field name="buses_faltantes_100" readonly="1"
+                                   decoration-danger="buses_faltantes_100 &gt; 0"
+                                   decoration-success="buses_faltantes_100 == 0"/>
+                            <field name="ifo_objetivo_compensado_100" readonly="1"/>
+                            <field name="cbd_objetivo_compensado_100" readonly="1"/>
+                            <field name="buses_faltantes_comp_100" readonly="1"
+                                   decoration-danger="buses_faltantes_comp_100 &gt; 0"
+                                   decoration-success="buses_faltantes_comp_100 == 0"/>
+                        </group>
                         <group string="Metas para Nivel A (Promedio Franja >= 90%)">
                             <field name="ifo_objetivo_compensado_a" readonly="1"
                                    decoration-danger="ifo_objetivo_compensado_a &gt; 100.0"
@@ -410,6 +548,13 @@
                   decoration-success="ifo_level == 'A' and cumple_cbd_minimo"
                   decoration-warning="ifo_level == 'B' and cumple_cbd_minimo"
                   decoration-danger="ifo_level == 'C' or not cumple_cbd_minimo">
+                <header>
+                    <button name="action_sync_today_live"
+                            string="🔄 Sincronizar CBD / IFO en Vivo"
+                            type="object"
+                            class="btn-primary"
+                            display="always"/>
+                </header>
                 <field name="date"/>
                 <field name="concessionaire_id"/>
                 <field name="hour_label"/>
@@ -419,14 +564,20 @@
                 <field name="cbd_historico" string="CBD Histórico"/>
                 <field name="adjustment_factor" string="Factor"/>
                 <field name="cbd_objetivo" string="CBD Obj. (100%)"/>
+                <field name="buses_faltantes_100" string="Faltan p/ 100%"
+                       decoration-danger="buses_faltantes_100 &gt; 0"
+                       decoration-success="buses_faltantes_100 == 0"/>
                 <field name="ifo_pct" string="IFO Actual (%)"/>
                 <field name="ifo_level" widget="badge"
                        decoration-success="ifo_level == 'A'"
                        decoration-warning="ifo_level == 'B'"
                        decoration-danger="ifo_level == 'C'"/>
+                <field name="cbd_objetivo_compensado_100" string="Req. Comp. (100%)" optional="show"/>
+                <field name="buses_faltantes_comp_100" string="Faltan Comp. (100%)" optional="show"
+                       decoration-danger="buses_faltantes_comp_100 &gt; 0"/>
                 <field name="ifo_objetivo_compensado_a" string="IFO Obj. Compensado (%)"/>
                 <field name="cbd_objetivo_compensado_a" string="Buses Requeridos (A)"/>
-                <field name="buses_faltantes_a" string="Buses Faltantes"
+                <field name="buses_faltantes_a" string="Faltan (Nivel A)"
                        decoration-danger="buses_faltantes_a &gt; 0"/>
                 <field name="cumple_cbd_minimo" column_invisible="True"/>
                 <field name="alert_status" widget="badge"
@@ -721,6 +872,17 @@
         <field name="res_model">transit.rain.casuistica</field>
         <field name="view_mode">list,form</field>
         <field name="context">{}</field>
+    </record>
+
+    <!-- Cron Continuo: Sincronización de CBD e IFO en Tiempo Real cada 5 minutos -->
+    <record id="ir_cron_update_today_cbd_ifo" model="ir.cron">
+        <field name="name">Transporte: Actualizar CBD e IFO del Día en Tiempo Real</field>
+        <field name="model_id" ref="model_transit_cbd_hourly"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_update_today_cbd_ifo()</field>
+        <field name="interval_number">5</field>
+        <field name="interval_type">minutes</field>
+        <field name="active">True</field>
     </record>
 
     <!-- Cron Diario: Descarga Automática de Lluvias Open-Meteo (script_lluvia) y Días Atípicos -->

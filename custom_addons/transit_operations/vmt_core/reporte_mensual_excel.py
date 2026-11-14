@@ -1173,8 +1173,8 @@ def _enviar_correo_mensual(nombre_archivo, codigo_servicio, nombre_servicio, mes
     <p><strong>Mes de análisis:</strong> {mes_analisis}</p>
     <p>Este informe centraliza la cantidad de servicios y validaciones registradas durante el periodo indicado.</p>
     <div class="footer">
-      Coordinación de Innovación y Desarrollo<br>
-      Viceministerio de Transporte
+      Centro de Control y Monitoreo de Transporte<br>
+      Sistema de Gestión de Flota
     </div>
   </div>
 </body>

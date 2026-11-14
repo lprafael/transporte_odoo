@@ -27,9 +27,9 @@ class TransitService(models.Model):
     # Vigencia de la Adjudicación / Concesión
     contract_start_date = fields.Date(string='Inicio de Vigencia', tracking=True)
     contract_end_date = fields.Date(string='Fin de Vigencia', tracking=True)
-    external_dashboard_url = fields.Char(string='Enlace Dashboard CID / Externo')
-    cid_service_id = fields.Integer(string='ID Servicio CID', index=True,
-                                    help='Identificador en el schema servicios_especiales de CID')
+    external_dashboard_url = fields.Char(string='Enlace Dashboard Externo')
+    cid_service_id = fields.Integer(string='ID Servicio Operativo', index=True,
+                                    help='Identificador del servicio especial')
 
     # Cuota Operativa Diaria
     daily_target_departures = fields.Integer(
@@ -103,8 +103,8 @@ class TransitService(models.Model):
         help='Marcar si la jornada operativa concluye en la madrugada del día calendario siguiente'
     )
 
-    # Identificadores telemáticos VMT
-    agency_vmt_id = fields.Char(string='Agency ID VMT (Hex)', help='Ej: 004B, 0006, etc.')
+    # Identificadores telemáticos
+    agency_vmt_id = fields.Char(string='Código de Empresa (Hex)', help='Ej: 004B, 0006, etc.')
     emisor_id = fields.Integer(string='ID Emisor Telemetría')
 
     # Relaciones Operativas
@@ -165,7 +165,7 @@ class TransitService(models.Model):
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': 'Parámetros CID Sincronizados',
+                'title': 'Parámetros Operativos Sincronizados',
                 'message': 'Se actualizaron las reglas de monitoreo oficiales (04:00 a 03:30, tolerancias -5/+10m, geocercas y cumplimientos).',
                 'type': 'success',
                 'sticky': False,

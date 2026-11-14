@@ -77,7 +77,7 @@ def list_system_users() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Error listando usuarios en PG: {e}")
         return [
-            {"id": 1, "login": "admin", "name": "Administrador Global", "active": True, "is_admin": True, "concessionaire_name": "Regulador GVMT"},
+            {"id": 1, "login": "admin", "name": "Administrador Global", "active": True, "is_admin": True, "concessionaire_name": "Administración Central"},
             {"id": 2, "login": "operador_linea20", "name": "Operador Arapotí", "active": True, "is_admin": False, "concessionaire_name": "Consorcio Arapotí"}
         ]
 
@@ -293,7 +293,7 @@ def get_login_html(error_msg: Optional[str] = None) -> str:
         <div class="brand">
             <div class="brand-icon">🚌⚡</div>
             <h1>Centro de Control de Flota</h1>
-            <p>Monitoreo GPS & Res. GVMT 065/2024</p>
+            <p>Monitoreo GPS & Control Operativo en Tiempo Real</p>
         </div>
         {error_box}
         <form method="POST" action="/login">
@@ -312,7 +312,7 @@ def get_login_html(error_msg: Optional[str] = None) -> str:
             <div class="links-row">
                 <a href="/map" class="quick-link">🗺️ Radar Satelital</a>
                 <a href="/headway" class="quick-link">📏 Tablero Lineal</a>
-                <a href="/compliance" class="quick-link">📊 VMT Res. 065</a>
+                <a href="/compliance" class="quick-link">📊 Cumplimiento Operativo</a>
             </div>
         </div>
     </div>

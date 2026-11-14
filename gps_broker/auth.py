@@ -141,7 +141,7 @@ def _enrich_user_from_db(uid: int, base_user: Dict[str, Any]) -> Dict[str, Any]:
             conc_name = row.get("concessionaire_name")
             user_info["concessionaire_id"] = conc_id
             if user_info.get("is_admin") and not conc_id:
-                user_info["concessionaire_name"] = "Todas las Empresas (Regulador / GVMT)"
+                user_info["concessionaire_name"] = "Todas las Empresas (Administración Central)"
                 user_info["agency_id"] = None
             else:
                 user_info["concessionaire_name"] = conc_name or "Sin Empresa Asignada"
@@ -149,7 +149,7 @@ def _enrich_user_from_db(uid: int, base_user: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         logger.debug(f"Error enriqueciendo usuario desde DB: {e}")
         if user_info.get("is_admin"):
-            user_info["concessionaire_name"] = "Todas las Empresas (Regulador / GVMT)"
+            user_info["concessionaire_name"] = "Todas las Empresas (Administración Central)"
             user_info["agency_id"] = None
         else:
             user_info["concessionaire_name"] = "Consorcio Arapotí"
@@ -513,7 +513,7 @@ def render_login_page(error_msg: Optional[str] = None, redirect_url: str = "/hea
             </div>
             <h1 class="brand-title">Poliverso Transit</h1>
             <p class="brand-subtitle">
-                Monitoreo de Frecuencias, Cumplimiento y Telemetría VMT.<br>
+                Monitoreo de Frecuencias, Cumplimiento y Telemetría Satelital.<br>
                 Inicie sesión con su usuario de <strong>Odoo ({ODOO_DB})</strong>.
             </p>
         </div>
@@ -540,7 +540,7 @@ def render_login_page(error_msg: Optional[str] = None, redirect_url: str = "/hea
         </form>
 
         <div class="tenant-info">
-            Sistema Multi-Tenant Consorcio Arapotí / VMT.<br>
+            Plataforma Multi-Tenant de Gestión de Transporte.<br>
             ¿Necesitas acceder al panel administrativo?<br>
             <a href="{ODOO_PUBLIC_URL}" target="_blank">Abrir Odoo ERP (:8069)</a>
         </div>

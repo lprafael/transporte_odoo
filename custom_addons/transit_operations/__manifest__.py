@@ -82,6 +82,8 @@ Sistema Integral de Transporte de Pasajeros y Flota de Buses:
             'transit_operations/static/src/css/transit_roster_board.css',
             'transit_operations/static/src/xml/transit_roster_board.xml',
             'transit_operations/static/src/js/transit_roster_board.js',
+            'transit_operations/static/src/xml/cbd_auto_refresh.xml',
+            'transit_operations/static/src/js/cbd_auto_refresh.js',
         ],
     },
     'installable': True,

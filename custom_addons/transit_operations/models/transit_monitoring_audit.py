@@ -38,7 +38,7 @@ for d in [VMT_CORE_DIR, MONITOREO_DIR, ALT_MONITOREO_DIR]:
 
 class TransitMonitoringAudit(models.Model):
     _name = 'transit.monitoring.audit'
-    _description = 'Auditoría y Monitoreo Operativo VMT'
+    _description = 'Auditoría y Monitoreo Operativo'
     _inherit = ['mail.thread', 'mail.activity.mixin']
     _order = 'date desc, id desc'
 
@@ -152,7 +152,7 @@ class TransitMonitoringAudit(models.Model):
     operator_excel_file = fields.Binary(
         string='Planilla del Operador (Excel)',
         attachment=True,
-        help='Planilla de despacho diario/mensual del operador (ej. Arapotí) para contrastar contra el monitoreo satelital VMT'
+        help='Planilla de despacho diario/mensual del operador (ej. Arapotí) para contrastar contra el monitoreo satelital'
     )
     operator_excel_filename = fields.Char(string='Nombre Archivo Planilla')
 
@@ -161,7 +161,7 @@ class TransitMonitoringAudit(models.Model):
     contrast_discrepancy_trips = fields.Integer(string='Con Discrepancia Horaria', readonly=True)
     contrast_missing_gps_trips = fields.Integer(string='Declarados sin Señal GPS', readonly=True)
     contrast_unreported_reinforcements = fields.Integer(string='Refuerzos GPS no Declarados', readonly=True)
-    contrast_concordance_pct = fields.Float(string='% Concordancia Operador / VMT', digits=(5, 2), readonly=True)
+    contrast_concordance_pct = fields.Float(string='% Concordancia Operador / Monitoreo', digits=(5, 2), readonly=True)
 
     contrast_excel_file = fields.Binary(string='Informe de Contraste (Excel)', readonly=True, attachment=True)
     contrast_excel_filename = fields.Char(string='Nombre Informe Contraste', readonly=True)
@@ -169,7 +169,7 @@ class TransitMonitoringAudit(models.Model):
     contrast_line_ids = fields.One2many(
         'transit.monitoring.contrast.line',
         'audit_id',
-        string='Detalle de Contraste Operador vs VMT'
+        string='Detalle de Contraste Operador vs Monitoreo'
     )
 
     # -------------------------------------------------------------------------
@@ -208,11 +208,11 @@ class TransitMonitoringAudit(models.Model):
             code = rec.service_code or (rec.service_id.code if rec.service_id else 'S/C')
             if rec.mode == 'daily':
                 f_str = rec.date.strftime("%d/%m/%Y") if rec.date else ""
-                rec.name = f"[{code}] Auditoría Diaria VMT - {f_str}"
+                rec.name = f"[{code}] Auditoría Diaria - {f_str}"
             else:
                 meses = dict(self._fields['month'].selection)
                 m_nom = meses.get(rec.month, rec.month)
-                rec.name = f"[{code}] Planilla Mensual VMT - {m_nom} {rec.year}"
+                rec.name = f"[{code}] Planilla Mensual - {m_nom} {rec.year}"
 
     # -------------------------------------------------------------------------
     # EJECUCION DE MONITOREO
@@ -604,7 +604,7 @@ class TransitMonitoringAudit(models.Model):
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
-                    'title': _('Auditoría VMT Concluida'),
+                    'title': _('Auditoría Operativa Concluida'),
                     'message': _('Se procesó la telemetría y se clasificaron los servicios (Según Operativa, Fuera de Operativa y No Realizados). Reportes Excel listos para descargar.'),
                     'type': 'success',
                     'sticky': False,
@@ -612,7 +612,7 @@ class TransitMonitoringAudit(models.Model):
             }
 
         except Exception as e:
-            _logger.exception("Error ejecutando auditoría VMT: %s", e)
+            _logger.exception("Error ejecutando auditoría operativa: %s", e)
             dur = (datetime.now() - start_time).total_seconds()
             logs.append(f"[ERROR] {str(e)}")
             self.write({
@@ -620,7 +620,7 @@ class TransitMonitoringAudit(models.Model):
                 'execution_time_seconds': dur,
                 'log_output': "\n".join(logs)
             })
-            raise UserError(_("Error durante la auditoría de monitoreo VMT:\n\n%s") % str(e))
+            raise UserError(_("Error durante la auditoría de monitoreo operativo:\n\n%s") % str(e))
 
     def action_contrast_operator_sheet(self):
         """
@@ -776,9 +776,9 @@ class TransitMonitoringAudit(models.Model):
             # Generar Excel de Contraste
             wb_out = openpyxl.Workbook()
             ws_out = wb_out.active
-            ws_out.title = "Contraste Operador vs VMT"
+            ws_out.title = "Contraste Operador vs Monitoreo"
 
-            headers = ["Fecha", "Bus", "Sentido", "Hora Declarada", "Salida GPS Real", "Desfase (min)", "Tarjetas Declaradas", "Validaciones VMT", "% Cumplimiento", "Estado Contraste", "Diagnóstico Técnico"]
+            headers = ["Fecha", "Bus", "Sentido", "Hora Declarada", "Salida GPS Real", "Desfase (min)", "Tarjetas Declaradas", "Validaciones Monitoreo", "% Cumplimiento", "Estado Contraste", "Diagnóstico Técnico"]
             ws_out.append(headers)
 
             for col_idx, header in enumerate(headers, 1):
@@ -821,7 +821,7 @@ class TransitMonitoringAudit(models.Model):
             out_bytes = out_stream.getvalue()
             code_str = (self.service_code or 'SRV').upper()
             f_str = self.date.strftime("%Y-%m-%d")
-            contrast_filename = f"Reporte_Contraste_Operador_VMT_{code_str}_{f_str}.xlsx"
+            contrast_filename = f"Reporte_Contraste_Operador_{code_str}_{f_str}.xlsx"
 
             self.write({
                 'operator_declared_trips': tot_decl,
@@ -839,7 +839,7 @@ class TransitMonitoringAudit(models.Model):
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
-                    'title': _('Contraste Operador vs VMT Concluido'),
+                    'title': _('Contraste Operador vs Monitoreo Concluido'),
                     'message': _('Se procesó la planilla de %(op)s: %(tot)d declarados, %(match)d coincidentes (%(pct).1f%%). Informe listo.',
                                  op=self.operator_excel_filename or 'Operador', tot=tot_decl, match=coincidentes, pct=concordance),
                     'type': 'success',
@@ -854,10 +854,10 @@ class TransitMonitoringAudit(models.Model):
 
 class TransitMonitoringAuditLine(models.Model):
     _name = 'transit.monitoring.audit.line'
-    _description = 'Detalle de Servicio Auditado VMT'
+    _description = 'Detalle de Servicio Auditado'
     _order = 'category asc, actual_start asc, scheduled_time asc'
 
-    audit_id = fields.Many2one('transit.monitoring.audit', string='Auditoría VMT', required=True, ondelete='cascade')
+    audit_id = fields.Many2one('transit.monitoring.audit', string='Auditoría Operativa', required=True, ondelete='cascade')
 
     category = fields.Selection([
         ('segun_operativa', 'Realizado según Operativa'),
@@ -895,10 +895,10 @@ class TransitMonitoringAuditLine(models.Model):
 
 class TransitMonitoringContrastLine(models.Model):
     _name = 'transit.monitoring.contrast.line'
-    _description = 'Línea de Contraste Operador vs Monitoreo VMT'
+    _description = 'Línea de Contraste Operador vs Monitoreo'
     _order = 'direction asc, declared_departure asc, id asc'
 
-    audit_id = fields.Many2one('transit.monitoring.audit', string='Auditoría VMT', required=True, ondelete='cascade')
+    audit_id = fields.Many2one('transit.monitoring.audit', string='Auditoría Operativa', required=True, ondelete='cascade')
     date = fields.Date(string='Fecha')
     bus = fields.Char(string='Unidad / Bus', required=True)
     direction = fields.Selection([('ida', 'Ida'), ('vuelta', 'Vuelta')], string='Sentido')
@@ -906,7 +906,7 @@ class TransitMonitoringContrastLine(models.Model):
     monitored_departure = fields.Datetime(string='Salida Detectada GPS')
     time_diff_minutes = fields.Float(string='Desfase Horario (min)', digits=(6, 1))
     declared_validations = fields.Integer(string='Tarjetas Planilla')
-    monitored_validations = fields.Integer(string='Validaciones VMT')
+    monitored_validations = fields.Integer(string='Validaciones Monitoreo')
     compliance_pct = fields.Float(string='% Trazado GPS', digits=(5, 2))
     status = fields.Selection([
         ('matched', 'Coincidente Pleno (GPS y Horario)'),

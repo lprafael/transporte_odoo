@@ -178,6 +178,23 @@ def _get_cid_connection():
         return None
 
 
+def _get_vmt_live_connection():
+    """Conexión directa a la BD transaccional de telemetría en vivo del VMT (monitoreo.vmt.gov.py)."""
+    vmt_host = os.getenv("VMT_DB_HOST", "monitoreo.vmt.gov.py")
+    vmt_port = int(os.getenv("VMT_DB_PORT", 5432))
+    vmt_db = os.getenv("VMT_DB_NAME", "bbdd-monitoreo-prod")
+    vmt_user = os.getenv("VMT_DB_USER", "jefe-CID")
+    vmt_pass = os.getenv("VMT_DB_PASS", "vmtdmt")
+    try:
+        return psycopg2.connect(
+            host=vmt_host, port=vmt_port, dbname=vmt_db,
+            user=vmt_user, password=vmt_pass, sslmode="require", connect_timeout=6
+        )
+    except Exception as e:
+        _logger.debug("No se pudo conectar a VMT Live DB (%s): %s", vmt_host, e)
+        return None
+
+
 def _get_paraguay_now() -> datetime:
     """Retorna la fecha/hora actual en zona horaria de Paraguay (UTC-3)."""
     return datetime.utcnow() - timedelta(hours=3)
@@ -193,9 +210,9 @@ class TransitCBDFranja(models.Model):
     _order = 'date desc, start_hour asc, id desc'
 
     name = fields.Char(string='Franja Operativa', required=True, tracking=True)
-    cid_franja_id = fields.Integer(string='ID Franja CID', index=True, help='ID oficial en control_metricas.franjas_operativas de la BD CID.')
+    cid_franja_id = fields.Integer(string='ID Franja Operativa', index=True, help='Identificador de la franja operativa.')
     date = fields.Date(string='Fecha Operativa', required=True, default=fields.Date.context_today, index=True, tracking=True)
-    agency_id = fields.Char(string='Código VMT (Agency ID)', related='concessionaire_id.agency_id', store=True, index=True)
+    agency_id = fields.Char(string='Código de Empresa (Agency ID)', related='concessionaire_id.agency_id', store=True, index=True)
 
     start_hour = fields.Integer(string='Hora Inicio', required=True)
     end_hour = fields.Integer(string='Hora Fin', required=True)
@@ -209,13 +226,13 @@ class TransitCBDFranja(models.Model):
 
     is_peak = fields.Boolean(string='Es Franja Pico', compute='_compute_is_peak', store=True)
     is_regulated = fields.Boolean(
-        string='Franja Regulada VMT (CBD & IFO)',
+        string='Franja Regulada (CBD & IFO)',
         compute='_compute_is_peak',
         store=True,
-        help='Todas las franjas activas en control_metricas.franjas_operativas se controlan en CBD Mínimo, ICCBDM e IFO.'
+        help='Todas las franjas activas se controlan en CBD Mínimo, ICCBDM e IFO.'
     )
 
-    # Condiciones de Feriado y Clima (Open-Meteo + CID DB)
+    # Condiciones de Feriado y Clima (Open-Meteo)
     is_holiday = fields.Boolean(string='Es Feriado', default=False)
     holiday_info = fields.Char(string='Estado Feriado / Calendario', default='Día Normal')
     is_rainy_day = fields.Boolean(string='Día de Lluvia (>= 5mm Open-Meteo)', default=False)
@@ -229,7 +246,7 @@ class TransitCBDFranja(models.Model):
         string='Umbral Mínimo IFO (%)',
         digits=(5, 1),
         default=80.0,
-        help='Porcentaje mínimo exigido según control_metricas.parametros_ifo de la BD CID.'
+        help='Porcentaje mínimo exigido según parámetros regulatorios de IFO.'
     )
 
     # Relación con las líneas horarias
@@ -268,6 +285,12 @@ class TransitCBDFranja(models.Model):
         string='Buses Faltantes Mínimo Franja',
         compute='_compute_cbd_metrics',
         store=True
+    )
+    buses_faltantes_ifo_100_franja = fields.Integer(
+        string='Faltan p/ 100% IFO Franja',
+        compute='_compute_cbd_metrics',
+        store=True,
+        help='Buses distintos faltantes en toda la franja para alcanzar el CBD Objetivo (100% IFO Franja).'
     )
     iccbdm_pct = fields.Float(
         string='Índice ICCBDM (%)',
@@ -315,8 +338,8 @@ class TransitCBDFranja(models.Model):
         help='Indica si la franja está en su última hora o últimos minutos de operación.'
     )
     state = fields.Selection([
-        ('future', 'Próxima / Por Iniciar'),
         ('in_progress', 'En Curso (Operando)'),
+        ('future', 'Próxima / Por Iniciar'),
         ('closed', 'Concluida / Cerrada'),
     ], string='Estado de la Franja', compute='_compute_progress', store=True, tracking=True)
 
@@ -351,6 +374,76 @@ class TransitCBDFranja(models.Model):
         string='Buses Mínimos / Hora Restante (Nivel B)',
         compute='_compute_compensation',
         store=True
+    )
+    ifo_requerido_restante_100 = fields.Float(
+        string='IFO Req. Horas Restantes (100%)',
+        digits=(6, 1),
+        compute='_compute_compensation',
+        store=True,
+        help='IFO promedio requerido en las horas restantes de la franja para cerrar con promedio = 100%.'
+    )
+    buses_requeridos_restante_100 = fields.Integer(
+        string='Buses Objetivo / Hora Restante (100% IFO)',
+        compute='_compute_compensation',
+        store=True,
+        help='Cantidad de buses en tránsito por hora requeridos en las horas restantes para alcanzar 100% IFO.'
+    )
+
+    # Monitoreo instantáneo en calle y faltantes para IFO 100% (Franja en curso)
+    active_hour = fields.Integer(
+        string='Hora Actual Monitoreada',
+        compute='_compute_live_ifo_100',
+        store=True
+    )
+    active_hour_label = fields.Char(
+        string='Hora en Curso',
+        compute='_compute_live_ifo_100',
+        store=True
+    )
+    buses_en_calle_actual = fields.Integer(
+        string='En Calle (Hora Actual)',
+        compute='_compute_live_ifo_100',
+        store=True,
+        help='Buses en tránsito contabilizados en la hora en curso de la franja (base del IFO horario).'
+    )
+    buses_en_calle_vivo = fields.Integer(
+        string='Activos Ahora (Últ. 15 min)',
+        default=0,
+        help='Buses válidos con transmisión activa fuera de terminales en los últimos 15 minutos.'
+    )
+    cbd_objetivo_hora_actual = fields.Integer(
+        string='Meta 100% IFO (Hora Actual)',
+        compute='_compute_live_ifo_100',
+        store=True,
+        help='Cantidad de buses requerida en la hora en curso para alcanzar IFO = 100%.'
+    )
+    ifo_hora_actual = fields.Float(
+        string='IFO Hora Actual (%)',
+        digits=(6, 1),
+        compute='_compute_live_ifo_100',
+        store=True
+    )
+    buses_faltantes_hora_100 = fields.Integer(
+        string='Faltan p/ 100% IFO (Hora)',
+        compute='_compute_live_ifo_100',
+        store=True,
+        help='Cantidad de buses que falta sacar en la hora en curso para alcanzar IFO = 100%.'
+    )
+    cbd_objetivo_comp_100_actual = fields.Integer(
+        string='Meta 100% Compensada (Hora)',
+        compute='_compute_live_ifo_100',
+        store=True,
+        help='Buses requeridos en la hora actual para compensar horas previas y cerrar la franja en 100% IFO.'
+    )
+    buses_faltantes_comp_100 = fields.Integer(
+        string='Faltan p/ 100% Franja (Comp.)',
+        compute='_compute_live_ifo_100',
+        store=True,
+        help='Buses que falta incorporar en la hora actual para cerrar la franja con promedio de 100% IFO.'
+    )
+    last_sync_at = fields.Datetime(
+        string='Última Sincronización',
+        default=fields.Datetime.now
     )
 
     # Alertas y Sanciones Previstas
@@ -443,6 +536,7 @@ class TransitCBDFranja(models.Model):
             base_franja = max(rec.cbd_historico_franja * rec.adjustment_factor, rec.cbd_minimo_franja)
             rec.cbd_objetivo_franja = math.ceil(base_franja) if base_franja > 0 else rec.cbd_minimo_franja
             rec.buses_faltantes_franja = max(0, rec.cbd_minimo_franja - rec.cbd_franja_distinct)
+            rec.buses_faltantes_ifo_100_franja = max(0, rec.cbd_objetivo_franja - rec.cbd_franja_distinct)
 
             lines = rec.hourly_line_ids
             if lines and rec.cbd_minimo_hora > 0:
@@ -513,6 +607,8 @@ class TransitCBDFranja(models.Model):
 
             if not lines_sorted:
                 rec.ifo_acumulado_transcurrido = 0.0
+                rec.ifo_requerido_restante_100 = 100.0
+                rec.buses_requeridos_restante_100 = rec.cbd_minimo_hora
                 rec.ifo_requerido_restante_a = 90.0
                 rec.buses_requeridos_restante_a = rec.cbd_minimo_hora
                 rec.ifo_requerido_restante_b = 80.0
@@ -556,6 +652,15 @@ class TransitCBDFranja(models.Model):
                 ]
                 avg_denom_rem = sum(denoms_rem) / len(denoms_rem)
 
+                # Meta 100% IFO (Promedio Franja = 100%)
+                target_sum_100 = (100.0 * total_n) - s_closed
+                req_ifo_100 = max(round(target_sum_100 / m_remaining, 1), 0.0)
+                rec.ifo_requerido_restante_100 = req_ifo_100
+                rec.buses_requeridos_restante_100 = max(
+                    math.ceil((req_ifo_100 / 100.0) * avg_denom_rem),
+                    rec.cbd_minimo_hora
+                ) if req_ifo_100 > 0 else rec.cbd_minimo_hora
+
                 # Meta Nivel A (Promedio Franja >= 90%)
                 target_sum_a = (90.0 * total_n) - s_closed
                 req_ifo_a = max(round(target_sum_a / m_remaining, 1), 0.0)
@@ -574,10 +679,61 @@ class TransitCBDFranja(models.Model):
                     rec.cbd_minimo_hora
                 ) if req_ifo_b > 0 else rec.cbd_minimo_hora
             else:
+                rec.ifo_requerido_restante_100 = 0.0
+                rec.buses_requeridos_restante_100 = 0
                 rec.ifo_requerido_restante_a = 0.0
                 rec.buses_requeridos_restante_a = 0
                 rec.ifo_requerido_restante_b = 0.0
                 rec.buses_requeridos_restante_b = 0
+
+    @api.depends(
+        'state',
+        'start_hour',
+        'end_hour',
+        'date',
+        'cbd_minimo_hora',
+        'hourly_line_ids.hour',
+        'hourly_line_ids.distinct_buses_count',
+        'hourly_line_ids.cbd_objetivo',
+        'hourly_line_ids.ifo_pct',
+        'hourly_line_ids.cbd_objetivo_compensado_100',
+    )
+    def _compute_live_ifo_100(self):
+        """Calcula en la hora activa los buses actualmente en calle y los faltantes para IFO = 100%."""
+        now_py = _get_paraguay_now()
+        today = now_py.date()
+        current_hour = now_py.hour
+
+        for rec in self:
+            lines_sorted = sorted(rec.hourly_line_ids, key=lambda l: l.hour)
+            if not lines_sorted:
+                rec.active_hour = rec.start_hour
+                rec.active_hour_label = f"{rec.start_hour:02d}:00 - {rec.start_hour:02d}:59"
+                rec.buses_en_calle_actual = 0
+                rec.cbd_objetivo_hora_actual = rec.cbd_minimo_hora
+                rec.ifo_hora_actual = 0.0
+                rec.buses_faltantes_hora_100 = rec.cbd_minimo_hora
+                rec.cbd_objetivo_comp_100_actual = rec.cbd_minimo_hora
+                rec.buses_faltantes_comp_100 = rec.cbd_minimo_hora
+                continue
+
+            if rec.state == 'in_progress' or (rec.date == today and rec.start_hour <= current_hour <= rec.end_hour):
+                target_line = next((l for l in lines_sorted if l.hour == current_hour), lines_sorted[-1])
+            elif rec.state == 'future' or rec.date > today or (rec.date == today and current_hour < rec.start_hour):
+                target_line = lines_sorted[0]
+            else:
+                operated = [l for l in lines_sorted if l.distinct_buses_count > 0]
+                target_line = operated[-1] if operated else lines_sorted[-1]
+
+            rec.active_hour = target_line.hour
+            rec.active_hour_label = f"{target_line.hour:02d}:00 - {target_line.hour:02d}:59"
+            rec.buses_en_calle_actual = target_line.distinct_buses_count
+            rec.cbd_objetivo_hora_actual = target_line.cbd_objetivo
+            rec.ifo_hora_actual = target_line.ifo_pct
+            rec.buses_faltantes_hora_100 = max(0, target_line.cbd_objetivo - target_line.distinct_buses_count)
+            comp_100 = target_line.cbd_objetivo_compensado_100 or target_line.cbd_objetivo
+            rec.cbd_objetivo_comp_100_actual = comp_100
+            rec.buses_faltantes_comp_100 = max(0, comp_100 - target_line.distinct_buses_count)
 
     @api.depends(
         'state',
@@ -674,12 +830,18 @@ class TransitCBDFranja(models.Model):
             rec.infraccion_prevista = infraccion
             rec.alert_message = "\n".join(msg_parts) if msg_parts else "Operación normal sin alertas."
 
+    def action_recalculate_silent(self):
+        """Recalcula silenciosamente las métricas desde telemetría GPS para actualización automática en pantalla."""
+        for rec in self:
+            if rec.date and rec.concessionaire_id:
+                self.env['transit.cbd.hourly'].compute_cbd_for_date_and_company(
+                    rec.date, rec.concessionaire_id.id
+                )
+        return True
+
     def action_recalculate(self):
         """Recalcula las métricas horarias y de franja desde el GPS para la fecha y empresa de este registro."""
-        for rec in self:
-            self.env['transit.cbd.hourly'].compute_cbd_for_date_and_company(
-                rec.date, rec.concessionaire_id.id
-            )
+        self.action_recalculate_silent()
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
@@ -688,7 +850,16 @@ class TransitCBDFranja(models.Model):
                 'message': _('Se recalcularon los buses en tránsito, IFO Objetivo y alertas desde telemetría GPS.'),
                 'type': 'success',
                 'sticky': False,
+                'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'},
             }
+        }
+
+    def action_sync_today_live(self):
+        """Sincroniza el día actual desde telemetría GPS en tiempo real desde la vista."""
+        self.env['transit.cbd.hourly'].cron_update_today_cbd_ifo()
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'reload',
         }
 
 
@@ -704,7 +875,7 @@ class TransitCBDHourly(models.Model):
     date = fields.Date(string='Fecha Operativa', required=True, default=fields.Date.context_today, index=True)
     hour = fields.Integer(string='Hora del Día (0-23)', required=True, index=True)
     hour_label = fields.Char(string='Horario', compute='_compute_hour_label', store=True)
-    agency_id = fields.Char(string='Código VMT (Agency ID)', related='concessionaire_id.agency_id', store=True, index=True)
+    agency_id = fields.Char(string='Código de Empresa (Agency ID)', related='concessionaire_id.agency_id', store=True, index=True)
 
     franja_id = fields.Many2one('transit.cbd.franja', string='Franja Operativa', ondelete='cascade', index=True)
     franja_name = fields.Char(string='Denominación Franja', related='franja_id.name', store=True)
@@ -714,12 +885,12 @@ class TransitCBDHourly(models.Model):
         string='CBD Actual (Buses Distintos)',
         default=0,
         tracking=True,
-        help='Cantidad de buses distintos que saca la empresa en esta hora (fuera de terminales y con continuidad operativa según bus_monitor.py).'
+        help='Cantidad de buses distintos que saca la empresa en esta hora (fuera de terminales y con continuidad operativa).'
     )
     bus_codes_summary = fields.Text(string='Internos en Tránsito', help='Lista de internos detectados fuera de terminal en la hora.')
     data_source = fields.Selection([
-        ('gps_broker', 'GPS Broker (telemetry_ping)'),
-        ('cid_db', 'Base Monitoreo CID'),
+        ('gps_broker', 'Telemetría GPS en Tiempo Real'),
+        ('cid_db', 'Consolidado de Monitoreo'),
         ('manual', 'Simulación / Manual'),
     ], string='Fuente de Datos', default='gps_broker')
 
@@ -773,6 +944,19 @@ class TransitCBDHourly(models.Model):
     )
 
     # IFO Objetivo Compensado (Teniendo en cuenta las horas previas de la misma franja)
+    ifo_objetivo_compensado_100 = fields.Float(
+        string='IFO Objetivo Comp. 100% (%)',
+        digits=(6, 1),
+        compute='_compute_compensated_targets',
+        store=True,
+        help='IFO que debe alcanzar esta hora para cerrar la franja con promedio de 100% IFO, compensando horas previas.'
+    )
+    cbd_objetivo_compensado_100 = fields.Integer(
+        string='Buses Req. Comp. [100% IFO]',
+        compute='_compute_compensated_targets',
+        store=True,
+        help='Cantidad de buses en calle necesaria en esta hora para promediar 100% IFO en toda la franja.'
+    )
     ifo_objetivo_compensado_a = fields.Float(
         string='IFO Objetivo Compensado (%) [Nivel A]',
         digits=(6, 1),
@@ -802,6 +986,18 @@ class TransitCBDHourly(models.Model):
         string='Faltan p/ CBD Mínimo',
         compute='_compute_compensated_targets',
         store=True
+    )
+    buses_faltantes_100 = fields.Integer(
+        string='Faltan p/ 100% IFO (Hora)',
+        compute='_compute_compensated_targets',
+        store=True,
+        help='Cantidad de buses que falta incorporar respecto al CBD Objetivo (100% IFO) de esta hora.'
+    )
+    buses_faltantes_comp_100 = fields.Integer(
+        string='Faltan p/ 100% IFO (Comp.)',
+        compute='_compute_compensated_targets',
+        store=True,
+        help='Cantidad de buses que falta incorporar respecto a la meta compensada de 100% IFO.'
     )
     buses_faltantes_a = fields.Integer(
         string='Faltan p/ IFO Objetivo (Nivel A)',
@@ -903,6 +1099,7 @@ class TransitCBDHourly(models.Model):
         'ifo_pct',
         'cbd_denominador_ajustado',
         'cbd_minimo_hora',
+        'cbd_objetivo',
         'cbd_objetivo_nivel_a',
         'cbd_objetivo_nivel_b',
         'franja_id.hourly_line_ids.ifo_pct',
@@ -936,25 +1133,33 @@ class TransitCBDHourly(models.Model):
                 sum_prev_ifo = sum(s.ifo_pct for s in prev_lines)
 
                 if rem_count > 0:
+                    req_100 = max(round(((100.0 * total_n) - sum_prev_ifo) / rem_count, 1), 0.0)
                     req_a = max(round(((90.0 * total_n) - sum_prev_ifo) / rem_count, 1), 0.0)
                     req_b = max(round(((80.0 * total_n) - sum_prev_ifo) / rem_count, 1), 0.0)
                 else:
+                    req_100 = 100.0
                     req_a = 90.0
                     req_b = 80.0
             else:
+                req_100 = 100.0
                 req_a = 90.0
                 req_b = 80.0
 
+            rec.ifo_objetivo_compensado_100 = req_100
             rec.ifo_objetivo_compensado_a = req_a
             rec.ifo_objetivo_compensado_b = req_b
 
+            buses_100 = math.ceil((req_100 / 100.0) * denom) if (denom > 0 and req_100 > 0) else rec.cbd_minimo_hora
             buses_a = math.ceil((req_a / 100.0) * denom) if (denom > 0 and req_a > 0) else rec.cbd_minimo_hora
             buses_b = math.ceil((req_b / 100.0) * denom) if (denom > 0 and req_b > 0) else rec.cbd_minimo_hora
 
+            rec.cbd_objetivo_compensado_100 = max(buses_100, rec.cbd_minimo_hora)
             rec.cbd_objetivo_compensado_a = max(buses_a, rec.cbd_minimo_hora)
             rec.cbd_objetivo_compensado_b = max(buses_b, rec.cbd_minimo_hora)
 
             rec.buses_faltantes_minimo = max(0, rec.cbd_minimo_hora - rec.distinct_buses_count)
+            rec.buses_faltantes_100 = max(0, rec.cbd_objetivo - rec.distinct_buses_count)
+            rec.buses_faltantes_comp_100 = max(0, rec.cbd_objetivo_compensado_100 - rec.distinct_buses_count)
             rec.buses_faltantes_a = max(0, rec.cbd_objetivo_compensado_a - rec.distinct_buses_count)
 
     @api.depends(
@@ -1031,6 +1236,14 @@ class TransitCBDHourly(models.Model):
                 'type': 'success',
                 'sticky': False,
             }
+        }
+
+    def action_sync_today_live(self):
+        """Sincroniza el día actual desde VMT / CID / GPS Broker desde el botón de cabecera en lista."""
+        self.cron_update_today_cbd_ifo()
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'reload',
         }
 
     # ==========================================================================
@@ -1195,16 +1408,31 @@ class TransitCBDHourly(models.Model):
                 if details_to_create:
                     self.env['transit.cbd.bus.detail'].sudo().create(details_to_create)
 
-            # Actualizar conteo de buses distintos acumulados en toda la franja
+            now_py_dt = _get_paraguay_now()
+            now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+            cutoff_15m = now_utc_naive - timedelta(minutes=15)
+            active_vivo_buses: Set[str] = set()
+            if target_date == now_py_dt.date() and h_start <= now_py_dt.hour <= h_end:
+                for h_chk in range(h_start, h_end + 1):
+                    for b_info in buses_detail_by_hour.get(h_chk, []):
+                        last_p = b_info.get('ultima_posicion_timestamp')
+                        if b_info.get('is_valid') and last_p and last_p >= cutoff_15m:
+                            active_vivo_buses.add(b_info['mean_id'])
+
+            # Actualizar conteo de buses distintos acumulados en toda la franja y activos en últimos 15 min
             franja_rec.sudo().write({
-                'cbd_franja_distinct': len(all_buses_franja)
+                'cbd_franja_distinct': len(all_buses_franja),
+                'buses_en_calle_vivo': len(active_vivo_buses),
+                'last_sync_at': fields.Datetime.now(),
             })
             # Forzar recálculo de objetivos compensados entre hermanos de la franja
             franja_rec.hourly_line_ids._compute_compensated_targets()
             franja_rec.hourly_line_ids._compute_alerts()
+            franja_rec._compute_progress()
             franja_rec._compute_cbd_metrics()
             franja_rec._compute_ifo_metrics()
             franja_rec._compute_compensation()
+            franja_rec._compute_live_ifo_100()
             franja_rec._compute_alerts()
 
     @api.model
@@ -1397,7 +1625,7 @@ class TransitCBDHourly(models.Model):
                 cur.execute("SELECT fecha, descripcion FROM public.feriados WHERE fecha IS NOT NULL;")
                 for r in cur.fetchall():
                     f_dt = r['fecha']
-                    f_desc = r.get('descripcion') or 'Feriado Oficial VMT'
+                    f_desc = r.get('descripcion') or 'Feriado Oficial'
                     if f_dt not in feriados_map:
                         feriados_map[f_dt] = f_desc
                         if 2024 <= f_dt.year <= 2030:
@@ -1657,17 +1885,253 @@ class TransitCBDHourly(models.Model):
     ) -> Tuple[Dict[int, List[str]], Dict[int, List[Dict]], str]:
         """
         Calcula los buses distintos en tránsito por hora ejecutando el mismo análisis de
-        cbd_monitor/res_120/bus_monitor.py:
-        1. PRIORIDAD 1: Calcula desde telemetry_ping en flota_db (el GPS recibido por gps_broker),
-           filtrando puntos fuera de terminales (transit_stop origin/destination + geocercas VMT)
-           y aplicando la regla de continuidad operativa inteligente.
-        2. PRIORIDAD 2: Si telemetry_ping no tiene datos para esa fecha/empresa, consulta
-           control_metricas.cbd_detalle_buses en CID DB.
+        cbd_monitor/res_120/bus_monitor.py y fusionando por hora las 3 fuentes oficiales:
+        1. CID DB (control_metricas.cbd_detalle_buses) para las horas ya consolidadas por el VMT.
+        2. VMT Live DB (app_monitoreo_mensajeoperativo en monitoreo.vmt.gov.py) para las horas
+           en curso o aún no consolidadas en CID DB (filtrando terminales con PostGIS y aplicando
+           la regla de continuidad operativa inteligente de bus_monitor.py).
+        3. Telemetría local (telemetry_ping en flota_db).
         """
         buses_by_hour: Dict[int, List[str]] = {}
         buses_detail_by_hour: Dict[int, List[Dict]] = {}
+        primary_source = 'cid_db'
 
-        # Verificar si existen pings en telemetry_ping (flota_db) para la fecha y empresa
+        def _merge_hour_results(
+            src_buses_by_hour: Dict[int, List[str]],
+            src_detail_by_hour: Dict[int, List[Dict]],
+        ):
+            for h, b_list in src_buses_by_hour.items():
+                existing_set = set(buses_by_hour.get(h, []))
+                for b_code in b_list:
+                    if b_code not in existing_set:
+                        buses_by_hour.setdefault(h, []).append(b_code)
+                        existing_set.add(b_code)
+            for h, d_list in src_detail_by_hour.items():
+                existing_map = {d['mean_id']: d for d in buses_detail_by_hour.get(h, [])}
+                for d_item in d_list:
+                    mid = d_item['mean_id']
+                    if mid not in existing_map:
+                        buses_detail_by_hour.setdefault(h, []).append(d_item)
+                        existing_map[mid] = d_item
+                    else:
+                        ex = existing_map[mid]
+                        if d_item.get('is_valid') and not ex.get('is_valid'):
+                            ex['is_valid'] = True
+                        if int(d_item.get('cantidad_mensajes') or 0) > int(ex.get('cantidad_mensajes') or 0):
+                            ex['cantidad_mensajes'] = d_item['cantidad_mensajes']
+                            ex['duracion_min'] = d_item['duracion_min']
+                            ex['primera_posicion_timestamp'] = d_item['primera_posicion_timestamp']
+                            ex['ultima_posicion_timestamp'] = d_item['ultima_posicion_timestamp']
+
+        def _evaluate_raw_rows(raw_rows: List[Dict]) -> Tuple[Dict[int, List[str]], Dict[int, List[Dict]]]:
+            out_buses: Dict[int, List[str]] = {}
+            out_details: Dict[int, List[Dict]] = {}
+            if not raw_rows:
+                return out_buses, out_details
+
+            now_py = _get_paraguay_now()
+            is_today = (target_date == now_py.date())
+            current_hour = now_py.hour if is_today else -1
+            max_hour_in_data = max(int(r['hora']) for r in raw_rows)
+
+            # Incluir también continuidad desde horas ya cargadas en buses_by_hour (ej. desde CID DB)
+            buses_horas = set((str(r['mean_id']), int(r['hora'])) for r in raw_rows)
+            for prev_h, prev_list in buses_by_hour.items():
+                for prev_b in prev_list:
+                    buses_horas.add((str(prev_b), int(prev_h)))
+
+            for r in raw_rows:
+                h = int(r['hora'])
+                b = str(r['mean_id'])
+                msgs = int(r['cantidad_mensajes'] or 0)
+                active_route_msgs = int(r.get('mensajes_en_ruta', msgs) or 0)
+                dur = 0.0
+                first_ts = r['primera_posicion_timestamp']
+                last_ts = r['ultima_posicion_timestamp']
+                if first_ts and last_ts:
+                    dur = (last_ts - first_ts).total_seconds() / 60.0
+                    if hasattr(first_ts, 'tzinfo') and first_ts.tzinfo:
+                        first_ts = first_ts.astimezone(timezone.utc).replace(tzinfo=None)
+                    if hasattr(last_ts, 'tzinfo') and last_ts.tzinfo:
+                        last_ts = last_ts.astimezone(timezone.utc).replace(tzinfo=None)
+
+                continua_sig = (b, h + 1) in buses_horas
+                viene_ant = (b, h - 1) in buses_horas
+                is_live_edge = (h == current_hour) or (h == max_hour_in_data and not continua_sig)
+
+                # Regla de _consolidar_detalles_buses en bus_monitor.py + continuidad en hora actual en curso:
+                es_operativo = False
+                if dur >= min_duracion_min and msgs >= min_mensajes:
+                    es_operativo = True
+                elif viene_ant and continua_sig:
+                    es_operativo = True
+                elif continua_sig and not viene_ant and msgs >= 15:
+                    es_operativo = True
+                elif is_live_edge and (
+                    (viene_ant and msgs >= 2)
+                    or (dur >= 8.0 and msgs >= 8)
+                    or (active_route_msgs >= 3 and dur >= 2.0)
+                ):
+                    es_operativo = True
+
+                out_details.setdefault(h, []).append({
+                    'mean_id': b,
+                    'primera_posicion_timestamp': first_ts,
+                    'ultima_posicion_timestamp': last_ts,
+                    'cantidad_mensajes': msgs,
+                    'duracion_min': round(dur, 1),
+                    'is_valid': es_operativo,
+                })
+                if es_operativo:
+                    out_buses.setdefault(h, []).append(b)
+            return out_buses, out_details
+
+        # ------------------------------------------------------------------
+        # 1. Consultar CID DB (control_metricas.cbd_detalle_buses)
+        # ------------------------------------------------------------------
+        max_cid_hour = -1
+        conn_cid = _get_cid_connection()
+        if conn_cid:
+            try:
+                cur = conn_cid.cursor(cursor_factory=RealDictCursor)
+                cur.execute("""
+                    SELECT hora, mean_id, primera_posicion_timestamp, ultima_posicion_timestamp, cantidad_mensajes
+                    FROM control_metricas.cbd_detalle_buses
+                    WHERE id_eot_vmt_hex = %s AND fecha = %s
+                    ORDER BY hora, mean_id;
+                """, (agency_id, target_date))
+                rows = cur.fetchall()
+                cur.close()
+                conn_cid.close()
+
+                cid_buses: Dict[int, List[str]] = {}
+                cid_details: Dict[int, List[Dict]] = {}
+                for r in rows:
+                    h = int(r['hora'])
+                    if h > max_cid_hour:
+                        max_cid_hour = h
+                    mid = str(r['mean_id'])
+                    cid_buses.setdefault(h, []).append(mid)
+                    dur = 0.0
+                    first_ts = r['primera_posicion_timestamp']
+                    last_ts = r['ultima_posicion_timestamp']
+                    if first_ts and last_ts:
+                        dur = (last_ts - first_ts).total_seconds() / 60.0
+                        if hasattr(first_ts, 'tzinfo') and first_ts.tzinfo:
+                            first_ts = first_ts.astimezone(timezone.utc).replace(tzinfo=None)
+                        if hasattr(last_ts, 'tzinfo') and last_ts.tzinfo:
+                            last_ts = last_ts.astimezone(timezone.utc).replace(tzinfo=None)
+
+                    cid_details.setdefault(h, []).append({
+                        'mean_id': mid,
+                        'primera_posicion_timestamp': first_ts,
+                        'ultima_posicion_timestamp': last_ts,
+                        'cantidad_mensajes': int(r['cantidad_mensajes'] or 1),
+                        'duracion_min': round(dur, 1),
+                        'is_valid': True,
+                    })
+                _merge_hour_results(cid_buses, cid_details)
+            except Exception as e:
+                _logger.debug("Aviso consultando cbd_detalle_buses en CID DB: %s", e)
+
+        # ------------------------------------------------------------------
+        # 2. Consultar VMT Live DB (app_monitoreo_mensajeoperativo) para horas
+        #    aún no consolidadas en CID DB (ej. hoy desde max_cid_hour hasta hora actual)
+        # ------------------------------------------------------------------
+        now_py = _get_paraguay_now()
+        days_diff = (now_py.date() - target_date).days
+        max_expected_hour = now_py.hour if target_date == now_py.date() else 23
+        terminal_wkts = None
+
+        if days_diff <= 2 and max_cid_hour < max_expected_hour and agency_id in ('0008', '002A', '004B'):
+            start_live_hour = max(0, max_cid_hour)  # incluye max_cid_hour para evaluar continuidad H-1
+            start_local_dt = datetime.combine(target_date, time(start_live_hour, 0, 0))
+            end_local_dt = datetime.combine(target_date, time(23, 59, 59))
+
+            conn_vmt = _get_vmt_live_connection()
+            if conn_vmt:
+                try:
+                    terminal_wkts = self._get_company_terminal_geoms_wkt(agency_id, target_date)
+                    # Agregar también las terminales locales de transit_stop como WKT
+                    self.env.cr.execute("""
+                        SELECT ST_AsText(ST_Buffer(geom::geography, COALESCE(radius_meters, 100))::geometry) AS wkt
+                        FROM transit_stop
+                        WHERE stop_type IN ('origin', 'destination') AND geom IS NOT NULL;
+                    """)
+                    for r_stop in self.env.cr.dictfetchall():
+                        if r_stop.get('wkt'):
+                            terminal_wkts.append(r_stop['wkt'])
+
+                    cur_vmt = conn_vmt.cursor(cursor_factory=RealDictCursor)
+                    if terminal_wkts:
+                        cur_vmt.execute("""
+                            WITH terminal_geoms AS (
+                                SELECT ST_SetSRID(ST_GeomFromText(wkt), 4326) AS geom
+                                FROM unnest(%s::text[]) AS wkt
+                            ),
+                            consolidated_terminals AS (
+                                SELECT ST_Union(geom) AS geom FROM terminal_geoms
+                            )
+                            SELECT
+                                EXTRACT(HOUR FROM m.fecha_hora_procesamiento AT TIME ZONE 'America/Asuncion')::int AS hora,
+                                m.mean_id::text AS mean_id,
+                                MIN(m.fecha_hora_procesamiento AT TIME ZONE 'UTC') AS primera_posicion_timestamp,
+                                MAX(m.fecha_hora_procesamiento AT TIME ZONE 'UTC') AS ultima_posicion_timestamp,
+                                COUNT(*) AS cantidad_mensajes,
+                                COUNT(*) FILTER (WHERE m.route_id IS NOT NULL AND m.route_id NOT IN ('0000', '', 'None')) AS mensajes_en_ruta
+                            FROM public.app_monitoreo_mensajeoperativo m
+                            CROSS JOIN consolidated_terminals ct
+                            WHERE m.agency_id = %s
+                              AND m.fecha_hora_procesamiento >= (%s::timestamp AT TIME ZONE 'America/Asuncion')
+                              AND m.fecha_hora_procesamiento <= (%s::timestamp AT TIME ZONE 'America/Asuncion')
+                              AND DATE(m.fecha_hora_procesamiento AT TIME ZONE 'America/Asuncion') = %s
+                              AND m.latitude IS NOT NULL AND m.longitude IS NOT NULL
+                              AND NOT (m.latitude = 0 AND m.longitude = 0)
+                              AND (
+                                  ct.geom IS NULL
+                                  OR NOT ST_Within(ST_SetSRID(ST_MakePoint(m.longitude, m.latitude), 4326), ct.geom)
+                              )
+                            GROUP BY 1, 2
+                            ORDER BY 1, 2;
+                        """, (terminal_wkts, agency_id, start_local_dt, end_local_dt, target_date))
+                    else:
+                        cur_vmt.execute("""
+                            SELECT
+                                EXTRACT(HOUR FROM m.fecha_hora_procesamiento AT TIME ZONE 'America/Asuncion')::int AS hora,
+                                m.mean_id::text AS mean_id,
+                                MIN(m.fecha_hora_procesamiento AT TIME ZONE 'UTC') AS primera_posicion_timestamp,
+                                MAX(m.fecha_hora_procesamiento AT TIME ZONE 'UTC') AS ultima_posicion_timestamp,
+                                COUNT(*) AS cantidad_mensajes,
+                                COUNT(*) FILTER (WHERE m.route_id IS NOT NULL AND m.route_id NOT IN ('0000', '', 'None')) AS mensajes_en_ruta
+                            FROM public.app_monitoreo_mensajeoperativo m
+                            WHERE m.agency_id = %s
+                              AND m.fecha_hora_procesamiento >= (%s::timestamp AT TIME ZONE 'America/Asuncion')
+                              AND m.fecha_hora_procesamiento <= (%s::timestamp AT TIME ZONE 'America/Asuncion')
+                              AND DATE(m.fecha_hora_procesamiento AT TIME ZONE 'America/Asuncion') = %s
+                              AND m.latitude IS NOT NULL AND m.longitude IS NOT NULL
+                              AND NOT (m.latitude = 0 AND m.longitude = 0)
+                            GROUP BY 1, 2
+                            ORDER BY 1, 2;
+                        """, (agency_id, start_local_dt, end_local_dt, target_date))
+
+                    vmt_raw_rows = cur_vmt.fetchall()
+                    cur_vmt.close()
+                    conn_vmt.close()
+
+                    if vmt_raw_rows:
+                        vmt_buses, vmt_details = _evaluate_raw_rows(vmt_raw_rows)
+                        _merge_hour_results(vmt_buses, vmt_details)
+                        primary_source = 'gps_broker'
+                except Exception as e:
+                    _logger.warning("Aviso consultando app_monitoreo_mensajeoperativo en VMT Live DB: %s", e)
+                    try:
+                        conn_vmt.close()
+                    except Exception:
+                        pass
+
+        # ------------------------------------------------------------------
+        # 3. Complementar con telemetry_ping en flota_db (si tiene datos adicionales)
+        # ------------------------------------------------------------------
         self.env.cr.execute("""
             SELECT COUNT(*)
             FROM telemetry_ping
@@ -1677,7 +2141,8 @@ class TransitCBDHourly(models.Model):
         local_ping_count = self.env.cr.fetchone()[0] or 0
 
         if local_ping_count > 0:
-            terminal_wkts = self._get_company_terminal_geoms_wkt(agency_id, target_date)
+            if terminal_wkts is None:
+                terminal_wkts = self._get_company_terminal_geoms_wkt(agency_id, target_date)
             if terminal_wkts:
                 self.env.cr.execute("""
                     WITH local_terminals AS (
@@ -1685,7 +2150,8 @@ class TransitCBDHourly(models.Model):
                         FROM transit_stop
                         WHERE stop_type IN ('origin', 'destination') AND geom IS NOT NULL
                         UNION ALL
-                        SELECT ST_SetSRID(ST_GeomFromText(unnest(%s::text[])), 4326) AS geom
+                        SELECT ST_SetSRID(ST_GeomFromText(wkt), 4326) AS geom
+                        FROM unnest(%s::text[]) AS wkt
                     ),
                     consolidated_terminals AS (
                         SELECT ST_Union(geom) AS geom FROM local_terminals
@@ -1695,7 +2161,8 @@ class TransitCBDHourly(models.Model):
                         tp.bus_internal_code AS mean_id,
                         MIN(tp.recorded_at AT TIME ZONE 'UTC') AS primera_posicion_timestamp,
                         MAX(tp.recorded_at AT TIME ZONE 'UTC') AS ultima_posicion_timestamp,
-                        COUNT(*) AS cantidad_mensajes
+                        COUNT(*) AS cantidad_mensajes,
+                        COUNT(*) FILTER (WHERE tp.route_id IS NOT NULL AND tp.route_id NOT IN ('0000', '', 'None')) AS mensajes_en_ruta
                     FROM telemetry_ping tp
                     CROSS JOIN consolidated_terminals ct
                     WHERE DATE(tp.recorded_at AT TIME ZONE 'America/Asuncion') = %s
@@ -1717,7 +2184,8 @@ class TransitCBDHourly(models.Model):
                         tp.bus_internal_code AS mean_id,
                         MIN(tp.recorded_at AT TIME ZONE 'UTC') AS primera_posicion_timestamp,
                         MAX(tp.recorded_at AT TIME ZONE 'UTC') AS ultima_posicion_timestamp,
-                        COUNT(*) AS cantidad_mensajes
+                        COUNT(*) AS cantidad_mensajes,
+                        COUNT(*) FILTER (WHERE tp.route_id IS NOT NULL AND tp.route_id NOT IN ('0000', '', 'None')) AS mensajes_en_ruta
                     FROM telemetry_ping tp
                     CROSS JOIN consolidated_terminals ct
                     WHERE DATE(tp.recorded_at AT TIME ZONE 'America/Asuncion') = %s
@@ -1730,92 +2198,11 @@ class TransitCBDHourly(models.Model):
 
             raw_rows = self.env.cr.dictfetchall()
             if raw_rows:
-                now_py = _get_paraguay_now()
-                is_today = (target_date == now_py.date())
-                current_hour = now_py.hour if is_today else -1
-                max_hour_in_data = max(r['hora'] for r in raw_rows)
+                loc_buses, loc_details = _evaluate_raw_rows(raw_rows)
+                _merge_hour_results(loc_buses, loc_details)
+                primary_source = 'gps_broker'
 
-                buses_horas = set((str(r['mean_id']), int(r['hora'])) for r in raw_rows)
-
-                for r in raw_rows:
-                    h = int(r['hora'])
-                    b = str(r['mean_id'])
-                    msgs = int(r['cantidad_mensajes'] or 0)
-                    dur = 0.0
-                    if r['primera_posicion_timestamp'] and r['ultima_posicion_timestamp']:
-                        dur = (r['ultima_posicion_timestamp'] - r['primera_posicion_timestamp']).total_seconds() / 60.0
-
-                    continua_sig = (b, h + 1) in buses_horas
-                    viene_ant = (b, h - 1) in buses_horas
-                    is_live_edge = (h == current_hour) or (h == max_hour_in_data and not continua_sig)
-
-                    # Regla exacta de _consolidar_detalles_buses en bus_monitor.py:
-                    es_operativo = False
-                    if dur >= min_duracion_min and msgs >= min_mensajes:
-                        es_operativo = True
-                    elif viene_ant and continua_sig:
-                        es_operativo = True
-                    elif continua_sig and not viene_ant and msgs >= 15:
-                        es_operativo = True
-                    elif is_live_edge and ((viene_ant and msgs >= 5) or (dur >= 10.0 and msgs >= 10)):
-                        # En la hora en curso aún no existe H+1, por lo que validamos continuidad activa
-                        es_operativo = True
-
-                    buses_detail_by_hour.setdefault(h, []).append({
-                        'mean_id': b,
-                        'primera_posicion_timestamp': r['primera_posicion_timestamp'],
-                        'ultima_posicion_timestamp': r['ultima_posicion_timestamp'],
-                        'cantidad_mensajes': msgs,
-                        'duracion_min': round(dur, 1),
-                        'is_valid': es_operativo,
-                    })
-                    if es_operativo:
-                        buses_by_hour.setdefault(h, []).append(b)
-
-                return buses_by_hour, buses_detail_by_hour, 'gps_broker'
-
-        # Fallback a CID DB si telemetry_ping local no tiene pings para esa fecha
-        conn_cid = _get_cid_connection()
-        if conn_cid:
-            try:
-                cur = conn_cid.cursor(cursor_factory=RealDictCursor)
-                cur.execute("""
-                    SELECT hora, mean_id, primera_posicion_timestamp, ultima_posicion_timestamp, cantidad_mensajes
-                    FROM control_metricas.cbd_detalle_buses
-                    WHERE id_eot_vmt_hex = %s AND fecha = %s
-                    ORDER BY hora, mean_id;
-                """, (agency_id, target_date))
-                rows = cur.fetchall()
-                cur.close()
-                conn_cid.close()
-
-                for r in rows:
-                    h = int(r['hora'])
-                    mid = str(r['mean_id'])
-                    buses_by_hour.setdefault(h, []).append(mid)
-                    dur = 0.0
-                    first_ts = r['primera_posicion_timestamp']
-                    last_ts = r['ultima_posicion_timestamp']
-                    if first_ts and last_ts:
-                        dur = (last_ts - first_ts).total_seconds() / 60.0
-                        if hasattr(first_ts, 'tzinfo') and first_ts.tzinfo:
-                            first_ts = first_ts.astimezone(timezone.utc).replace(tzinfo=None)
-                        if hasattr(last_ts, 'tzinfo') and last_ts.tzinfo:
-                            last_ts = last_ts.astimezone(timezone.utc).replace(tzinfo=None)
-
-                    buses_detail_by_hour.setdefault(h, []).append({
-                        'mean_id': mid,
-                        'primera_posicion_timestamp': first_ts,
-                        'ultima_posicion_timestamp': last_ts,
-                        'cantidad_mensajes': int(r['cantidad_mensajes'] or 1),
-                        'duracion_min': round(dur, 1),
-                        'is_valid': True,
-                    })
-                return buses_by_hour, buses_detail_by_hour, 'cid_db'
-            except Exception as e:
-                _logger.debug("Aviso consultando cbd_detalle_buses en CID DB: %s", e)
-
-        return {}, {}, 'gps_broker'
+        return buses_by_hour, buses_detail_by_hour, primary_source
 
     @api.model
     def _get_historical_cbd(
@@ -1934,7 +2321,7 @@ class TransitCBDHourly(models.Model):
 
     @api.model
     def cron_update_today_cbd_ifo(self):
-        """Cron automático cada 10 minutos para actualizar el conteo horario de buses, IFO y alertas."""
+        """Cron automático cada 5 minutos para actualizar el conteo horario de buses, IFO y alertas."""
         today = _get_paraguay_now().date()
         _logger.info("Cron CBD/IFO: actualizando métricas en tiempo real para %s", today)
         concessionaires = self.env['transit.concessionaire'].sudo().search([('active', '=', True)])
@@ -1943,6 +2330,15 @@ class TransitCBDHourly(models.Model):
                 self.compute_cbd_for_date_and_company(today, conc.id)
             except Exception as e:
                 _logger.error("Error en cron CBD/IFO para %s: %s", conc.name, e)
+        # Asegurar transición limpia a cerrada de franjas vencidas si quedó alguna abierta
+        stale_open = self.env['transit.cbd.franja'].sudo().search([
+            ('state', '=', 'in_progress'),
+        ])
+        if stale_open:
+            stale_open._compute_progress()
+            stale_open._compute_live_ifo_100()
+            stale_open._compute_compensation()
+            stale_open._compute_alerts()
 
 
 # ==============================================================================
@@ -2353,7 +2749,7 @@ class TransitAtypicalDay(models.Model):
                 cur.execute("SELECT fecha, descripcion FROM public.feriados WHERE fecha IS NOT NULL;")
                 for r in cur.fetchall():
                     f_dt = r['fecha']
-                    f_desc = r.get('descripcion') or 'Feriado Oficial VMT'
+                    f_desc = r.get('descripcion') or 'Feriado Oficial'
                     feriados_map[f_dt] = f_desc
                     if 2024 <= f_dt.year <= 2030:
                         ex_h = self.env['transit.holiday'].sudo().search([('date', '=', f_dt)], limit=1)
@@ -2376,13 +2772,15 @@ class TransitAtypicalDay(models.Model):
                     if tipo not in ('LLUVIA', 'FERIADO_LAB', 'FERIADO_SAB', 'PRE_POS_FERIADO', 'DISRUPTIVO', 'OTRO'):
                         tipo = 'OTRO'
                     descartar = True if tipo == 'LLUVIA' else bool(r.get('descartar_historico', True))
+                    raw_fuente = (r.get('fuente_dato') or '').strip()
+                    clean_fuente = 'Monitoreo Operativo' if raw_fuente.upper() in ('', 'CID', 'CID DB', 'VMT', 'CCM') else raw_fuente
                     ex_at = self.sudo().search([('fecha', '=', f_dt), ('tipo_atipico', '=', tipo)], limit=1)
                     vals = {
                         'fecha': f_dt,
                         'tipo_atipico': tipo,
                         'factor_exigencia': float(r.get('factor_exigencia') or 0.50),
                         'descartar_historico': descartar,
-                        'fuente_dato': r.get('fuente_dato') or 'CID DB',
+                        'fuente_dato': clean_fuente,
                         'observacion': r.get('observacion') or tipo,
                         'id_tipo_dia_aplicable': r.get('id_tipo_dia_aplicable'),
                         'active': True,
@@ -2495,7 +2893,7 @@ class TransitAtypicalDay(models.Model):
             'params': {
                 'title': _('Días Atípicos y Lluvias Sincronizados'),
                 'message': _(
-                    'Feriados/Pre-Pos: %d | Días Atípicos CID: %d | Lluvias Open-Meteo (últimos 30 días): %d días con lluvia > 5mm.'
+                    'Feriados/Pre-Pos: %d | Días Atípicos: %d | Lluvias Open-Meteo (últimos 30 días): %d días con lluvia > 5mm.'
                 ) % (res_hol['holidays_atypical'], res_hol['cid_atypical'], res_rain['atypical']),
                 'type': 'success',
                 'sticky': False,

@@ -11,7 +11,7 @@ class TransitConcessionaire(models.Model):
     name = fields.Char(string='Nombre Comercial', required=True, tracking=True)
     code = fields.Char(string='Código Interno de Concesión', required=True, index=True, tracking=True)
     agency_id = fields.Char(
-        string='Código Telemática / VMT (Agency ID)',
+        string='Código Telemática (Agency ID)',
         required=True,
         index=True,
         tracking=True,

@@ -57,8 +57,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("gps_broker")
 
 app = FastAPI(
-    title="Broker de Telemetría GPS & PostGIS Shapes (Resolución GVMT 065/2024)",
-    description="Servicio integral: Ingesta MQTT/Protobuf, Motor de Geocercas PostGIS, ETA Predictivo por Parada, Cumplimiento VMT (Res. 065/2024), Detector de Pegonamiento y WebSockets",
+    title="Broker de Telemetría GPS & PostGIS Shapes",
+    description="Servicio integral: Ingesta MQTT/Protobuf, Motor de Geocercas PostGIS, ETA Predictivo por Parada, Cumplimiento Operativo, Detector de Pegonamiento y WebSockets",
     version="3.0.0"
 )
 
@@ -437,24 +437,72 @@ def calculate_bearing_degrees(lat1: float, lon1: float, lat2: float, lon2: float
     bearing = math.degrees(math.atan2(y, x))
     return round((bearing + 360.0) % 360.0, 1)
 
+_pg_thread_local = threading.local()
+
+def _get_thread_pg_conn():
+    conn = getattr(_pg_thread_local, "conn", None)
+    if conn is None or conn.closed:
+        conn = psycopg2.connect(
+            host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2
+        )
+        conn.autocommit = True
+        _pg_thread_local.conn = conn
+    return conn
+
 def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id: str = "004B") -> Optional[Dict[str, Any]]:
     """Calcula con PostGIS el porcentaje del recorrido completado y la distancia al trazado oficial."""
-    if not route_code:
-        return None
     try:
-        conn = psycopg2.connect(
-            host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=1
-        )
+        conn = _get_thread_pg_conn()
         cur = conn.cursor()
-        cur.execute(
-            "SELECT progress_percent, distance_traveled_km, total_km, deviation_meters FROM get_bus_route_progress(%s, %s, %s, %s)",
-            (lat, lon, route_code, agency_id)
-        )
-        row = cur.fetchone()
+        row = None
+        clean_route = (route_code or "").strip().lower()
+        if clean_route and clean_route not in ("0000", "none", "depot", "taller"):
+            cur.execute(
+                "SELECT progress_percent, distance_traveled_km, total_km, deviation_meters FROM get_bus_route_progress(%s, %s, %s, %s)",
+                (lat, lon, clean_route, agency_id)
+            )
+            row = cur.fetchone()
+
+        # Si el bus reporta ruta 0000 o está sobre otro ramal de la misma empresa (>400m del código reportado),
+        # buscar el shape activo más cercano de la misma concesionaria
+        if not row or row[0] is None or (row[3] is not None and float(row[3]) > MAX_DEVIATION_METERS):
+            cur.execute(
+                """
+                SELECT
+                    r.code,
+                    ROUND((ST_LineLocatePoint(s.geom, pt.v_pt) * 100.0)::NUMERIC, 1) AS progress_percent,
+                    ROUND((ST_LineLocatePoint(s.geom, pt.v_pt) * COALESCE(s.total_km, ST_Length(s.geom::geography)/1000.0))::NUMERIC, 2) AS distance_traveled_km,
+                    ROUND(COALESCE(s.total_km, ST_Length(s.geom::geography)/1000.0)::NUMERIC, 2) AS total_km,
+                    ROUND(ST_Distance(pt.v_pt::geography, s.geom::geography)::NUMERIC, 0) AS deviation_meters
+                FROM transit_route r
+                JOIN transit_route_shape s ON s.route_id = r.id
+                CROSS JOIN (SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS v_pt) pt
+                WHERE r.agency_id = %s
+                  AND s.valid_from <= CURRENT_DATE
+                  AND (s.valid_until IS NULL OR s.valid_until > CURRENT_DATE)
+                ORDER BY s.geom <-> pt.v_pt
+                LIMIT 1;
+                """,
+                (lon, lat, agency_id)
+            )
+            best = cur.fetchone()
+            if best and best[0] is not None:
+                best_dev = float(best[4]) if best[4] is not None else 9999.0
+                orig_dev = float(row[3]) if (row and row[3] is not None) else 9999.0
+                if not row or row[0] is None or best_dev < orig_dev:
+                    cur.close()
+                    return {
+                        "matched_route_code": str(best[0]).lower(),
+                        "progress_percent": float(best[1]) if best[1] is not None else 0.0,
+                        "distance_traveled_km": float(best[2]) if best[2] is not None else 0.0,
+                        "total_km": float(best[3]) if best[3] is not None else 0.0,
+                        "deviation_meters": best_dev,
+                    }
+
         cur.close()
-        conn.close()
-        if row:
+        if row and row[0] is not None:
             return {
+                "matched_route_code": clean_route,
                 "progress_percent": float(row[0]) if row[0] is not None else 0.0,
                 "distance_traveled_km": float(row[1]) if row[1] is not None else 0.0,
                 "total_km": float(row[2]) if row[2] is not None else 0.0,
@@ -462,14 +510,16 @@ def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id:
             }
     except Exception as e:
         logger.debug(f"Aviso PostGIS progress: {e}")
+        try:
+            _pg_thread_local.conn = None
+        except Exception:
+            pass
     return None
 
 def insert_telemetry_to_pg(ping: TelemetryPing):
     """Guarda el ping en PostgreSQL. El trigger asigna automáticamente geometría y shape_id vigente."""
     try:
-        conn = psycopg2.connect(
-            host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2
-        )
+        conn = _get_thread_pg_conn()
         cur = conn.cursor()
         recorded_at = ping.effective_timestamp
         op_type = ping.type if ping.type is not None else 2
@@ -501,11 +551,13 @@ def insert_telemetry_to_pg(ping: TelemetryPing):
                 heading
             )
         )
-        conn.commit()
         cur.close()
-        conn.close()
     except Exception as e:
         logger.debug(f"Aviso: Inserción en PostgreSQL diferida: {e}")
+        try:
+            _pg_thread_local.conn = None
+        except Exception:
+            pass
 
 # ------------------------------------------------------------------------------
 # Consultas GeoJSON de Shapes y Paradas con Vigencia
@@ -763,7 +815,7 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
 
         valid_agencies_list = list(get_valid_agencies())
         cur.execute("""
-            SELECT DISTINCT ON (bus_internal_code)
+            SELECT DISTINCT ON (agency_id, bus_internal_code)
                 bus_internal_code as mean_id,
                 license_plate,
                 route_id,
@@ -776,7 +828,7 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
                 recorded_at as fecha_hora
             FROM telemetry_ping
             WHERE (agency_id = ANY(%s) OR agency_id IS NOT NULL)
-            ORDER BY bus_internal_code, recorded_at DESC;
+            ORDER BY agency_id, bus_internal_code, recorded_at DESC;
         """, (valid_agencies_list,))
 
         rows = cur.fetchall()
@@ -809,6 +861,12 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
                 pass
 
             progress = calculate_shape_progress(lat, lon, route_code, r["agency_id"] or "004B")
+            if progress and progress.get("matched_route_code"):
+                matched_c = progress["matched_route_code"]
+                if route_code in ("0000", "", "none", "depot", "taller") and progress.get("deviation_meters", 9999) <= MAX_DEVIATION_METERS:
+                    route_code = matched_c
+                elif progress.get("deviation_meters", 9999) <= MAX_DEVIATION_METERS:
+                    route_code = matched_c
             pct = progress["progress_percent"] if progress else 0.0
             dist_km = progress["distance_traveled_km"] if progress else 0.0
             total_km = progress["total_km"] if progress else 0.0
@@ -818,15 +876,11 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
                 curr_state = "GPS_FAULT"
                 geofence = f"Falla GPS (Sin señal hace {int(minutes_old)}m)"
                 speed = 0.0
-            elif route_code in ("0000", "", "depot", "taller"):
+            elif route_code in ("0000", "", "depot", "taller") and raw_speed < 5.0:
                 curr_state = "DEPOT"
                 geofence = "En Depósito / Patio"
                 speed = raw_speed
-            elif dev_m > MAX_DEVIATION_METERS:
-                curr_state = "OFF_ROUTE"
-                geofence = f"Desviado ({round(dev_m)}m)"
-                speed = raw_speed
-            elif pct >= 97.5 or (total_km > 0 and (total_km - dist_km) <= 0.35):
+            elif pct >= 97.5 or (total_km > 0 and (total_km - dist_km) <= 0.35 and raw_speed < 5.0):
                 curr_state = "AT_DESTINATION"
                 geofence = "Terminal Llegada"
                 speed = raw_speed
@@ -888,7 +942,7 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
             else:
                 v_state["status_display"] = "En Circulación" if curr_state == "IN_TRANSIT" else curr_state
 
-            save_vehicle_state(bus_key, v_state)
+            save_vehicle_state(bus_key, v_state, agency_id=r["agency_id"] or "004B")
             count += 1
 
         logger.info(f"✅ Hidratados {count} vehículos activos desde PostgreSQL a Redis / Memoria.")
@@ -942,6 +996,13 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     # 2. Recuperar o Inicializar Estado (aislado por empresa)
     v_state = get_vehicle_state(bus_key, agency_id=agency)
     raw_ping_time = str(ping.fecha_hora_procesamiento or ping.fecha_hora or ping.timestamp or now_iso).strip()
+    is_new_vehicle = v_state is None
+
+    prev_lat = v_state.get("last_latitude") if v_state else None
+    prev_lon = v_state.get("last_longitude") if v_state else None
+    prev_time = v_state.get("last_ping_time") if v_state else None
+    prev_raw_time = v_state.get("raw_ping_time") if v_state else None
+    prev_heading = v_state.get("heading_deg") if v_state else None
 
     if not v_state:
         v_state = {
@@ -949,8 +1010,8 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
             "license_plate": plate,
             "agency_id": agency,
             "route_id": ping.route_id or "020f",
-            "current_state": "AT_ORIGIN",
-            "state": "AT_ORIGIN",
+            "current_state": "IN_TRANSIT",
+            "state": "IN_TRANSIT",
             "crossed_checkpoints": set(),
             "latitude": ping.latitude,
             "longitude": ping.longitude,
@@ -964,21 +1025,15 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
             "raw_ping_time": raw_ping_time,
             "speed_alert": False,
             "deviation_alert": False,
-            "current_geofence_name": "Terminal Origen",
+            "current_geofence_name": "En Itinerario",
             "progress_percent": 0.0,
             "distance_traveled_km": 0.0,
             "route_total_km": 0.0,
             "deviation_meters": 0.0,
         }
 
-    prev_lat = v_state.get("last_latitude")
-    prev_lon = v_state.get("last_longitude")
-    prev_time = v_state.get("last_ping_time")
-    prev_raw_time = v_state.get("raw_ping_time")
-    prev_heading = v_state.get("heading_deg")
-
-    # 2.0 Deduplicación: Si coordenadas y timestamp son idénticos al último ping procesado, omitir
-    if prev_lat is not None and prev_lon is not None:
+    # 2.0 Deduplicación: Si el vehículo ya existía en Redis y coordenadas + timestamp son idénticos, omitir
+    if not is_new_vehicle and prev_lat is not None and prev_lon is not None:
         is_same_coords = (
             abs(float(prev_lat) - float(ping.latitude)) < 1e-7 and
             abs(float(prev_lon) - float(ping.longitude)) < 1e-7
@@ -1030,11 +1085,11 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     v_state["last_ping_time"] = now_iso
     v_state["raw_ping_time"] = raw_ping_time
 
-    # 3. Guardado Asíncrono en PostgreSQL (solo pings nuevos y válidos)
+    # 3. Guardado en PostgreSQL (reutilizando conexión thread-local en worker o vía BackgroundTasks en HTTP)
     if background_tasks:
         background_tasks.add_task(insert_telemetry_to_pg, ping)
     else:
-        threading.Thread(target=insert_telemetry_to_pg, args=(ping,), daemon=True).start()
+        insert_telemetry_to_pg(ping)
 
     # 4. Cálculo PostGIS de Progreso en Ruta y Desvío Exacto
     progress = calculate_shape_progress(
@@ -1049,6 +1104,10 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
         dist_km = progress["distance_traveled_km"]
         total_km = progress["total_km"]
         dev_m = progress["deviation_meters"]
+        matched_route = progress.get("matched_route_code")
+        if matched_route and (route_code in ("0000", "", "none", "depot", "taller") or dev_m <= MAX_DEVIATION_METERS):
+            v_state["route_id"] = matched_route
+            route_code = matched_route.lower()
 
         v_state["progress_percent"] = pct
         v_state["distance_traveled_km"] = dist_km
@@ -1077,24 +1136,24 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
                         is_at_dest_geofence = True
                 break
 
-        if route_code in ("0000", "", "depot", "taller"):
+        if route_code in ("0000", "", "depot", "taller") and speed < 5.0:
             v_state["current_state"] = "DEPOT"
             v_state["current_geofence_name"] = "En Depósito / Patio"
-        elif dev_m > MAX_DEVIATION_METERS and not is_at_origin_geofence and not is_at_dest_geofence:
-            v_state["current_state"] = "OFF_ROUTE"
-            v_state["current_geofence_name"] = f"Desviado ({round(dev_m)}m)"
-        elif ping.type == 1 or pct >= 97.5 or (total_km > 0 and (total_km - dist_km) <= 0.35) or (is_at_dest_geofence and speed < 5.0):
+        elif (ping.type == 1 or pct >= 98.5 or (total_km > 0 and (total_km - dist_km) <= 0.25) or is_at_dest_geofence) and speed < 5.0:
             v_state["current_state"] = "AT_DESTINATION"
             v_state["current_geofence_name"] = "Terminal Llegada"
-            if is_at_dest_geofence and speed < 5.0:
+            if is_at_dest_geofence:
                 v_state["progress_percent"] = 100.0
                 v_state["distance_traveled_km"] = total_km
-        elif ((pct < 2.5 or dist_km < 0.35) and speed < 5.0 and ping.type != 0) or (is_at_origin_geofence and speed < 5.0):
+        elif ((pct < 1.5 or dist_km < 0.25) or is_at_origin_geofence) and speed < 5.0:
             v_state["current_state"] = "AT_ORIGIN"
             v_state["current_geofence_name"] = "En Cabecera (Origen)"
-            if is_at_origin_geofence and speed < 5.0:
+            if is_at_origin_geofence:
                 v_state["progress_percent"] = 0.0
                 v_state["distance_traveled_km"] = 0.0
+        elif dev_m > MAX_DEVIATION_METERS and not is_at_origin_geofence and not is_at_dest_geofence:
+            v_state["current_state"] = "IN_TRANSIT"
+            v_state["current_geofence_name"] = f"En Circulación (Desvío {round(dev_m)}m)"
         else:
             v_state["current_state"] = "IN_TRANSIT"
             v_state["current_geofence_name"] = "En Itinerario"
@@ -1189,6 +1248,7 @@ def vmt_continuous_sync_worker():
     """Hilo continuo que consulta la BD del Viceministerio de Transporte (VMT) según .env"""
     logger.info(f"🔄 Iniciando sincronización continua con VMT ({VMT_DB_HOST}:{VMT_DB_PORT}/{VMT_DB_NAME}) para Agencia {VMT_AGENCY_ID}...")
     conn = None
+    initial_load = True
     while True:
         try:
             if not conn or conn.closed:
@@ -1208,21 +1268,9 @@ def vmt_continuous_sync_worker():
                 target_agencies = ["004B", "002A", "0008"]
 
             cur = conn.cursor(cursor_factory=RealDictCursor)
-            query = """
-                SELECT DISTINCT ON (agency_id, mean_id) 
-                    id,
-                    agency_id,
-                    mean_id,
-                    route_id,
-                    driver_id,
-                    latitude,
-                    longitude,
-                    rumbo,
-                    velocidad,
-                    fecha_hora,
-                    fecha_hora_procesamiento
-                FROM (
-                    SELECT 
+            if initial_load:
+                query = """
+                    SELECT DISTINCT ON (agency_id, mean_id) 
                         id,
                         agency_id,
                         mean_id,
@@ -1236,14 +1284,34 @@ def vmt_continuous_sync_worker():
                         fecha_hora_procesamiento
                     FROM app_monitoreo_mensajeoperativo
                     WHERE agency_id = ANY(%s)
-                    ORDER BY id DESC
-                    LIMIT 8000
-                ) sub
-                ORDER BY agency_id, mean_id, id DESC;
-            """
+                      AND fecha_hora_procesamiento >= NOW() - INTERVAL '12 hours'
+                    ORDER BY agency_id, mean_id, id DESC;
+                """
+            else:
+                query = """
+                    SELECT DISTINCT ON (agency_id, mean_id) 
+                        id,
+                        agency_id,
+                        mean_id,
+                        route_id,
+                        driver_id,
+                        latitude,
+                        longitude,
+                        rumbo,
+                        velocidad,
+                        fecha_hora,
+                        fecha_hora_procesamiento
+                    FROM app_monitoreo_mensajeoperativo
+                    WHERE agency_id = ANY(%s)
+                      AND fecha_hora_procesamiento >= NOW() - INTERVAL '30 minutes'
+                    ORDER BY agency_id, mean_id, id DESC;
+                """
             cur.execute(query, (target_agencies,))
             rows = cur.fetchall()
             cur.close()
+            if initial_load and rows:
+                logger.info(f"📡 Carga inicial VMT completada: {len(rows)} buses detectados para agencias {target_agencies}.")
+                initial_load = False
 
             for r in rows:
                 bus_key = str(r["mean_id"]).strip()
@@ -1966,7 +2034,7 @@ async def live_map_view(request: Request):
     if not user:
         return RedirectResponse(url="/login?redirect=/map", status_code=303)
     user_agency = user.get("agency_id") or ""
-    user_company = user.get("concessionaire_name") or ("Todas las Empresas (Regulador GVMT)" if user.get("is_admin") else "Consorcio Arapotí")
+    user_company = user.get("concessionaire_name") or ("Todas las Empresas (Administrador General)" if user.get("is_admin") else "Consorcio Arapotí")
     company_badge = f"{user_company} ({user_agency})" if user_agency else user_company
     html = """<!DOCTYPE html>
 
@@ -2136,7 +2204,7 @@ async def live_map_view(request: Request):
                 <span style="color: #94a3b8; font-weight: 600;">⏱️ Filtro Sin Señal GPS:</span>
                 <select id="sel-gps-timeout" onchange="updateGpsTimeout()" style="background: #0f172a; border: 1px solid #475569; color: #f8fafc; padding: 2px 6px; border-radius: 4px; font-size: 11px;">
                     <option value="15">15 min</option>
-                    <option value="30" selected>30 min (Oficial GVMT)</option>
+                    <option value="30" selected>30 min (Regla Operativa)</option>
                     <option value="60">60 min</option>
                 </select>
             </div>
@@ -2903,9 +2971,9 @@ async def live_map_view(request: Request):
 
                 if (v._isFault) {
                     faultsCount++;
-                } else if (v.state === 'AT_ORIGIN' || v.state === 'AT_DESTINATION') {
+                } else if (v.state === 'AT_ORIGIN' || v.state === 'AT_DESTINATION' || v.state === 'DEPOT') {
                     inTerminalsCount++;
-                } else if (v.state === 'IN_TRANSIT' || v.current_state === 'IN_TRANSIT') {
+                } else {
                     inTransitCount++;
                 }
 

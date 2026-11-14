@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="transit_operations.CbdAutoRefreshWidget">
+        <div class="d-inline-flex align-items-center flex-wrap gap-2 px-2 py-1 rounded border bg-light text-muted small">
+            <span t-if="state.refreshing" class="text-primary fw-semibold">
+                <i class="fa fa-spinner fa-spin me-1"/>Recalculando GPS...
+            </span>
+            <span t-else="">
+                <i class="fa fa-refresh text-primary me-1"/>Auto-recálculo cada 5 min:
+                <strong class="text-dark ms-1" t-esc="formattedCountdown"/>
+            </span>
+            <t t-if="state.lastRunLabel">
+                <span class="text-success">
+                    · Últ. <t t-esc="state.lastRunLabel"/>
+                </span>
+            </t>
+        </div>
+    </t>
+</templates>
+

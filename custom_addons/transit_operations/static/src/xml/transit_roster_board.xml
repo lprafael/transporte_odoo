@@ -249,9 +249,9 @@
                                                         🌙 +1 día
                                                     </span>
 
-                                                    <!-- Tolerancia Oficial VMT/CID -->
-                                                    <span class="o_vmt_tol_badge" t-att-title="shift.tolerance_window_str or 'Tolerancia oficial VMT: -5 min / +10 min'">
-                                                        <i class="fa fa-tachometer me-1"/>VMT: -5/+10m
+                                                    <!-- Tolerancia Oficial -->
+                                                    <span class="o_vmt_tol_badge" t-att-title="shift.tolerance_window_str or 'Tolerancia oficial: -5 min / +10 min'">
+                                                        <i class="fa fa-tachometer me-1"/>Tol: -5/+10m
                                                     </span>
                                                 </div>
                                                 <div class="o_cuadrilla_date_tag" t-if="state.selectedDayIndex === null">

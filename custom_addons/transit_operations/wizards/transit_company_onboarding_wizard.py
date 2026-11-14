@@ -9,7 +9,7 @@ class TransitCompanyOnboardingWizard(models.TransientModel):
     # 1. Datos de la Empresa Concesionaria
     company_name = fields.Char(string='Nombre Comercial de la Empresa', required=True)
     agency_id = fields.Char(
-        string='Código Telemática / VMT (Agency ID)',
+        string='Código Telemática (Agency ID)',
         required=True,
         help='Código que transmitirán los dispositivos GPS en el campo agency_id del payload.'
     )

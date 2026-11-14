@@ -8,8 +8,8 @@ class TransitGtfsExportWizard(models.TransientModel):
     _name = 'transit.gtfs.export.wizard'
     _description = 'Asistente de Exportación GTFS Estático (Google Transit / Moovit)'
 
-    agency_name = fields.Char(string='Nombre de la Agencia / Autoridad', default='Viceministerio de Transporte / Poliverso Transit', required=True)
-    agency_url = fields.Char(string='Sitio Web Oficial', default='https://transporte.gov.py', required=True)
+    agency_name = fields.Char(string='Nombre de la Agencia / Autoridad', default='Poliverso Transit', required=True)
+    agency_url = fields.Char(string='Sitio Web Oficial', default='https://transporte.poliverso.com', required=True)
     agency_timezone = fields.Char(string='Zona Horaria', default='America/Asuncion', required=True)
     agency_lang = fields.Char(string='Idioma', default='es', required=True)
     

@@ -175,11 +175,11 @@ class TransitDispatch(models.Model):
     ], string='Estado de Regularidad', compute='_compute_performance', store=True, tracking=True)
 
     clasificacion_operativa = fields.Selection([
-        ('segun_operativa', 'Según Operativa (Oficial VMT)'),
+        ('segun_operativa', 'Según Operativa'),
         ('fuera_operativa', 'Fuera de Operativa (Refuerzo / Desfasado)'),
         ('no_realizado', 'No Realizado (Falta / Suspendido)'),
     ], string='Clasificación Operativa', compute='_compute_clasificacion_operativa', store=True, index=True,
-       help='Clasificación oficial VMT y de monitoreo operativo: Según Operativa (>=80% traza en horario oficial), Fuera de Operativa (refuerzo o desvío) o No Realizado.')
+       help='Clasificación de monitoreo operativo: Según Operativa (>=80% traza en horario oficial), Fuera de Operativa (refuerzo o desvío) o No Realizado.')
 
     segun_operativa = fields.Boolean(
         string='Según Operativa',

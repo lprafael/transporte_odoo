@@ -40,7 +40,7 @@
               sequence="6"/>
 
     <menuitem id="menu_transit_monitoring_audit"
-              name="📊 Auditoría y Monitoreo VMT"
+              name="📊 Auditoría y Monitoreo Operativo"
               parent="menu_transit_daily_operations"
               action="action_transit_monitoring_audit"
               sequence="7"/>

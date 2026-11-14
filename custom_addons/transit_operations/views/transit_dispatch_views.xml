@@ -449,7 +449,7 @@
                     <filter string="Ruta / Ramal" name="group_route" context="{'group_by': 'route_id'}"/>
                     <filter string="Semáforo GPS" name="group_semaphore" context="{'group_by': 'semaphore_color'}"/>
                     <filter string="Régimen / Tipo de Día" name="group_tipo_dia" context="{'group_by': 'tipo_dia'}"/>
-                    <filter string="Clasificación Operativa (VMT)" name="group_clasif_operativa" context="{'group_by': 'clasificacion_operativa'}"/>
+                    <filter string="Clasificación Operativa" name="group_clasif_operativa" context="{'group_by': 'clasificacion_operativa'}"/>
                     <filter string="Puntualidad / Regularidad" name="group_compliance" context="{'group_by': 'compliance_status'}"/>
                     <filter string="Tipo de Parada Técnica" name="group_layover" context="{'group_by': 'layover_type'}"/>
                     <filter string="Franja Horaria" name="group_franja" context="{'group_by': 'franja_horaria'}"/>

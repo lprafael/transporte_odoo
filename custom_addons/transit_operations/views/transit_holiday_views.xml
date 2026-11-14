@@ -41,7 +41,7 @@
                         <field name="notes" placeholder="Número de ley o decreto oficial que establece el feriado..."/>
                     </group>
                     <div class="alert alert-info mt-3" role="alert">
-                        <strong>📌 Régimen Operativo:</strong> En los días declarados como feriados oficiales, el sistema aplica automáticamente la programación operativa de <strong>Domingos y Feriados (Tipo de Día 7)</strong> según la normativa del Viceministerio de Transporte (GVMT).
+                        <strong>📌 Régimen Operativo:</strong> En los días declarados como feriados oficiales, el sistema aplica automáticamente la programación operativa de <strong>Domingos y Feriados (Tipo de Día 7)</strong> según la normativa técnica oficial.
                     </div>
                 </sheet>
             </form>

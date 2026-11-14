@@ -366,7 +366,7 @@ def get_stop_page_html(stop_code: str, host_url: str = "") -> str:
     </div>
     <div class="footer">
         <p>Poliverso Transit &middot; Linea 20 Electricos</p>
-        <p style="margin-top:4px"><a href="/map">&#128506; Ver mapa</a> &middot; <a href="/headway">&#128202; Frecuencias</a> &middot; <a href="/compliance">&#9989; Cumplimiento VMT</a></p>
+        <p style="margin-top:4px"><a href="/map">&#128506; Ver mapa</a> &middot; <a href="/headway">&#128202; Frecuencias</a> &middot; <a href="/compliance">&#9989; Cumplimiento Operativo</a></p>
     </div>
 
     <script>

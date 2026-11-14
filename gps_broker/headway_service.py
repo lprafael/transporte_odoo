@@ -133,7 +133,7 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
             cur = conn.cursor(cursor_factory=RealDictCursor)
             if agency_id:
                 cur.execute("""
-                    SELECT DISTINCT ON (bus_internal_code)
+                    SELECT DISTINCT ON (agency_id, bus_internal_code)
                         bus_internal_code as bus_id,
                         license_plate,
                         route_id,
@@ -145,11 +145,11 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
                         recorded_at as last_ping_time
                     FROM telemetry_ping
                     WHERE agency_id = %s
-                    ORDER BY bus_internal_code, recorded_at DESC;
+                    ORDER BY agency_id, bus_internal_code, recorded_at DESC;
                 """, (agency_id,))
             else:
                 cur.execute("""
-                    SELECT DISTINCT ON (bus_internal_code)
+                    SELECT DISTINCT ON (agency_id, bus_internal_code)
                         bus_internal_code as bus_id,
                         license_plate,
                         route_id,
@@ -160,7 +160,7 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
                         odometer_km,
                         recorded_at as last_ping_time
                     FROM telemetry_ping
-                    ORDER BY bus_internal_code, recorded_at DESC;
+                    ORDER BY agency_id, bus_internal_code, recorded_at DESC;
                 """)
             for row in cur.fetchall():
                 active_buses.append(dict(row))
@@ -169,18 +169,20 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
         except Exception as e:
             logger.debug(f"Error fallback DB headway: {e}")
 
-    # 🛑 Deduplicar buses para evitar evaluar clones o claves duplicadas de Redis
+    # 🛑 Deduplicar buses por agencia + bus_id para evitar evaluar clones o claves duplicadas de Redis
     dedup_buses = {}
     for b in active_buses:
         b_id = str(b.get("bus_id") or "")
+        b_ag = str(b.get("agency_id") or agency_id or "")
+        dedup_key = f"{b_ag}_{b_id}"
         if b_id:
-            if b_id not in dedup_buses:
-                dedup_buses[b_id] = b
+            if dedup_key not in dedup_buses:
+                dedup_buses[dedup_key] = b
             else:
-                existing_ping = str(dedup_buses[b_id].get("last_ping_time") or "")
+                existing_ping = str(dedup_buses[dedup_key].get("last_ping_time") or "")
                 new_ping = str(b.get("last_ping_time") or "")
                 if new_ping > existing_ping:
-                    dedup_buses[b_id] = b
+                    dedup_buses[dedup_key] = b
     active_buses = list(dedup_buses.values())
 
     total_active_buses = 0
@@ -1331,7 +1333,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
         <div class="header-actions">
             <div class="pulse-live">
                 <div class="pulse-dot"></div>
-                <span>EN VIVO (TELEMETRÍA VMT)</span>
+                <span>EN VIVO (TELEMETRÍA GPS)</span>
             </div>
 
             <!-- Botón de Control de Alarma Sonora -->
@@ -1405,15 +1407,9 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
     <!-- Main Content -->
     <main>
         <!-- Filter Tabs -->
-        <div class="filter-bar">
+        <div class="filter-bar" id="route-filter-bar">
             <div class="filter-pill active" onclick="filterRoute('all')">Todos los Ramales</div>
             <div class="filter-pill bunching-filter" id="pill-filter-bunching" onclick="filterRoute('bunching')">🚨 Con Pegonamiento</div>
-            <div class="filter-pill" onclick="filterRoute('020c')">Ramal 020C</div>
-            <div class="filter-pill" onclick="filterRoute('020d')">Ramal 020D</div>
-            <div class="filter-pill" onclick="filterRoute('020e')">Ramal 020E</div>
-            <div class="filter-pill" onclick="filterRoute('020f')">Ramal 020F</div>
-            <div class="filter-pill" onclick="filterRoute('0210')">Ramal 0210</div>
-            <div class="filter-pill" onclick="filterRoute('0211')">Ramal 0211</div>
         </div>
 
         <!-- Dynamic Tracks Container -->
@@ -1667,8 +1663,28 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             const bunchingCount = data.total_bunching_alerts || 0;
             document.getElementById('kpi-bunching').textContent = bunchingCount;
             document.getElementById('kpi-buses').textContent = data.total_active_buses || 0;
+            const kpiRoutesEl = document.getElementById('kpi-routes');
+            if (kpiRoutesEl) {
+                kpiRoutesEl.textContent = (data.routes || []).length;
+            }
             const now = new Date();
             document.getElementById('kpi-time').textContent = now.toLocaleTimeString();
+
+            // Renderizar dinámicamente los botones de filtro de ramal según la empresa
+            const filterBar = document.getElementById('route-filter-bar');
+            if (filterBar && Array.isArray(data.routes)) {
+                const routePillsHtml = data.routes.map(r => {
+                    const rCode = String(r.route_id || '').toLowerCase();
+                    const isActive = (currentFilter === rCode) ? 'active' : '';
+                    const busCountBadge = (r.buses && r.buses.length > 0) ? ` (${r.buses.length})` : '';
+                    return `<div class="filter-pill ${isActive}" onclick="filterRoute('${rCode}')">Ramal ${rCode.toUpperCase()}${busCountBadge}</div>`;
+                }).join('');
+                filterBar.innerHTML = `
+                    <div class="filter-pill ${currentFilter === 'all' ? 'active' : ''}" onclick="filterRoute('all')">Todos los Ramales</div>
+                    <div class="filter-pill bunching-filter ${currentFilter === 'bunching' ? 'active' : ''}" id="pill-filter-bunching" onclick="filterRoute('bunching')">🚨 Con Pegonamiento</div>
+                    ${routePillsHtml}
+                `;
+            }
 
             // Gestionar Alerta Sonora y Banner Global
             const bunchingBanner = document.getElementById('global-bunching-banner');
@@ -1829,7 +1845,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                             <tbody>
                                 ${buses.map(b => `
                                     <tr class="clickable-row ${b.is_bunching ? 'bunching-row' : ''}" onclick="openBusModal('${b.bus_id}')" title="Clic para ver ficha completa y ubicar en mapa">
-                                        <td><strong>🚌 ${b.bus_id}</strong> (${b.license_plate})</td>
+                                        <td><strong>🚌 ${formatBusHexDec(b.bus_id)}</strong> (${b.license_plate})</td>
                                         <td><span style="background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">${b.state_label || 'En Circulación'}</span></td>
                                         <td>${b.speed_kmh} km/h</td>
                                         <td><strong>${b.distance_traveled_km} km</strong> / ${totalKm} km</td>
@@ -1868,10 +1884,17 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             container.innerHTML = html;
         }
 
+        // Número de bus en hexadecimal con su equivalente decimal entre paréntesis
+        function formatBusHexDec(busId) {
+            const hexId = String(busId || '');
+            const decNum = parseInt(hexId, 16);
+            return (hexId && !isNaN(decNum)) ? `${hexId} (${decNum})` : hexId;
+        }
+
         // --- MODAL DE DETALLES Y UBICAR EN MAPA ---
         function updateModalContent(b) {
             if (!b) return;
-            document.getElementById('modal-bus-id').textContent = `Coche #${b.bus_id}`;
+            document.getElementById('modal-bus-id').textContent = `Coche #${formatBusHexDec(b.bus_id)}`;
             document.getElementById('modal-bus-plate').textContent = `${b.license_plate} · Empresa ${b.agency_id}`;
             document.getElementById('modal-state').textContent = b.state_label || 'En Circulación';
             document.getElementById('modal-speed').textContent = `${b.speed_kmh} km/h`;

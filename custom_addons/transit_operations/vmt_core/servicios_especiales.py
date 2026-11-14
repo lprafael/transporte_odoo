@@ -599,7 +599,7 @@ def _enviar_correo_resumen(nombre_archivo, codigo_servicio, nombre_servicio, fec
         link_html = f'''
     <p>En caso de requerir información adicional o complementaria, puede consultar el siguiente enlace:<br>
     <a href="{link_panel}" target="_blank">
-      📊 Panel de Monitoreo – CID
+      📊 Panel de Monitoreo Operativo
     </a></p>
     '''
     
@@ -701,9 +701,8 @@ def _enviar_correo_resumen(nombre_archivo, codigo_servicio, nombre_servicio, fec
     <p>Quedamos atentos a cualquier consulta adicional.</p>
 
     <div class="footer">
-      <strong>Coordinación de Innovación y Desarrollo</strong><br>
-      Viceministerio de Transporte<br>
-      <span style="color:#888;">Ministerio de Obras Públicas y Comunicaciones</span>
+      <strong>Centro de Control y Monitoreo de Transporte</strong><br>
+      Sistema Integrado de Monitoreo y Gestión de Flota<br>
     </div>
   </div>
 </body>

@@ -83,7 +83,7 @@
                     <notebook>
                         <page string="Parámetros de Monitoreo y Tolerancia" name="monitoring_params">
                             <group>
-                                <group string="Geocercas e Itinerario (Resolución GVMT)">
+                                <group string="Geocercas e Itinerario">
                                     <field name="geofence_radius_m"/>
                                     <field name="itinerary_buffer_m"/>
                                     <field name="compliance_threshold_pct"/>
