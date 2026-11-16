@@ -24,6 +24,10 @@
         <field name="model">transit.concessionaire</field>
         <field name="arch" type="xml">
             <form string="Empresa Concesionaria">
+                <header>
+                    <button name="action_open_create_user_wizard" type="object"
+                            string="➕ Crear Nuevo Operador" class="btn-primary" icon="fa-user-plus"/>
+                </header>
                 <sheet>
                     <div class="oe_button_box" name="button_box">
                         <button class="oe_stat_button" type="action" name="%(fleet.fleet_vehicle_action)d" icon="fa-bus"
