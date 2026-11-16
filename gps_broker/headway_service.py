@@ -15,6 +15,14 @@ from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger("headway_service")
 
+try:
+    from billetaje_service import get_cached_billetaje_prod, get_cached_financial_summary
+except Exception:
+    def get_cached_billetaje_prod(redis_client, bus_id, agency_id="004B"):
+        return {}
+    def get_cached_financial_summary(redis_client, agency_id="0008"):
+        return {}
+
 PG_HOST = os.getenv("PG_HOST", "db")
 PG_PORT = int(os.getenv("PG_PORT", 5432))
 PG_DB = os.getenv("PG_DB", "flota_db")
@@ -275,6 +283,20 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
             "bunching_gap_m": None,
             "bunching_gap_min": None,
         }
+
+        # Datos de Billetaje Electrónico Jaha (Validaciones & Recaudación)
+        try:
+            prod = get_cached_billetaje_prod(redis_client, b.get("bus_id"), agency_id=b.get("agency_id", "004B"))
+            bus_entry["passengers_today"] = prod.get("passengers_today", 0)
+            bus_entry["revenue_today"] = prod.get("revenue_today", 0)
+            bus_entry["trips_today"] = prod.get("trips_today", 0)
+            bus_entry["validator_service"] = prod.get("service_type") or b.get("validator_service") or "DIFERENCIAL"
+        except Exception:
+            bus_entry["passengers_today"] = 0
+            bus_entry["revenue_today"] = 0
+            bus_entry["trips_today"] = 0
+            bus_entry["validator_service"] = "DIFERENCIAL"
+
         routes_dict[r_code]["buses"].append(bus_entry)
 
     # 4. Ordenar buses a lo largo de cada carril y calcular Pegonamiento (Bunching)
@@ -374,10 +396,17 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
     except Exception as e:
         logger.debug(f"Error correlacionando Waze en Headway: {e}")
 
+    fin_summary = {}
+    try:
+        fin_summary = get_cached_financial_summary(redis_client, agency_id=agency_id or "0008")
+    except Exception:
+        pass
+
     return {
         "timestamp": datetime.now().isoformat(),
         "total_active_buses": total_active_buses,
         "total_bunching_alerts": total_bunching_alerts,
+        "financial_summary": fin_summary,
         "routes": list(routes_dict.values())
     }
 
@@ -1402,6 +1431,15 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             </div>
             <div class="kpi-icon">⏱️</div>
         </div>
+
+        <div class="kpi-card" style="border-left: 3px solid #10b981;">
+            <div class="kpi-info">
+                <h4>Validaciones Jaha Hoy</h4>
+                <div class="kpi-value" id="kpi-billetaje-pax" style="color: #34d399;">--</div>
+                <div style="font-size: 11px; color: #94a3b8; font-weight: 500;" id="kpi-billetaje-monto">Recaudación: Gs. --</div>
+            </div>
+            <div class="kpi-icon">💳</div>
+        </div>
     </section>
 
     <!-- Main Content -->
@@ -1500,6 +1538,14 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                         </a>
                     </div>
                     <span class="val" id="modal-waze-info" style="font-size: 12px; font-weight: 500; color: #cbd5e1;">Evaluando condiciones de tráfico satelital...</span>
+                </div>
+                <!-- Sección Billetaje Electrónico Jaha en Modal -->
+                <div id="modal-billetaje-card" class="modal-metric modal-col-2" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 4px;">
+                        <span class="lbl" style="color: #34d399;">💳 Billetaje Electrónico Jaha (Validador en Vivo)</span>
+                        <span id="modal-billetaje-srv-badge" style="background: #059669; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700;">CONVENCIONAL</span>
+                    </div>
+                    <span class="val" id="modal-billetaje-info" style="font-size: 12px; font-weight: 600; color: #f8fafc;">Consultando validaciones del coche...</span>
                 </div>
             </div>
 
@@ -1691,6 +1737,17 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             const now = new Date();
             document.getElementById('kpi-time').textContent = now.toLocaleTimeString();
 
+            // KPI Billetaje Jaha
+            const fin = data.financial_summary || {};
+            const kpiPax = document.getElementById('kpi-billetaje-pax');
+            const kpiMonto = document.getElementById('kpi-billetaje-monto');
+            if (kpiPax && fin.cantidad !== undefined) {
+                kpiPax.textContent = Number(fin.cantidad).toLocaleString('es-PY');
+            }
+            if (kpiMonto && fin.brutoTotal !== undefined) {
+                kpiMonto.textContent = `Recaudación: Gs. ${Number(fin.brutoTotal).toLocaleString('es-PY')}`;
+            }
+
             // Renderizar dinámicamente los botones de filtro de ramal según la empresa
             const filterBar = document.getElementById('route-filter-bar');
             if (filterBar && Array.isArray(data.routes)) {
@@ -1860,6 +1917,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                                     <th>Progreso</th>
                                     <th>Desvío del Eje</th>
                                     <th>Último Ping</th>
+                                    <th>Validaciones Jaha</th>
                                     <th>Estado de Intervalo</th>
                                 </tr>
                             </thead>
@@ -1880,6 +1938,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                                         </td>
                                         <td>${b.deviation_meters} m</td>
                                         <td>${b.last_ping_time ? b.last_ping_time.substring(11, 19) : '--:--'}</td>
+                                        <td><span style="background: rgba(16, 185, 129, 0.12); color: #34d399; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎫 ${(b.passengers_today || 0).toLocaleString('es-PY')} pas</span></td>
                                         <td>
                                             ${b.is_bunching 
                                                 ? '<span style="color: #f87171; font-weight: 700;">🚨 PEGONAMIENTO DETECTADO</span>' 
@@ -1950,6 +2009,18 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                     `Circulando pegado a coche #${b.bunching_with} a una distancia crítica de ${b.bunching_gap_m} m (~${b.bunching_gap_min} min de separación).`;
             } else {
                 bunchBox.style.display = 'none';
+            }
+
+            // Datos de Billetaje Jaha
+            const pax = b.passengers_today || 0;
+            const rev = b.revenue_today || 0;
+            const trips = b.trips_today || 0;
+            const srv = b.validator_service || 'DIFERENCIAL';
+            const srvBadge = document.getElementById('modal-billetaje-srv-badge');
+            if (srvBadge) srvBadge.textContent = srv;
+            const bInfo = document.getElementById('modal-billetaje-info');
+            if (bInfo) {
+                bInfo.innerHTML = `🎫 <strong>${pax.toLocaleString('es-PY')}</strong> pasajes cobrados hoy · <strong>Gs. ${rev.toLocaleString('es-PY')}</strong> recaudados · <strong>${trips}</strong> vueltas registradas`;
             }
         }
 

@@ -1462,6 +1462,31 @@ def start_vmt_poller_thread():
     t = threading.Thread(target=vmt_continuous_sync_worker, daemon=True, name="VMT-Continuous-Poller")
     t.start()
 
+def start_billetaje_poller_thread():
+    """Inicia el worker periódico para sincronizar ramales de validadores y pasajes de Jaha."""
+    def _run():
+        import time
+        from billetaje_service import sync_billetaje_all
+        logger.info("💳 Iniciando sincronizador de Billetaje Electrónico Jaha (EPAS)...")
+        # Primera sincronización tras 10s de arranque
+        time.sleep(10)
+        try:
+            sync_billetaje_all(redis_client, agency_id="0008")
+        except Exception as e:
+            logger.debug(f"Aviso sync inicial Billetaje: {e}")
+
+        while True:
+            try:
+                time.sleep(60)
+                sync_billetaje_all(redis_client, agency_id="0008")
+            except Exception as e:
+                logger.debug(f"Aviso en loop Billetaje: {e}")
+                time.sleep(30)
+
+    t = threading.Thread(target=_run, name="billetaje_poller", daemon=True)
+    t.start()
+    logger.info("✅ Sincronizador de Billetaje Electrónico Jaha iniciado en background.")
+
 @app.on_event("startup")
 def startup_event():
     global main_event_loop
@@ -1483,6 +1508,9 @@ def startup_event():
 
     # Iniciar Sincronizador Continuo directo a BD Monitoreo VMT (.env: VMT_DB_HOST, VMT_AGENCY_ID)
     start_vmt_poller_thread()
+
+    # Iniciar Sincronizador de Billetaje Electrónico Jaha (Validadores y Pasajeros)
+    start_billetaje_poller_thread()
 
 # ------------------------------------------------------------------------------
 # Endpoints de Telemetría (Ingesta HTTP & MQTT)
@@ -1921,6 +1949,33 @@ async def api_headway_routes_for_agency(agency_id: Optional[str] = "0008"):
     except Exception as e:
         logger.error(f"Error cargando rutas por agencia: {e}")
         return {"agency_id": agency_id, "routes": []}
+
+# ------------------------------------------------------------------------------
+# Endpoints de Billetaje Electrónico Jaha (EPAS S.A.)
+# ------------------------------------------------------------------------------
+from billetaje_service import sync_billetaje_all, get_cached_financial_summary
+
+@app.get("/api/v1/billetaje/summary")
+async def api_billetaje_summary(agency_id: str = "0008"):
+    """Retorna el resumen financiero y operacional diario de Billetaje Jaha."""
+    fin = get_cached_financial_summary(redis_client, agency_id=agency_id)
+    if not fin:
+        try:
+            res = sync_billetaje_all(redis_client, agency_id=agency_id)
+            fin = res.get("financial_summary", {})
+        except Exception as e:
+            logger.error(f"Error sincronizando billetaje summary: {e}")
+    return {"agency_id": agency_id, "summary": fin}
+
+@app.post("/api/v1/billetaje/sync_now")
+async def api_billetaje_sync_now(agency_id: str = "0008"):
+    """Dispara una sincronización inmediata con la plataforma de Billetaje Jaha."""
+    try:
+        res = sync_billetaje_all(redis_client, agency_id=agency_id)
+        return res
+    except Exception as e:
+        logger.error(f"Error forzando sync billetaje: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/headway", response_class=HTMLResponse)
 async def headway_dashboard_view(request: Request):
