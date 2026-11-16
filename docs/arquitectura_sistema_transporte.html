@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arquitectura del Sistema - Gestión Integral de Flota de Transporte y Telemetría</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(17, 24, 39, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --card-hover-border: rgba(99, 102, 241, 0.4);
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --primary: #6366f1;
+      --primary-light: #818cf8;
+      --secondary: #0ea5e9;
+      --accent: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --purple: #a855f7;
+      --code-bg: #1e1e2e;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem 1rem;
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 85%, rgba(14, 165, 233, 0.08) 0%, transparent 40%);
+      background-attachment: fixed;
+    }
+
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    header {
+      margin-bottom: 2.5rem;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      color: var(--primary-light);
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      width: fit-content;
+    }
+
+    h1 {
+      font-size: 2.3rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #ffffff 40%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 1.05rem;
+      max-width: 850px;
+    }
+
+    /* Navigation Tabs */
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      overflow-x: auto;
+      margin-bottom: 2rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 0.65rem 1.25rem;
+      border-radius: 0.75rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.07);
+      color: var(--text);
+    }
+
+    .tab-btn.active {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(14, 165, 233, 0.2));
+      border-color: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 0 15px rgba(99, 102, 241, 0.2);
+    }
+
+    /* Sections */
+    .tab-content {
+      display: none;
+      animation: fadeIn 0.3s ease-in-out;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Grid & Cards */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      backdrop-filter: blur(12px);
+      transition: all 0.25s ease;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card:hover {
+      border-color: var(--card-hover-border);
+      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+      transform: translateY(-2px);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .icon-box {
+      width: 44px;
+      height: 44px;
+      border-radius: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+    }
+
+    .icon-indigo { background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3); color: var(--primary-light); }
+    .icon-sky { background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.3); color: var(--secondary); }
+    .icon-emerald { background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: var(--accent); }
+    .icon-amber { background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); color: var(--warning); }
+    .icon-purple { background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.3); color: var(--purple); }
+
+    .card-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #ffffff;
+    }
+
+    .card-subtitle {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .card-body {
+      font-size: 0.92rem;
+      color: #d1d5db;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      flex-grow: 1;
+    }
+
+    .tech-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 0.2rem 0.55rem;
+      border-radius: 0.4rem;
+      font-size: 0.75rem;
+      font-family: 'Fira Code', monospace;
+      color: #e2e8f0;
+    }
+
+    .tech-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.5rem;
+    }
+
+    /* Architecture Visual Canvas */
+    .arch-flow {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--card-border);
+      border-radius: 1rem;
+      padding: 2rem;
+      margin-bottom: 2rem;
+    }
+
+    .flow-layer {
+      margin-bottom: 2rem;
+    }
+
+    .flow-layer:last-child {
+      margin-bottom: 0;
+    }
+
+    .layer-title {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .flow-nodes {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .node {
+      flex: 1 1 220px;
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 0.75rem;
+      padding: 1rem;
+      position: relative;
+    }
+
+    .node-header {
+      font-weight: 700;
+      font-size: 0.95rem;
+      margin-bottom: 0.35rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .node-desc {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    .node-connector {
+      text-align: center;
+      color: var(--primary-light);
+      margin: 0.5rem 0;
+      font-size: 1.2rem;
+      opacity: 0.6;
+    }
+
+    /* Key Spec Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 0.88rem;
+    }
+
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    th {
+      color: var(--text-muted);
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    td {
+      color: #e5e7eb;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    code {
+      font-family: 'Fira Code', monospace;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 0.15rem 0.4rem;
+      border-radius: 0.3rem;
+      font-size: 0.82em;
+      color: #38bdf8;
+    }
+
+    /* Highlight Banner */
+    .banner {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(16, 185, 129, 0.12));
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 1rem;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .banner-icon {
+      font-size: 2rem;
+    }
+
+    .banner-text h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 0.2rem;
+    }
+
+    .banner-text p {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+    }
+
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--card-border);
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="badge-pill">
+        <span>⚡ Producción 100% Autónoma</span>
+        <span>•</span>
+        <span>Resolución GVMT N° 065/2024 & SIFEN</span>
+      </div>
+      <h1>Arquitectura Integral del Sistema de Transporte</h1>
+      <p class="subtitle">
+        Documento técnico de arquitectura de software, infraestructura de red, motores de cálculo geoespacial PostGIS, modelo multi-tenant ERP en Odoo 18 y microservicios de telemetría GPS en tiempo real.
+      </p>
+    </header>
+
+    <!-- Nav Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('tab-overview')">🌐 Visión General</button>
+      <button class="tab-btn" onclick="switchTab('tab-db')">🗄️ Base de Datos & PostGIS</button>
+      <button class="tab-btn" onclick="switchTab('tab-backend')">⚙️ Backend & Odoo 18</button>
+      <button class="tab-btn" onclick="switchTab('tab-broker')">📡 Microservicio GPS Broker</button>
+      <button class="tab-btn" onclick="switchTab('tab-frontend')">💻 Frontend (OWL & Dashboards)</button>
+      <button class="tab-btn" onclick="switchTab('tab-infra')">☁️ Red & Infraestructura</button>
+      <button class="tab-btn" onclick="switchTab('tab-matrix')">📊 Matriz de Lenguajes</button>
+    </div>
+
+    <!-- 1. TAB: OVERVIEW -->
+    <div id="tab-overview" class="tab-content active">
+      <div class="banner">
+        <div class="banner-icon">🚀</div>
+        <div class="banner-text">
+          <h3>Arquitectura Híbrida: ERP Transaccional + Microservicios de Ultra-Baja Latencia</h3>
+          <p>El sistema combina la robustez corporativa de Odoo 18 (gestión de flota, finanzas, facturación SIFEN, cuadrantes y multitenancy) con un clúster de ingesta asíncrona FastAPI + Redis + PostGIS capaz de procesar miles de pings GPS concurrentes sin degradar la base de datos empresarial.</p>
+        </div>
+      </div>
+
+      <!-- Diagrama de Flujo Arquitectónico -->
+      <div class="arch-flow">
+        <!-- Capa 1: Dispositivos & Ingesta -->
+        <div class="flow-layer">
+          <div class="layer-title">1. Dispositivos GPS & Fuentes Externas (Flota de Buses)</div>
+          <div class="flow-nodes">
+            <div class="node">
+              <div class="node-header">Buses / Dispositivos GPS <span class="tech-pill">Hardware IoT</span></div>
+              <div class="node-desc">Transmisión de coordenadas cada 5-15s vía HTTP REST con token criptográfico o MQTT.</div>
+            </div>
+            <div class="node">
+              <div class="node-header">Mosquitto MQTT Broker <span class="tech-pill">Port 1883/9001</span></div>
+              <div class="node-desc">Ingesta liviana con tópicos <code>telemetry/gps/{agency}/{imei}</code> en formato Protobuf binario o JSON.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="node-connector">⬇ Tráfico Seguro TLS / HTTPS (Puerto 443) ⬇</div>
+
+        <!-- Capa 2: Edge & Reverse Proxy -->
+        <div class="flow-layer">
+          <div class="layer-title">2. Seguridad de Perímetro, CDN y Proxy Inverso</div>
+          <div class="flow-nodes">
+            <div class="node">
+              <div class="node-header">Cloudflare Edge <span class="tech-pill">WAF / SSL</span></div>
+              <div class="node-desc">Terminación SSL universal, protección anti-DDoS y enrutamiento a <code>dashboardtransito.agsrl.com.py</code>.</div>
+            </div>
+            <div class="node">
+              <div class="node-header">Nginx Proxy Manager <span class="tech-pill">SIGEL-proxy :443</span></div>
+              <div class="node-desc">Canaliza tráfico HTTPS interno directamente al contenedor de Odoo en el puerto 8069.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="node-connector">⬇ Red Privada Docker (Bridge Network) ⬇</div>
+
+        <!-- Capa 3: Capa de Aplicación -->
+        <div class="flow-layer">
+          <div class="layer-title">3. Servidores de Aplicación & Lógica de Negocio</div>
+          <div class="flow-nodes">
+            <div class="node" style="border-left: 4px solid var(--primary);">
+              <div class="node-header">Odoo 18.0 Community <span class="tech-pill">Python / Werkzeug</span></div>
+              <div class="node-desc">
+                • Multi-Tenant estricto con reglas <code>ir.rule</code> por concesionaria.<br>
+                • Motor oficial CBD / IFO (Res. GVMT 065/2024).<br>
+                • Facturación electrónica SIFEN / DNIT.<br>
+                • Proxy dinámico interno a tableros GPS sin exponer puertos.
+              </div>
+            </div>
+            <div class="node" style="border-left: 4px solid var(--secondary);">
+              <div class="node-header">FastAPI GPS Broker <span class="tech-pill">Python 3.11 / Uvicorn</span></div>
+              <div class="node-desc">
+                • Ingestor y calculador de pegonamiento (Headway).<br>
+                • Radar Satelital WebSockets (0ms) con fallback a HTTP polling.<br>
+                • Algoritmo de ETA predictivo por parada con PostGIS.<br>
+                • Capa Waze for Cities CCP integrada.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="node-connector">⬇ Persistencia & Caché de Alta Concurrencia ⬇</div>
+
+        <!-- Capa 4: Persistencia -->
+        <div class="flow-layer">
+          <div class="layer-title">4. Capa de Datos & Almacenamiento Distribuido</div>
+          <div class="flow-nodes">
+            <div class="node" style="border-left: 4px solid var(--accent);">
+              <div class="node-header">PostgreSQL 15 + PostGIS 3.4 <span class="tech-pill">flota_db</span></div>
+              <div class="node-desc">
+                • Shapes geográficos bitemporales (valid_from/until).<br>
+                • Índices espaciales GiST en 4326 (WGS84).<br>
+                • Particionado mensual masivo de telemetría histórica.
+              </div>
+            </div>
+            <div class="node" style="border-left: 4px solid var(--danger);">
+              <div class="node-header">Redis 7 Alpine <span class="tech-pill">In-Memory Cache</span></div>
+              <div class="node-desc">
+                • Estado de flota viva (última posición con latencia &lt;1ms).<br>
+                • Caché de sesiones Odoo para Single Sign-On transparente.<br>
+                • Pub/Sub y deduplicación de alertas de bunching.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. TAB: BASE DE DATOS -->
+    <div id="tab-db" class="tab-content">
+      <div class="grid">
+        <div class="card">
+          <div class="card-header">
+            <div class="icon-box icon-emerald">🗺️</div>
+            <div>
+              <div class="card-title">Motor Geoespacial PostGIS 3.4</div>
+              <div class="card-subtitle">PostgreSQL 15 Alpine (Contenedor odoo_transporte_db)</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <p>PostGIS no solo almacena datos tabulares, sino que actúa como un <strong>motor geométrico en tiempo real</strong> para calcular distancias, desvíos y correspondencia de trazas:</p>
+            <ul style="padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.4rem;">
+              <li><code>ST_LineLocatePoint(shape, pt)</code>: Proyecta la posición exacta del bus sobre la traza oficial de la ruta en metros y porcentaje recorrido (0% a 100%).</li>
+              <li><code>ST_Distance(shape::geography, pt::geography)</code>: Mide el desvío físico en metros respecto al itinerario autorizado por el GVMT.</li>
+              <li><code>ST_DWithin(geom, stop_geom, radius)</code>: Detección automática de arribos y salidas de paradas sin bucles en Python.</li>
+              <li><code>ST_Buffer(geom, radius)</code>: Generación de geocercas circulares alrededor de cabeceras, terminales y puntos de control.</li>
+            </ul>
+            <div class="tech-list">
+              <span class="tech-pill">PostGIS 3.4.2</span>
+              <span class="tech-pill">SRID 4326 (WGS84)</span>
+              <span class="tech-pill">GiST Indexes</span>
+              <span class="tech-pill">Geography Types</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="icon-box icon-emerald">⚡</div>
+            <div>
+              <div class="card-title">Redis 7 para Telemetría Viva</div>
+              <div class="card-subtitle">Contenedor odoo_transporte_redis (Puerto 6379)</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <p>Para evitar bloquear la base de datos relacional con cientos de escrituras por segundo, Redis asume el rol de <strong>Estado de Flota en Vivo</strong>:</p>
+            <ul style="padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.4rem;">
+              <li><code>fleet:live:{vehicle_id}</code>: Hash con lat, lon, velocidad, rumbo, ignición, retraso y estado operativo en tiempo real.</li>
+              <li><code>auth:session:{session_id}</code>: Caché de sesiones Odoo (TTL 300s) que permite al microservicio FastAPI verificar usuarios y roles sin consultar la DB en cada request.</li>
+              <li><code>headway:cache</code>: Almacena las alertas activas de pegonamiento para respuesta instantánea en el tablero lineal.</li>
+            </ul>
+            <div class="tech-list">
+              <span class="tech-pill">Redis 7 Alpine</span>
+              <span class="tech-pill">In-Memory TTL</span>
+              <span class="tech-pill">Pub/Sub Engine</span>
+              <span class="tech-pill">JSON Serialization</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabla de Modelos de Datos Clave -->
+      <div class="card">
+        <div class="card-header">
+          <div class="icon-box icon-emerald">📊</div>
+          <div>
+            <div class="card-title">Principales Tablas y Modelos de Datos</div>
+            <div class="card-subtitle">Estructura unificada en la base de datos <code>flota_db</code></div>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Tabla en BD</th>
+              <th>Modelo Odoo</th>
+              <th>Propósito y Alcance</th>
+              <th>Aislamiento Multi-Tenant</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>transit_concessionaire</code></td>
+              <td><code>transit.concessionaire</code></td>
+              <td>Empresas operadoras (Arapotí, Guaraní, San José, etc.), agency_id, RUC.</td>
+              <td>Por ID de empresa asignada</td>
+            </tr>
+            <tr>
+              <td><code>fleet_vehicle</code></td>
+              <td><code>fleet.vehicle</code></td>
+              <td>Buses físicos, Nº interno, chasis, telemetría, vigencia técnica, consumo EV.</td>
+              <td><code>concessionaire_id</code> estricto</td>
+            </tr>
+            <tr>
+              <td><code>transit_dispatch</code></td>
+              <td><code>transit.dispatch</code></td>
+              <td>Despachos diarios, horarios programados vs reales, cumplimiento de salida.</td>
+              <td><code>concessionaire_id</code> estricto</td>
+            </tr>
+            <tr>
+              <td><code>transit_route / transit_shape</code></td>
+              <td><code>transit.route</code></td>
+              <td>Trazas geográficas LineString con vigencia histórica (valid_from / until).</td>
+              <td>Compartido / Por concesión</td>
+            </tr>
+            <tr>
+              <td><code>transit_cbd_hourly / franja</code></td>
+              <td><code>transit.cbd.hourly</code></td>
+              <td>Métricas horarias de buses en tránsito (CBD) e Índice IFO (Res. GVMT 065/2024).</td>
+              <td><code>concessionaire_id</code> estricto</td>
+            </tr>
+            <tr>
+              <td><code>transit_driver_roster / shift</code></td>
+              <td><code>transit.driver.roster</code></td>
+              <td>Cuadrantes semanales de turnos de choferes, horas trabajadas y francos.</td>
+              <td><code>concessionaire_id</code> estricto</td>
+            </tr>
+            <tr>
+              <td><code>telemetry_ping</code></td>
+              <td><em>(Microservicio FastAPI)</em></td>
+              <td>Histórico masivo de posiciones GPS particionado mensualmente por fecha.</td>
+              <td>Indexado por <code>agency_id</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 3. TAB: BACKEND -->
+    <div id="tab-backend" class="tab-content">
+      <div class="grid">
+        <div class="card">
+          <div class="card-header">
+            <div class="icon-box icon-indigo">🟣</div>
+            <div>
+              <div class="card-title">Odoo 18.0 Community ERP</div>
+              <div class="card-subtitle">Núcleo Empresarial y Motor Transaccional</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <p>Odoo 18 está desarrollado íntegramente en <strong>Python</strong> y opera sobre un servidor HTTP multi-threaded basado en <strong>Werkzeug</strong>:</p>
+            <ul style="padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.4rem;">
+              <li><strong>ORM (Object-Relational Mapping):</strong> Abstracción completa de SQL con validaciones de tipos, métodos computados reactivos (<code>@api.depends</code>), constraints de integridad y tracking en chatter.</li>
+              <li><strong>Seguridad Multi-Tenant:</strong> Reglas de registro (<code>ir.rule</code>) que inyectan cláusulas <code>WHERE</code> automáticas en cada consulta SQL para que un operador jamás acceda a los datos de otra empresa.</li>
+              <li><strong>Crons Automáticos:</strong> Tareas programadas en background que recalculan el CBD/IFO cada 5 minutos y evalúan el cumplimiento operativo diario.</li>
+              <li><strong>Facturación SIFEN / DNIT:</strong> Emisión de boletos electrónicos homologados con firma digital, CDC de 44 dígitos y generación de código QR.</li>
+            </ul>
+            <div class="tech-list">
+              <span class="tech-pill">Python 3.10/3.11</span>
+              <span class="tech-pill">Odoo 18.0 ORM</span>
+              <span class="tech-pill">Werkzeug WSGI</span>
+              <span class="tech-pill">Jinja2 / QWeb</span>
+              <span class="tech-pill">psycopg2-binary</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="icon-box icon-indigo">🔄</div>
+            <div>
+              <div class="card-title">Proxy Inverso Dinámico Interno</div>
+              <div class="card-subtitle">Controlador api_gps.py en Odoo</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <p>Para evitar abrir puertos como el <code>8088</code> hacia internet o alterar la configuración del firewall:</p>
+            <ul style="padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.4rem;">
+              <li>El controlador de Odoo intercepta peticiones a <code>/headway</code>, <code>/map</code>, <code>/compliance</code> y <code>/api/v1/...</code>.</li>
+              <li>Reenvía internamente la petición vía HTTP al microservicio FastAPI (<code>http://gps_broker:8088</code>) a través de la red privada de Docker.</li>
+              <li>Transfiere transparentemente las cookies de sesión (<code>session_id</code>) garantizando <strong>Single Sign-On (SSO)</strong> y respetando los permisos del usuario activo.</li>
+              <li>Sirve la respuesta directamente bajo <strong>HTTPS en el puerto 443</strong> a través del mismo dominio <code>dashboardtransito.agsrl.com.py</code>.</li>
+            </ul>
+            <div class="tech-list">
+              <span class="tech-pill">Requests Proxy</span>
+              <span class="tech-pill">Session Forwarding</span>
+              <span class="tech-pill">Zero Port Exposure</span>
+              <span class="tech-pill">Pure HTTPS 443</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. TAB: MICROSERVICIO GPS BROKER -->
+    <div id="tab-broker" class="tab-content">
+      <div class="grid">
+        <div class="card">
+          <div class="card-header">
+            <div class="icon-box icon-sky">⚡</div>
+            <div>
+              <div class="card-title">FastAPI & Ingesta Asíncrona</div>
+              <div class="card-subtitle">Contenedor odoo_transporte_gps_broker</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <p>Construido sobre <strong>FastAPI y Uvicorn</strong>, diseñado para concurrencia masiva sin esperas bloqueantes:</p>
+            <ul style="padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.4rem;">
+              <li><strong>WebSockets en Vivo (<code>/ws/live</code>):</strong> Mantiene conexiones abiertas con los radares web enviando cambios de posición con 0ms de retardo, con fallback automático a HTTP polling cada 15 segundos si se interrumpe la conexión.</li>
+              <li><strong>Consumidor MQTT (<code>mqtt_consumer.py</code>):</strong> Hilo de ejecución persistente conectado a Mosquitto para recibir telemetría binaria de buses en ruta.</li>
+              <li><strong>Autenticación Unificada (<code>auth.py</code>):</strong> Consulta <code>/web/session/get_session_info</code> en Odoo para validar roles multi-tenant y aplicar filtros por empresa automáticamente.</li>
+            </ul>
+            <div class="tech-list">
+              <span class="tech-pill">FastAPI 0.109+</span>
+              <span class="tech-pill">Uvicorn (ASGI)</span>
+              <span class="tech-pill">WebSockets</span>
+              <span class="tech-pill">Asyncio / Pydantic v2</span>
+              <span class="tech-pill">Paho-MQTT</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="icon-box icon-sky">🧠</div>
+            <div>
+              <div class="card-title">Motores de Inteligencia Operativa</div>
+              <div class="card-subtitle">Algoritmos Matemáticos & Telemetría Predictiva</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <p>Módulos especializados que transforman coordenadas brutas en información de toma de decisiones:</p>
+            <ul style="padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.4rem;">
+              <li><strong>Detector de Pegonamiento (<code>headway_service.py</code>):</strong> Mide la distancia física y el tiempo entre coches consecutivos en el mismo ramal. Si la brecha cae por debajo de 800m, emite alertas sonoras y visuales para evitar la canibalización de pasajeros.</li>
+              <li><strong>ETA Predictivo por Parada (<code>eta_service.py</code>):</strong> Calcula el tiempo estimado de llegada de los próximos buses a cada parada física, con código QR escaneable por pasajeros.</li>
+              <li><strong>Capa Waze CCP:</strong> Integración en tiempo real de alertas de congestión, accidentes y obras de Waze for Cities sobre el mapa de la flota.</li>
+            </ul>
+            <div class="tech-list">
+              <span class="tech-pill">Headway Engine</span>
+              <span class="tech-pill">Bunching Alerts</span>
+              <span class="tech-pill">Predictive ETA</span>
+              <span class="tech-pill">Waze CCP Integration</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. TAB: FRONTEND -->
+    <div id="tab-frontend" class="tab-content">
+      <div class="grid">
+        <div class="card">
+          <div class="card-header">
+            <div class="icon-box icon-purple">🎨</div>
+            <div>
+              <div class="card-title">Odoo Web Client: OWL Framework</div>
+              <div class="card-subtitle">Odoo Web Library (Arquitectura Reactiva Moderna)</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <p>Odoo 18 utiliza <strong>OWL</strong>, un framework JavaScript moderno desarrollado por Odoo con conceptos similares a React y Vue:</p>
+            <ul style="padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.4rem;">
+              <li><strong>Componentes Reactivos:</strong> Vistas interactivas con estado interno reactivo (<code>useState</code>), Virtual DOM y hooks de ciclo de vida (<code>onWillStart</code>, <code>useEffect</code>).</li>
+              <li><strong>Mesa de Asignación de Turnos (<code>transit_roster_board.js</code>):</strong> Tablero interactivo para arrastrar choferes a turnos (T1/T2), resolver solapamientos, balancear horas semanales y exportar cuadrantes.</li>
+              <li><strong>Plantillas QWeb (XML):</strong> Declaración de interfaces enriquecidas compiladas en el navegador con soporte de directivas <code>t-if</code>, <code>t-foreach</code>, <code>t-on-click</code>.</li>
+            </ul>
+            <div class="tech-list">
+              <span class="tech-pill">OWL Framework</span>
+              <span class="tech-pill">Virtual DOM</span>
+              <span class="tech-pill">JavaScript ES2022</span>
+              <span class="tech-pill">SCSS / CSS3</span>
+              <span class="tech-pill">Bootstrap 5</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="icon-box icon-purple">🗺️</div>
+            <div>
+              <div class="card-title">Radares & Tableros en Tiempo Real</div>
+              <div class="card-subtitle">Vistas de Monitoreo Crítico (/map, /headway, /compliance)</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <p>Interfaces web ligeras optimizadas para monitoreo continuo en pantallas de control o dispositivos móviles:</p>
+            <ul style="padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.4rem;">
+              <li><strong>Cartografía Interactiva:</strong> Motor <strong>Leaflet.js</strong> con teselas oscuras (CartoDB Dark Matter) y renderizado de capas GeoJSON para trazas oficiales y geocercas circulares.</li>
+              <li><strong>Animación Fluida de Marcadores:</strong> Los buses se desplazan suavemente entre posiciones recibidas por WebSocket, rotando su icono según el rumbo (heading) de la brújula GPS.</li>
+              <li><strong>Alarma Sonora de Pegonamiento:</strong> Utiliza la <strong>Web Audio API</strong> nativa del navegador para generar alertas sonoras sin requerir archivos de audio externos.</li>
+            </ul>
+            <div class="tech-list">
+              <span class="tech-pill">Leaflet.js</span>
+              <span class="tech-pill">Vanilla JS ES6+</span>
+              <span class="tech-pill">Web Audio API</span>
+              <span class="tech-pill">GeoJSON</span>
+              <span class="tech-pill">CSS Grid & Flexbox</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. TAB: INFRAESTRUCTURA -->
+    <div id="tab-infra" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <div class="icon-box icon-amber">☁️</div>
+          <div>
+            <div class="card-title">Infraestructura de Servidores & Docker Compose</div>
+            <div class="card-subtitle">Topología de Contenedores en Producción (Hostinger VPS 187.77.247.23)</div>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Nombre del Contenedor</th>
+              <th>Imagen Base</th>
+              <th>Puertos Internos</th>
+              <th>Volúmenes Persistentes</th>
+              <th>Función en el Clúster</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>odoo_transporte_app</code></td>
+              <td><code>odoo:18.0</code></td>
+              <td>8069 (HTTP)</td>
+              <td><code>odoo-web-data</code>, <code>custom_addons</code></td>
+              <td>Aplicación ERP principal, ORM, controladores y proxy dinámico</td>
+            </tr>
+            <tr>
+              <td><code>odoo_transporte_db</code></td>
+              <td><code>postgis/postgis:15-3.4-alpine</code></td>
+              <td>5432 (Postgres)</td>
+              <td><code>odoo-db-data</code></td>
+              <td>Base de datos relacional y motor geoespacial PostGIS</td>
+            </tr>
+            <tr>
+              <td><code>odoo_transporte_redis</code></td>
+              <td><code>redis:7-alpine</code></td>
+              <td>6379 (Redis)</td>
+              <td><code>odoo-redis-data</code></td>
+              <td>Caché de telemetría de ultra-baja latencia y sesiones compartidas</td>
+            </tr>
+            <tr>
+              <td><code>odoo_transporte_gps_broker</code></td>
+              <td><code>python:3.11-slim (Dockerfile)</code></td>
+              <td>8088 (FastAPI)</td>
+              <td><code>./gps_broker</code>, <code>./scripts</code></td>
+              <td>Microservicio de ingesta GPS, WebSockets, Headway y ETAs</td>
+            </tr>
+            <tr>
+              <td><code>odoo_transporte_mosquitto</code></td>
+              <td><code>eclipse-mosquitto:2</code></td>
+              <td>1883 (TCP), 9001 (WS)</td>
+              <td><code>mosquitto-data</code></td>
+              <td>Broker MQTT para dispositivos telemáticos embebidos en buses</td>
+            </tr>
+            <tr>
+              <td><code>SIGEL-proxy</code></td>
+              <td><code>jc21/nginx-proxy-manager</code></td>
+              <td>80, 443, 81</td>
+              <td><code>npm-data</code></td>
+              <td>Reverse Proxy Nginx externo que canaliza el dominio oficial</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 7. TAB: MATRIZ DE LENGUAJES -->
+    <div id="tab-matrix" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <div class="icon-box icon-indigo">📊</div>
+          <div>
+            <div class="card-title">Matriz Completa de Lenguajes, Frameworks y Protocolos</div>
+            <div class="card-subtitle">Inventario tecnológico del repositorio <code>transporte_odoo</code></div>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Capa</th>
+              <th>Lenguaje Principal</th>
+              <th>Frameworks / Bibliotecas</th>
+              <th>Protocolos & Formatos</th>
+              <th>Ubicación en el Repositorio</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Backend ERP</strong></td>
+              <td>Python 3.10 / 3.11</td>
+              <td>Odoo 18.0 Framework, Werkzeug, Jinja2, ReportLab</td>
+              <td>HTTP REST, JSON-RPC 2.0</td>
+              <td><code>custom_addons/transit_operations/</code></td>
+            </tr>
+            <tr>
+              <td><strong>Microservicios</strong></td>
+              <td>Python 3.11</td>
+              <td>FastAPI, Uvicorn, Asyncio, Pydantic v2, Requests</td>
+              <td>WebSockets, HTTP REST, JSON</td>
+              <td><code>gps_broker/main.py</code>, <code>headway_service.py</code></td>
+            </tr>
+            <tr>
+              <td><strong>Ingesta IoT</strong></td>
+              <td>Python 3.11 / C (Mosquitto)</td>
+              <td>Paho-MQTT, Protobuf v3</td>
+              <td>MQTT v3.1.1/v5, Protobuf Binary</td>
+              <td><code>gps_broker/mqtt_consumer.py</code></td>
+            </tr>
+            <tr>
+              <td><strong>Base de Datos</strong></td>
+              <td>SQL & PL/pgSQL</td>
+              <td>PostgreSQL 15, PostGIS 3.4.2</td>
+              <td>SQL ANSI, GeoJSON, WKT (Well-Known Text)</td>
+              <td>Esquema <code>public</code> en <code>flota_db</code></td>
+            </tr>
+            <tr>
+              <td><strong>Caché</strong></td>
+              <td>C (Redis Core)</td>
+              <td>Redis 7</td>
+              <td>RESP (Redis Serialization Protocol)</td>
+              <td>Memoria RAM en <code>odoo_transporte_redis</code></td>
+            </tr>
+            <tr>
+              <td><strong>Frontend ERP</strong></td>
+              <td>JavaScript (ES2022)</td>
+              <td>OWL (Odoo Web Library), Bootstrap 5</td>
+              <td>JSON-RPC, QWeb XML</td>
+              <td><code>static/src/js/</code>, <code>static/src/xml/</code></td>
+            </tr>
+            <tr>
+              <td><strong>Dashboards Web</strong></td>
+              <td>Vanilla JS (ES6+)</td>
+              <td>Leaflet.js, Web Audio API, CSS3 Grid/Flexbox</td>
+              <td>WebSocket (WSS), Fetch API</td>
+              <td>Vistas HTML servidas por FastAPI/Odoo</td>
+            </tr>
+            <tr>
+              <td><strong>DevOps</strong></td>
+              <td>YAML & Bash</td>
+              <td>Docker, Docker Compose, Nginx</td>
+              <td>SSH, TLS/SSL (HTTPS 443)</td>
+              <td><code>docker-compose.yml</code>, scripts <code>*.sh</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+      Sistema de Gestión y Operaciones de Transporte Público • Arquitectura 100% Autónoma y Desconectada del VMT • Ministerio de Tecnologías y Comunicaciones (MITIC) / GVMT • Paraguay 2026
+    </footer>
+  </div>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      
+      const target = document.getElementById(tabId);
+      if (target) target.classList.add('active');
+      
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => 
+        btn.getAttribute('onclick').includes(tabId)
+      );
+      if (activeBtn) activeBtn.classList.add('active');
+    }
+  </script>
+</body>
+</html>

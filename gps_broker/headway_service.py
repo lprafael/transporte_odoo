@@ -1503,6 +1503,27 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                 </div>
             </div>
 
+            <!-- Selector de Reasignación Rápida de Ramal (1 Clic) -->
+            <div id="modal-reassign-container" style="margin-top: 14px; padding: 12px 14px; background: rgba(30, 41, 59, 0.75); border: 1px solid #334155; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 5px;">
+                        <span>🔄</span> Reasignar / Corregir Ramal Activo
+                    </span>
+                    <span id="modal-reassign-badge" style="font-size: 10px; color: #94a3b8; background: #0f172a; padding: 2px 8px; border-radius: 4px; border: 1px solid #334155;">
+                        Control Operativo
+                    </span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <select id="modal-reassign-select" style="flex: 1; background: #0f172a; color: #f8fafc; border: 1px solid #475569; padding: 7px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; outline: none; cursor: pointer;">
+                        <option value="">Cargando ramales de la empresa...</option>
+                    </select>
+                    <button id="modal-reassign-btn" onclick="executeRouteReassign()" style="background: #2563eb; color: white; border: none; padding: 7px 16px; border-radius: 6px; font-weight: 700; font-size: 12px; cursor: pointer; transition: all 0.2s; white-space: nowrap;">
+                        Aplicar Cambio
+                    </button>
+                </div>
+                <div id="modal-reassign-status" style="font-size: 11px; margin-top: 6px; font-weight: 600; display: none;"></div>
+            </div>
+
             <!-- Modal Footer con Acción Directa a GPS -->
             <div class="modal-footer">
                 <button class="btn-locate-map" onclick="locateSelectedBusOnMap()">
@@ -1939,7 +1960,75 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
 
             selectedBusId = busId;
             updateModalContent(b);
+
+            // Poblar selector de reasignación con los ramales de la empresa
+            const sel = document.getElementById('modal-reassign-select');
+            const statusEl = document.getElementById('modal-reassign-status');
+            if (statusEl) statusEl.style.display = 'none';
+
+            if (sel) {
+                if (latestDashboardData && Array.isArray(latestDashboardData.routes) && latestDashboardData.routes.length > 0) {
+                    const curRoute = String(b.route_id || '').toLowerCase();
+                    sel.innerHTML = latestDashboardData.routes.map(r => {
+                        const rCode = String(r.route_id || '').toLowerCase();
+                        const isSelected = rCode === curRoute;
+                        return `<option value="${rCode}" ${isSelected ? 'selected' : ''}>${r.route_id.toUpperCase()} - ${r.name} (${r.direction_label})</option>`;
+                    }).join('');
+                } else {
+                    sel.innerHTML = `<option value="${b.route_id || ''}">${(b.route_id || '').toUpperCase()} - Actual</option>`;
+                }
+            }
+
             document.getElementById('bus-modal').style.display = 'flex';
+        }
+
+        async function executeRouteReassign() {
+            if (!selectedBusId) return;
+            const b = busRegistry[selectedBusId];
+            if (!b) return;
+            const sel = document.getElementById('modal-reassign-select');
+            const newRoute = sel.value;
+            if (!newRoute) return;
+
+            const btn = document.getElementById('modal-reassign-btn');
+            const statusEl = document.getElementById('modal-reassign-status');
+            btn.disabled = true;
+            btn.textContent = 'Guardando...';
+            statusEl.style.display = 'block';
+            statusEl.style.color = '#38bdf8';
+            statusEl.textContent = 'Enviando reasignación a la central de tráfico...';
+
+            try {
+                const res = await fetch('/api/v1/headway/reassign_route', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bus_id: b.bus_id,
+                        agency_id: b.agency_id || '0008',
+                        new_route_code: newRoute
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    statusEl.style.color = '#4ade80';
+                    statusEl.textContent = `✓ ${data.message || 'Ramal reasignado correctamente'}`;
+                    b.route_id = newRoute;
+                    b.route_name = data.route_name || newRoute.toUpperCase();
+                    await fetchHeadwayData();
+                    setTimeout(() => {
+                        closeBusModal();
+                    }, 1200);
+                } else {
+                    statusEl.style.color = '#f87171';
+                    statusEl.textContent = `Error: ${data.detail || data.message || 'No se pudo reasignar'}`;
+                }
+            } catch (err) {
+                statusEl.style.color = '#f87171';
+                statusEl.textContent = `Error de red: ${err.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Aplicar Cambio';
+            }
         }
 
         function closeBusModal() {

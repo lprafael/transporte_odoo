@@ -449,13 +449,92 @@ def _get_thread_pg_conn():
         _pg_thread_local.conn = conn
     return conn
 
-def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id: str = "004B") -> Optional[Dict[str, Any]]:
-    """Calcula con PostGIS el porcentaje del recorrido completado y la distancia al trazado oficial."""
+def get_bus_active_dispatch(bus_id: str, agency_id: str = None) -> Optional[Dict[str, Any]]:
+    """Consulta si el vehículo tiene un despacho activo en Odoo hoy para fijar su ramal oficial."""
+    if not bus_id:
+        return None
+    clean_id = str(bus_id).strip()
+    candidates = [clean_id, clean_id.lstrip("0")]
+    try:
+        dec_num = str(int(clean_id, 16))
+        if dec_num not in candidates:
+            candidates.append(dec_num)
+    except Exception:
+        pass
+
+    cache_key = f"dispatch:route:{agency_id or 'all'}:{clean_id}"
+    if redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
+    try:
+        conn = _get_thread_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT 
+                d.id AS dispatch_id,
+                r.code AS route_code,
+                r.name AS route_name,
+                d.state,
+                r.agency_id
+            FROM transit_dispatch d
+            JOIN fleet_vehicle v ON d.vehicle_id = v.id
+            JOIN transit_route r ON d.route_id = r.id
+            WHERE (v.bus_internal_number = ANY(%s) OR v.license_plate = ANY(%s))
+              AND d.state IN ('draft', 'inspected', 'dispatched', 'in_transit')
+              AND d.date = CURRENT_DATE
+            ORDER BY d.actual_departure DESC NULLS LAST, d.scheduled_departure DESC
+            LIMIT 1;
+        """, (candidates, candidates))
+        row = cur.fetchone()
+        cur.close()
+        if row:
+            res = {
+                "dispatch_id": row[0],
+                "route_code": str(row[1]).lower(),
+                "route_name": row[2],
+                "state": row[3],
+                "agency_id": row[4],
+            }
+            if redis_client:
+                try:
+                    redis_client.setex(cache_key, 60, json.dumps(res))
+                except Exception:
+                    pass
+            return res
+    except Exception as e:
+        logger.debug(f"Aviso get_bus_active_dispatch: {e}")
+    return None
+
+def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id: str = "004B", bus_id: str = None) -> Optional[Dict[str, Any]]:
+    """Calcula con PostGIS el porcentaje del recorrido completado y la distancia al trazado oficial.
+    Respeta bloqueos manuales en Redis y despachos activos en Odoo antes de buscar shapes alternativos.
+    """
     try:
         conn = _get_thread_pg_conn()
         cur = conn.cursor()
         row = None
         clean_route = (route_code or "").strip().lower()
+
+        # 1. Comprobar bloqueo manual de ramal en Redis (fijado por operador)
+        if bus_id and redis_client:
+            try:
+                locked = redis_client.get(f"vehicle_route_lock:{agency_id}:{bus_id}") or redis_client.get(f"vehicle_route_lock:{bus_id}")
+                if locked:
+                    clean_route = (locked.decode("utf-8") if isinstance(locked, bytes) else str(locked)).strip().lower()
+            except Exception:
+                pass
+
+        # 2. Si no tiene ruta o es 0000/depot, consultar despacho activo en Odoo
+        if (not clean_route or clean_route in ("0000", "none", "depot", "taller")) and bus_id:
+            disp = get_bus_active_dispatch(bus_id, agency_id=agency_id)
+            if disp and disp.get("route_code"):
+                clean_route = disp["route_code"]
+
         if clean_route and clean_route not in ("0000", "none", "depot", "taller"):
             cur.execute(
                 "SELECT progress_percent, distance_traveled_km, total_km, deviation_meters FROM get_bus_route_progress(%s, %s, %s, %s)",
@@ -463,9 +542,16 @@ def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id:
             )
             row = cur.fetchone()
 
-        # Si el bus reporta ruta 0000 o está sobre otro ramal de la misma empresa (>400m del código reportado),
-        # buscar el shape activo más cercano de la misma concesionaria
-        if not row or row[0] is None or (row[3] is not None and float(row[3]) > MAX_DEVIATION_METERS):
+        # 3. Comprobar si la ruta está bloqueada manualmente
+        is_locked = False
+        if bus_id and redis_client:
+            try:
+                is_locked = bool(redis_client.exists(f"vehicle_route_lock:{agency_id}:{bus_id}") or redis_client.exists(f"vehicle_route_lock:{bus_id}"))
+            except Exception:
+                pass
+
+        # Si el bus reporta ruta 0000 o está sobre otro ramal (>400m del código reportado) y NO está bloqueado manualmente:
+        if not is_locked and (not row or row[0] is None or (row[3] is not None and float(row[3]) > MAX_DEVIATION_METERS)):
             cur.execute(
                 """
                 SELECT
@@ -860,12 +946,11 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
             except Exception:
                 pass
 
-            progress = calculate_shape_progress(lat, lon, route_code, r["agency_id"] or "004B")
+            agency_val = r["agency_id"] or "004B"
+            progress = calculate_shape_progress(lat, lon, route_code, agency_val, bus_id=bus_key)
             if progress and progress.get("matched_route_code"):
                 matched_c = progress["matched_route_code"]
-                if route_code in ("0000", "", "none", "depot", "taller") and progress.get("deviation_meters", 9999) <= MAX_DEVIATION_METERS:
-                    route_code = matched_c
-                elif progress.get("deviation_meters", 9999) <= MAX_DEVIATION_METERS:
+                if route_code in ("0000", "", "none", "depot", "taller"):
                     route_code = matched_c
             pct = progress["progress_percent"] if progress else 0.0
             dist_km = progress["distance_traveled_km"] if progress else 0.0
@@ -1092,8 +1177,11 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
         insert_telemetry_to_pg(ping)
 
     # 4. Cálculo PostGIS de Progreso en Ruta y Desvío Exacto
+    bus_key = str(v_state.get("bus_id") or ping.bus_internal_code or "").strip()
+    agency_key = str(v_state.get("agency_id") or ping.agency_id or "004B").strip()
+
     progress = calculate_shape_progress(
-        ping.latitude, ping.longitude, v_state.get("route_id", "020f"), v_state.get("agency_id", "004B")
+        ping.latitude, ping.longitude, v_state.get("route_id", "020f"), agency_key, bus_id=bus_key
     )
     
     old_state = v_state.get("current_state", "IN_TRANSIT")
@@ -1105,7 +1193,7 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
         total_km = progress["total_km"]
         dev_m = progress["deviation_meters"]
         matched_route = progress.get("matched_route_code")
-        if matched_route and (route_code in ("0000", "", "none", "depot", "taller") or dev_m <= MAX_DEVIATION_METERS):
+        if matched_route and route_code in ("0000", "", "none", "depot", "taller"):
             v_state["route_id"] = matched_route
             route_code = matched_route.lower()
 
@@ -1712,6 +1800,127 @@ async def api_headway_data(request: Request):
         hydrate_active_fleet_from_postgis(force=True)
         hw_data = get_headway_data(redis_client=redis_client, active_vehicles_memory=active_vehicles_memory, agency_id=agency_id)
     return hw_data
+
+class RouteReassignPayload(BaseModel):
+    bus_id: str
+    new_route_code: str
+    agency_id: Optional[str] = "0008"
+
+@app.post("/api/v1/headway/reassign_route")
+async def api_headway_reassign_route(payload: RouteReassignPayload, request: Request):
+    """Permite al operador reasignar de inmediato un bus al ramal correcto desde el tablero.
+    Fija el bloqueo en Redis y actualiza el despacho en Odoo (transit_dispatch).
+    """
+    bus_id = str(payload.bus_id).strip()
+    agency_id = str(payload.agency_id or "0008").strip()
+    new_route_code = str(payload.new_route_code).strip().lower()
+
+    if not bus_id or not new_route_code:
+        raise HTTPException(status_code=400, detail="bus_id y new_route_code son requeridos")
+
+    # 1. Obtener datos de la nueva ruta
+    route_name = new_route_code.upper()
+    try:
+        conn = _get_thread_pg_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT id, code, name FROM transit_route WHERE LOWER(code) = %s LIMIT 1", (new_route_code,))
+        r_db = cur.fetchone()
+        cur.close()
+        if r_db and r_db[2]:
+            route_name = r_db[2]
+    except Exception as e:
+        logger.debug(f"Aviso consultando ruta: {e}")
+
+    # 2. Bloquear en Redis durante 4 horas (14400s) para evitar que vuelva a cambiar
+    if redis_client:
+        try:
+            redis_client.setex(f"vehicle_route_lock:{agency_id}:{bus_id}", 14400, new_route_code)
+            redis_client.setex(f"vehicle_route_lock:{bus_id}", 14400, new_route_code)
+        except Exception as e:
+            logger.debug(f"Aviso bloqueo Redis: {e}")
+
+    # 3. Actualizar estado del bus en Redis / memoria inmediatamente
+    v_state = get_vehicle_state(bus_id, agency_id=agency_id)
+    if v_state:
+        v_state["route_id"] = new_route_code
+        v_state["route_locked"] = True
+        lat = v_state.get("latitude")
+        lon = v_state.get("longitude")
+        if lat and lon:
+            prog = calculate_shape_progress(lat, lon, new_route_code, agency_id=agency_id, bus_id=bus_id)
+            if prog:
+                v_state["progress_percent"] = prog["progress_percent"]
+                v_state["distance_traveled_km"] = prog["distance_traveled_km"]
+                v_state["route_total_km"] = prog["total_km"]
+                v_state["deviation_meters"] = prog["deviation_meters"]
+        save_vehicle_state(bus_id, v_state, agency_id=agency_id)
+
+    # 4. Actualizar despacho activo en Odoo (transit_dispatch)
+    candidates = [bus_id, bus_id.lstrip("0")]
+    try:
+        dec_num = str(int(bus_id, 16))
+        if dec_num not in candidates:
+            candidates.append(dec_num)
+    except Exception:
+        pass
+
+    try:
+        conn = _get_thread_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE transit_dispatch
+            SET route_id = (SELECT id FROM transit_route WHERE LOWER(code) = %s LIMIT 1),
+                write_date = NOW()
+            WHERE id = (
+                SELECT d.id
+                FROM transit_dispatch d
+                JOIN fleet_vehicle v ON d.vehicle_id = v.id
+                WHERE (v.bus_internal_number = ANY(%s) OR v.license_plate = ANY(%s))
+                  AND d.state IN ('draft', 'inspected', 'dispatched', 'in_transit')
+                  AND d.date = CURRENT_DATE
+                ORDER BY d.actual_departure DESC NULLS LAST, d.scheduled_departure DESC
+                LIMIT 1
+            );
+        """, (new_route_code, candidates, candidates))
+        cur.close()
+    except Exception as e:
+        logger.debug(f"Aviso actualizando transit_dispatch: {e}")
+
+    return {
+        "success": True,
+        "message": f"Coche #{bus_id} reasignado al ramal {new_route_code.upper()} ({route_name})",
+        "bus_id": bus_id,
+        "route_code": new_route_code,
+        "route_name": route_name
+    }
+
+@app.get("/api/v1/headway/routes_for_agency")
+async def api_headway_routes_for_agency(agency_id: Optional[str] = "0008"):
+    """Retorna los ramales disponibles para el selector de reasignación manual."""
+    try:
+        conn = _get_thread_pg_conn()
+        cur = conn.cursor()
+        if agency_id:
+            cur.execute("""
+                SELECT code, name, direction, COALESCE(distance_km, 0)
+                FROM transit_route
+                WHERE agency_id = %s AND active = TRUE
+                ORDER BY code ASC;
+            """, (agency_id,))
+        else:
+            cur.execute("""
+                SELECT code, name, direction, COALESCE(distance_km, 0)
+                FROM transit_route
+                WHERE active = TRUE
+                ORDER BY code ASC;
+            """)
+        rows = cur.fetchall()
+        cur.close()
+        routes = [{"code": r[0], "name": r[1], "direction": r[2], "distance_km": float(r[3])} for r in rows]
+        return {"agency_id": agency_id, "routes": routes}
+    except Exception as e:
+        logger.error(f"Error cargando rutas por agencia: {e}")
+        return {"agency_id": agency_id, "routes": []}
 
 @app.get("/headway", response_class=HTMLResponse)
 async def headway_dashboard_view(request: Request):
