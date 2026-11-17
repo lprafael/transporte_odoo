@@ -147,6 +147,53 @@ def get_valid_agencies() -> Set[str]:
             _cached_valid_agencies = {"004B"}
     return _cached_valid_agencies
 
+# Pares de ramales opuestos (Ida <-> Vuelta) para detección de IDRuta invertido
+OPPOSITE_ROUTE_PAIRS: Dict[str, str] = {
+    # Automotores Guaraní - Línea 15
+    "004a": "004b", "004b": "004a",
+    "004c": "004d", "004d": "004c",
+    "004e": "004f", "004f": "004e",
+    "0050": "0051", "0051": "0050",
+    "01a0": "01a1", "01a1": "01a0",
+    "01ef": "01f0", "01f0": "01ef",
+    # Automotores Guaraní - Línea 47
+    "0052": "0053", "0053": "0052",
+    "0054": "0055", "0055": "0054",
+    "0056": "0057", "0057": "0056",
+    "0058": "0059", "0059": "0058",
+    "0185": "0186", "0186": "0185",
+    "01a2": "01a3", "01a3": "01a2",
+    # Consorcio Arapotí - Línea 20
+    "020c": "020d", "020d": "020c",
+    "020e": "020f", "020f": "020e",
+    "0210": "0211", "0211": "0210",
+    # San José Obrero - Línea 187
+    "0138": "0139", "0139": "0138",
+    "013a": "013b", "013b": "013a",
+}
+
+def get_opposite_route_code(route_code: str, agency_id: Optional[str] = None) -> Optional[str]:
+    if not route_code:
+        return None
+    clean = route_code.strip().lower()
+    return OPPOSITE_ROUTE_PAIRS.get(clean)
+
+def get_route_line_name(route_code: str) -> str:
+    clean = (route_code or "").strip().lower()
+    for r in routes_cache:
+        if str(r.get("code", "")).lower() == clean and r.get("line_name"):
+            return r["line_name"]
+    # Fallback según códigos conocidos
+    if clean in ('0052', '0053', '0054', '0055', '0056', '0057', '0058', '0059', '0185', '0186', '01a2', '01a3'):
+        return "Línea 47"
+    if clean in ('004a', '004b', '004c', '004d', '004e', '004f', '0050', '0051', '01a0', '01a1', '01ef', '01f0'):
+        return "Línea 15"
+    if clean.startswith("020") or clean.startswith("021") or clean == "0000":
+        return "Línea 20"
+    if clean in ('0138', '0139', '013a', '013b'):
+        return "Línea 187"
+    return "Línea General"
+
 def get_vehicle_state(bus_id: str, agency_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     keys_to_try = []
     if agency_id:
@@ -259,6 +306,12 @@ def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
         "current_geofence_name": geofence_name,
         "speed_alert": bool(v.get("speed_alert", False)),
         "deviation_alert": bool(v.get("deviation_alert", False)),
+        "wrong_direction_alert": bool(v.get("wrong_direction_alert", False)),
+        "wrong_direction_reason": v.get("wrong_direction_reason", ""),
+        "suggested_opposite_route": v.get("suggested_opposite_route") or (get_opposite_route_code(v.get("route_id", "")) if v.get("wrong_direction_alert") else ""),
+        "heading_diff_deg": v.get("heading_diff_deg"),
+        "route_bearing_deg": v.get("route_bearing_deg"),
+        "line_name": v.get("line_name") or get_route_line_name(v.get("route_id", "")),
         "progress_percent": v.get("progress_percent", 0.0),
         "distance_traveled_km": v.get("distance_traveled_km", 0.0),
         "route_total_km": v.get("route_total_km", 0.0),
@@ -537,7 +590,7 @@ def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id:
 
         if clean_route and clean_route not in ("0000", "none", "depot", "taller"):
             cur.execute(
-                "SELECT progress_percent, distance_traveled_km, total_km, deviation_meters FROM get_bus_route_progress(%s, %s, %s, %s)",
+                "SELECT progress_percent, distance_traveled_km, total_km, deviation_meters, route_bearing_deg FROM get_bus_route_progress(%s, %s, %s, %s)",
                 (lat, lon, clean_route, agency_id)
             )
             row = cur.fetchone()
@@ -559,17 +612,28 @@ def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id:
                     ROUND((ST_LineLocatePoint(s.geom, pt.v_pt) * 100.0)::NUMERIC, 1) AS progress_percent,
                     ROUND((ST_LineLocatePoint(s.geom, pt.v_pt) * COALESCE(s.total_km, ST_Length(s.geom::geography)/1000.0))::NUMERIC, 2) AS distance_traveled_km,
                     ROUND(COALESCE(s.total_km, ST_Length(s.geom::geography)/1000.0)::NUMERIC, 2) AS total_km,
-                    ROUND(ST_Distance(pt.v_pt::geography, s.geom::geography)::NUMERIC, 0) AS deviation_meters
+                    ROUND(ST_Distance(pt.v_pt::geography, s.geom::geography)::NUMERIC, 0) AS deviation_meters,
+                    ROUND(CASE WHEN ST_LineLocatePoint(s.geom, pt.v_pt) < 0.999 THEN
+                        DEGREES(ST_Azimuth(
+                            ST_LineInterpolatePoint(s.geom, ST_LineLocatePoint(s.geom, pt.v_pt)),
+                            ST_LineInterpolatePoint(s.geom, LEAST(1.0, ST_LineLocatePoint(s.geom, pt.v_pt) + 0.005))
+                        ))
+                    ELSE
+                        DEGREES(ST_Azimuth(
+                            ST_LineInterpolatePoint(s.geom, GREATEST(0.0, ST_LineLocatePoint(s.geom, pt.v_pt) - 0.005)),
+                            ST_LineInterpolatePoint(s.geom, ST_LineLocatePoint(s.geom, pt.v_pt))
+                        ))
+                    END::NUMERIC, 1) AS route_bearing_deg
                 FROM transit_route r
                 JOIN transit_route_shape s ON s.route_id = r.id
                 CROSS JOIN (SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS v_pt) pt
-                WHERE r.agency_id = %s
+                WHERE (r.agency_id = %s OR r.concessionaire_id IN (SELECT id FROM transit_concessionaire WHERE agency_id = %s))
                   AND s.valid_from <= CURRENT_DATE
                   AND (s.valid_until IS NULL OR s.valid_until > CURRENT_DATE)
                 ORDER BY s.geom <-> pt.v_pt
                 LIMIT 1;
                 """,
-                (lon, lat, agency_id)
+                (lon, lat, agency_id, agency_id)
             )
             best = cur.fetchone()
             if best and best[0] is not None:
@@ -583,6 +647,7 @@ def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id:
                         "distance_traveled_km": float(best[2]) if best[2] is not None else 0.0,
                         "total_km": float(best[3]) if best[3] is not None else 0.0,
                         "deviation_meters": best_dev,
+                        "route_bearing_deg": float(best[5]) if len(best) > 5 and best[5] is not None else None,
                     }
 
         cur.close()
@@ -593,6 +658,7 @@ def calculate_shape_progress(lat: float, lon: float, route_code: str, agency_id:
                 "distance_traveled_km": float(row[1]) if row[1] is not None else 0.0,
                 "total_km": float(row[2]) if row[2] is not None else 0.0,
                 "deviation_meters": float(row[3]) if row[3] is not None else 0.0,
+                "route_bearing_deg": float(row[4]) if len(row) > 4 and row[4] is not None else None,
             }
     except Exception as e:
         logger.debug(f"Aviso PostGIS progress: {e}")
@@ -668,6 +734,7 @@ def get_active_shapes_geojson(agency_id: Optional[str] = None) -> Dict[str, Any]
                     r.name AS name,
                     r.agency_id,
                     r.direction,
+                    COALESCE(r.line_name, 'Línea General') AS line_name,
                     s.version,
                     s.valid_from::TEXT,
                     s.valid_until::TEXT,
@@ -808,7 +875,9 @@ def sync_geofences_from_postgis():
                 COALESCE(r.origin_latitude, ST_Y(ST_StartPoint(sh.geom))) as orig_lat,
                 COALESCE(r.origin_longitude, ST_X(ST_StartPoint(sh.geom))) as orig_lon,
                 COALESCE(r.destination_latitude, ST_Y(ST_EndPoint(sh.geom))) as dest_lat,
-                COALESCE(r.destination_longitude, ST_X(ST_EndPoint(sh.geom))) as dest_lon
+                COALESCE(r.destination_longitude, ST_X(ST_EndPoint(sh.geom))) as dest_lon,
+                r.direction,
+                COALESCE(r.line_name, 'Línea General') as line_name
             FROM transit_route r
             JOIN transit_route_shape sh ON sh.route_id = r.id AND (sh.valid_until IS NULL OR sh.valid_until > CURRENT_DATE)
             WHERE r.active = TRUE OR r.active IS NULL
@@ -820,7 +889,7 @@ def sync_geofences_from_postgis():
         conn.close()
         if rows:
             loaded_routes = []
-            for r_id, code, name, orig_name, dest_name, o_lat, o_lon, d_lat, d_lon in rows:
+            for r_id, code, name, orig_name, dest_name, o_lat, o_lon, d_lat, d_lon, direction, l_name in rows:
                 orig = {
                     "name": orig_name or "Cabecera Origen",
                     "latitude": float(o_lat) if o_lat is not None else None,
@@ -837,6 +906,8 @@ def sync_geofences_from_postgis():
                     "id": r_id,
                     "code": code,
                     "name": name,
+                    "direction": direction,
+                    "line_name": l_name,
                     "origin": orig,
                     "destination": dest,
                     "checkpoints": [orig, dest]
@@ -1248,6 +1319,60 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
 
     v_state["state"] = v_state["current_state"]
 
+    # 4.5 Detección de Contrasentido / IDRuta Invertido (Ticket REQ-2026-0002)
+    v_state["line_name"] = get_route_line_name(route_code)
+    route_bearing = progress.get("route_bearing_deg") if progress else None
+    prev_dist_km = v_state.get("prev_distance_traveled_km") or 0.0
+    v_state["prev_distance_traveled_km"] = v_state.get("distance_traveled_km", 0.0)
+
+    is_wrong_direction = False
+    wrong_dir_reason = ""
+    heading_diff = None
+
+    if route_code not in ("0000", "", "none", "depot", "taller") and route_bearing is not None and speed >= 7.0 and dev_m <= 400.0:
+        bus_h = heading
+        # Si el GPS no envía rumbo exacto o envía 0, estimar a partir del vector previo
+        if (bus_h is None or bus_h == 0.0) and prev_lat and prev_lon:
+            d_moved = haversine_meters(prev_lat, prev_lon, ping.latitude, ping.longitude)
+            if d_moved >= 10.0:
+                import math
+                y_b = math.sin(math.radians(ping.longitude - prev_lon)) * math.cos(math.radians(ping.latitude))
+                x_b = math.cos(math.radians(prev_lat)) * math.sin(math.radians(ping.latitude)) - math.sin(math.radians(prev_lat)) * math.cos(math.radians(ping.latitude)) * math.cos(math.radians(ping.longitude - prev_lon))
+                bus_h = (math.degrees(math.atan2(y_b, x_b)) + 360.0) % 360.0
+
+        if bus_h is not None and bus_h > 0.0:
+            diff = abs(bus_h - route_bearing) % 360.0
+            if diff > 180.0:
+                diff = 360.0 - diff
+            heading_diff = round(diff, 1)
+
+            # Si el ángulo es >= 105°, el vehículo se desplaza en sentido opuesto al trazado oficial
+            if diff >= 105.0:
+                is_wrong_direction = True
+                wrong_dir_reason = f"Desplazamiento en contrasentido (Rumbo bus {round(bus_h)}° vs Ruta {round(route_bearing)}°, desfase {heading_diff}°)"
+
+        # Comprobación de retroceso continuo de kilometraje en shape a velocidad de circulación
+        if prev_dist_km > 0.5 and v_state.get("distance_traveled_km", 0.0) > 0:
+            delta_dist = v_state["distance_traveled_km"] - prev_dist_km
+            if delta_dist < -0.15 and speed >= 10.0:
+                is_wrong_direction = True
+                wrong_dir_reason = f"Retroceso continuo de km sobre el trazado ({round(delta_dist, 2)} km a {round(speed)} km/h)"
+
+    if is_wrong_direction:
+        v_state["wrong_direction_consecutive"] = v_state.get("wrong_direction_consecutive", 0) + 1
+        if v_state["wrong_direction_consecutive"] >= 2:
+            v_state["wrong_direction_alert"] = True
+            v_state["wrong_direction_reason"] = wrong_dir_reason
+            v_state["heading_diff_deg"] = heading_diff
+            v_state["route_bearing_deg"] = round(route_bearing, 1) if route_bearing is not None else None
+            v_state["suggested_opposite_route"] = get_opposite_route_code(route_code)
+    else:
+        if (heading_diff is not None and heading_diff < 80.0) or (speed < 5.0 and v_state.get("current_state") in ("AT_ORIGIN", "AT_DESTINATION", "DEPOT")):
+            v_state["wrong_direction_consecutive"] = 0
+            v_state["wrong_direction_alert"] = False
+            v_state["wrong_direction_reason"] = ""
+            v_state["suggested_opposite_route"] = None
+
     # 5. Detección de Eventos Operativos para Odoo (Res. GVMT 065/2024 & Monitoreo VMT)
     new_state = v_state["current_state"]
     if old_state != new_state:
@@ -1306,6 +1431,11 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
             v_state["status_display"] = "En Circulación" if v_state["current_state"] == "IN_TRANSIT" else v_state["current_state"]
     else:
         v_state["status_display"] = "En Circulación" if v_state["current_state"] == "IN_TRANSIT" else v_state["current_state"]
+
+    if v_state.get("wrong_direction_alert"):
+        base_status = v_state.get("status_display") or "En Circulación"
+        if not base_status.startswith("⚠️"):
+            v_state["status_display"] = f"⚠️ Contrasentido ({base_status})"
 
     # 6. Guardar Estado en Redis (con aislamiento por agencia)
     save_vehicle_state(bus_key, v_state, agency_id=agency)
@@ -1572,7 +1702,8 @@ async def api_get_routes(request: Request, agency_id: Optional[str] = Query(None
         cur = conn.cursor()
         query = """
             SELECT r.id, r.code, r.name, r.agency_id, r.direction, r.origin, r.destination,
-                   s.version AS active_version, s.valid_from, s.valid_until, s.total_km
+                   s.version AS active_version, s.valid_from, s.valid_until, s.total_km,
+                   COALESCE(r.line_name, 'Línea General') AS line_name
             FROM transit_route r
             LEFT JOIN transit_route_shape s ON s.route_id = r.id 
                  AND s.valid_from <= CURRENT_DATE 
@@ -1593,7 +1724,8 @@ async def api_get_routes(request: Request, agency_id: Optional[str] = Query(None
                 "origin": r[5], "destination": r[6], "active_version": r[7],
                 "valid_from": str(r[8]) if r[8] else None,
                 "valid_until": str(r[9]) if r[9] else "Actualidad",
-                "total_km": float(r[10]) if r[10] else None
+                "total_km": float(r[10]) if r[10] else None,
+                "line_name": r[11] or get_route_line_name(r[1])
             }
             for r in rows
         ]
@@ -1930,21 +2062,21 @@ async def api_headway_routes_for_agency(agency_id: Optional[str] = "0008"):
         cur = conn.cursor()
         if agency_id:
             cur.execute("""
-                SELECT code, name, direction, COALESCE(distance_km, 0)
+                SELECT code, name, direction, COALESCE(distance_km, 0), COALESCE(line_name, 'Línea General')
                 FROM transit_route
                 WHERE agency_id = %s AND active = TRUE
-                ORDER BY code ASC;
+                ORDER BY line_name ASC, code ASC;
             """, (agency_id,))
         else:
             cur.execute("""
-                SELECT code, name, direction, COALESCE(distance_km, 0)
+                SELECT code, name, direction, COALESCE(distance_km, 0), COALESCE(line_name, 'Línea General')
                 FROM transit_route
                 WHERE active = TRUE
-                ORDER BY code ASC;
+                ORDER BY line_name ASC, code ASC;
             """)
         rows = cur.fetchall()
         cur.close()
-        routes = [{"code": r[0], "name": r[1], "direction": r[2], "distance_km": float(r[3])} for r in rows]
+        routes = [{"code": r[0], "name": r[1], "direction": r[2], "distance_km": float(r[3]), "line_name": r[4] or get_route_line_name(r[0])} for r in rows]
         return {"agency_id": agency_id, "routes": routes}
     except Exception as e:
         logger.error(f"Error cargando rutas por agencia: {e}")
@@ -2421,6 +2553,30 @@ async def live_map_view(request: Request):
             margin-top: 2px;
             box-shadow: 0 1px 4px rgba(0,0,0,0.5);
         }
+        .bus-speed-badge.wrong-dir {
+            background: #d97706;
+            color: #ffffff;
+            border-color: #fbbf24;
+            animation: bounce-alert 0.8s infinite alternate;
+        }
+        .bus-marker-wrap.wrong-dir .bus-arrow-circle {
+            background: #d97706 !important;
+            box-shadow: 0 0 15px #f59e0b !important;
+            border-color: #fef08a !important;
+        }
+        .bus-card.card-wrong-dir {
+            border-left: 4px solid #f59e0b !important;
+            background: rgba(40, 25, 10, 0.7);
+        }
+        .bus-line-badge {
+            background: #1e3a8a;
+            color: #93c5fd;
+            border: 1px solid #3b82f6;
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-weight: 700;
+        }
     </style>
 </head>
 <body>
@@ -2442,6 +2598,9 @@ async def live_map_view(request: Request):
                 <div class="metric-card">En Ruta: <strong id="m-transit" style="color: #10b981;">0</strong></div>
                 <div class="metric-card">Cabeceras: <strong id="m-terminals" style="color: #f59e0b;">0</strong></div>
                 <div class="metric-card">Falla GPS: <strong id="m-faults" style="color: #ef4444;">0</strong></div>
+                <div class="metric-card" id="m-card-wrong-dir" style="background: rgba(245, 158, 11, 0.2); border-color: #f59e0b; display: none;">
+                    <span>⚠️ Contrasentido: </span><strong id="m-wrong-dir" style="color: #fbbf24;">0</strong>
+                </div>
                 <div class="metric-card" style="background: rgba(2, 132, 199, 0.15); border-color: rgba(56, 189, 248, 0.4);">
                     <span>🚦 Waze: </span><strong id="m-waze" style="color: #38bdf8;">--</strong>
                 </div>
@@ -2527,8 +2686,9 @@ async def live_map_view(request: Request):
                 </div>
 
                 <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <span style="font-size: 11px; color: #cbd5e1;">Buses Visibles: <strong id="lbl-visible-count" style="color: #38bdf8;">0</strong> / <span id="lbl-total-count">0</span></span>
-                    <div style="display: flex; gap: 6px;">
+                    <span style="font-size: 11px; color: #cbd5e1;">Buses: <strong id="lbl-visible-count" style="color: #38bdf8;">0</strong> / <span id="lbl-total-count">0</span></span>
+                    <div style="display: flex; gap: 4px;">
+                        <button type="button" class="btn-quick-filter" id="btn-quick-wrong-dir" style="background: #d97706; display: none;" onclick="filterOnlyWrongDir()" title="Filtrar buses con IDRuta en contrasentido">⚠️ Contrasentido (<span id="lbl-wrong-dir-count">0</span>)</button>
                         <button type="button" class="btn-quick-filter" onclick="setAllBusesVisibility(true)">Todos</button>
                         <button type="button" class="btn-quick-filter" style="background: #334155;" onclick="setAllBusesVisibility(false)">Ninguno</button>
                     </div>
@@ -2627,24 +2787,73 @@ async def live_map_view(request: Request):
             return `hsl(${h}, 85%, 55%)`;
         }
 
+        function filterOnlyWrongDir() {
+            const sel = document.getElementById('sel-route-filter');
+            if (sel) {
+                if (sel.value === 'WRONG_DIR') {
+                    sel.value = 'ALL';
+                } else {
+                    let opt = sel.querySelector('option[value="WRONG_DIR"]');
+                    if (!opt) {
+                        opt = document.createElement('option');
+                        opt.value = 'WRONG_DIR';
+                        opt.textContent = '⚠️ Solo Buses en Contrasentido';
+                        sel.insertBefore(opt, sel.children[1]);
+                    }
+                    sel.value = 'WRONG_DIR';
+                }
+                applyRouteAndVisibilityFilters();
+            }
+        }
+
         function populateRouteDropdown(features) {
             const sel = document.getElementById('sel-route-filter');
             if (!sel || !features) return;
             const currentVal = sel.value;
             sel.innerHTML = '<option value="ALL">Todos los Ramales</option>';
+            
+            // Agrupar features por línea comercial (line_name)
+            const byLine = {};
             const seen = new Set();
             features.forEach(f => {
                 const code = f.properties.route_code;
                 const name = f.properties.route_name || code;
+                const lineName = f.properties.line_name || 'Línea Regular';
                 if (code && !seen.has(code.toLowerCase())) {
                     seen.add(code.toLowerCase());
-                    const opt = document.createElement('option');
-                    opt.value = code.toUpperCase();
-                    opt.textContent = `${code.toUpperCase()} (${name})`;
-                    sel.appendChild(opt);
+                    if (!byLine[lineName]) byLine[lineName] = [];
+                    byLine[lineName].push({ code: code.toUpperCase(), name: name });
                 }
             });
-            if (currentVal && seen.has(currentVal.toLowerCase())) {
+
+            // Si hay más de una línea comercial, agregar opción para filtrar toda la línea
+            const lineNames = Object.keys(byLine);
+            if (lineNames.length > 1) {
+                const groupFilter = document.createElement('optgroup');
+                groupFilter.label = '⚡ Filtrar Línea Completa';
+                lineNames.forEach(ln => {
+                    const opt = document.createElement('option');
+                    opt.value = 'LINE:' + ln;
+                    opt.textContent = `🚍 Toda la ${ln} (${byLine[ln].length} ramales)`;
+                    groupFilter.appendChild(opt);
+                });
+                sel.appendChild(groupFilter);
+            }
+
+            // Ramales organizados por grupos de línea
+            lineNames.forEach(ln => {
+                const optGroup = document.createElement('optgroup');
+                optGroup.label = `🚍 ${ln}`;
+                byLine[ln].forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item.code;
+                    opt.textContent = `${item.code} - ${item.name}`;
+                    optGroup.appendChild(opt);
+                });
+                sel.appendChild(optGroup);
+            });
+
+            if (currentVal) {
                 sel.value = currentVal;
             }
         }
@@ -2815,25 +3024,26 @@ async def live_map_view(request: Request):
             const isFault = v._isFault;
             const isStopped = speed < 1.0;
             const isOverSpeed = speed > 70.0;
+            const isWrongDir = !!v.wrong_direction_alert;
             const headingDeg = Math.round(heading || 0);
 
             const iconHtml = `
-                <div class="bus-marker-wrap">
-                    <div class="bus-speed-badge ${isStopped ? 'stopped' : (isOverSpeed ? 'overspeed' : '')}">
-                        ${isFault ? 'SIN SEÑAL' : Math.round(speed) + ' km/h'}
+                <div class="bus-marker-wrap ${isWrongDir ? 'wrong-dir' : ''}">
+                    <div class="bus-speed-badge ${isWrongDir ? 'wrong-dir' : (isStopped ? 'stopped' : (isOverSpeed ? 'overspeed' : ''))}">
+                        ${isWrongDir ? '⚠️ CONTRASENTIDO' : (isFault ? 'SIN SEÑAL' : Math.round(speed) + ' km/h')}
                     </div>
-                    <div class="bus-arrow-circle" style="background: ${markerColor}; box-shadow: 0 0 10px ${markerColor};">
+                    <div class="bus-arrow-circle" style="background: ${isWrongDir ? '#d97706' : markerColor}; box-shadow: 0 0 10px ${isWrongDir ? '#f59e0b' : markerColor};">
                         ${isFault ? '<span style="font-size:14px;">📡</span>' : `
                         <svg viewBox="0 0 24 24" width="18" height="18" style="transform: rotate(${headingDeg}deg); transform-origin: 50% 50%; display:block;">
                             <path fill="#ffffff" d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>
                         </svg>
                         `}
                     </div>
-                    <div class="bus-number-badge">#${v.bus_id}</div>
+                    <div class="bus-number-badge">${isWrongDir ? '⚠️ #' : '#'}${v.bus_id}</div>
                 </div>
             `;
             return L.divIcon({
-                className: 'custom-bus-icon',
+                className: 'custom-bus-icon' + (isWrongDir ? ' wrong-dir-marker' : ''),
                 html: iconHtml,
                 iconSize: [46, 58],
                 iconAnchor: [23, 29]
@@ -2904,8 +3114,16 @@ async def live_map_view(request: Request):
             if (v._isFault && !showFaults) return false;
 
             if (selectedRoute !== 'ALL') {
-                const busRoute = (v.route_id || '').toUpperCase();
-                if (!busRoute.includes(selectedRoute.toUpperCase())) return false;
+                if (selectedRoute.startsWith('LINE:')) {
+                    const targetLine = selectedRoute.substring(5).toUpperCase();
+                    const busLine = (v.line_name || '').toUpperCase();
+                    if (!busLine.includes(targetLine)) return false;
+                } else if (selectedRoute === 'WRONG_DIR') {
+                    if (!v.wrong_direction_alert) return false;
+                } else {
+                    const busRoute = (v.route_id || '').toUpperCase();
+                    if (!busRoute.includes(selectedRoute.toUpperCase())) return false;
+                }
             }
 
             const busKey = getBusKey(v);
@@ -2998,11 +3216,22 @@ async def live_map_view(request: Request):
                 `;
             } else {
                 const geofenceLabel = state === 'IN_TRANSIT' ? `Itinerario (${itinR}m)` : (state.includes('AT_') ? `Cabecera (${termR}m)` : `Fuera de Ruta`);
+                const wrongDirBanner = v.wrong_direction_alert ? `
+                    <div style="background: rgba(245, 158, 11, 0.2); border: 1px solid #f59e0b; color: #fde047; padding: 6px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; margin-bottom: 6px;">
+                        ⚠️ ALERTA: IDRUTA EN CONTRASENTIDO<br>
+                        <span style="font-weight: 500; font-size: 10px; color: #e2e8f0;">
+                            ${v.wrong_direction_reason || 'Circulando en sentido opuesto a la ruta.'}
+                            ${v.suggested_opposite_route ? '<br><b>Sugerido:</b> Ramal ' + v.suggested_opposite_route.toUpperCase() : ''}
+                        </span>
+                    </div>
+                ` : '';
                 popupContent = `
                     <div style="min-width: 210px;">
+                        ${wrongDirBanner}
                         <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
+                        ${v.line_name ? `Línea: <b style="color: #38bdf8;">${v.line_name}</b><br>` : ''}
                         Ramal: <b>${v.route_id}</b> (${v.agency_id})<br>
-                        Estado: <b style="color: ${markerColor};">${estadoEsp}</b><br>
+                        Estado: <b style="color: ${v.wrong_direction_alert ? '#f59e0b' : markerColor};">${v.wrong_direction_alert ? '⚠️ En Contrasentido' : estadoEsp}</b><br>
                         Rumbo: <b>${Math.round(heading)}°</b> | Velocidad: <b>${speed.toFixed(1)} km/h</b><br>
                         Progreso: <b>${v.progress_percent || 0}%</b> (${v.distance_traveled_km || 0} / ${v.route_total_km || 0} km)<br>
                         Desvío Traza: <b>${Math.round(v.deviation_meters || 0)}m</b><br>
@@ -3106,6 +3335,12 @@ async def live_map_view(request: Request):
 
             const progBarEl = document.getElementById(`card-prog-bar-${busKey}`);
             if (progBarEl) progBarEl.style.width = `${Math.min(v.progress_percent || 0, 100)}%`;
+
+            if (v.wrong_direction_alert) {
+                card.classList.add('card-wrong-dir');
+            } else {
+                card.classList.remove('card-wrong-dir');
+            }
         }
 
         function renderFullSidebarList() {
@@ -3129,25 +3364,31 @@ async def live_map_view(request: Request):
             listEl.innerHTML = vehicles.map(v => {
                 const busKey = getBusKey(v);
                 const isFault = v._isFault;
+                const isWrongDir = !!v.wrong_direction_alert;
                 const state = isFault ? 'GPS_FAULT' : (v.state || v.current_state || 'IN_TRANSIT');
-                const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
+                const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (isWrongDir ? '⚠️ En Contrasentido' : (v.status_display || (stateLabels[state] || state)));
                 const pillClass = isFault ? 'status-gpsfault' : (state === 'IN_TRANSIT' ? 'status-transit' : (state === 'OFF_ROUTE' ? 'status-offroute' : (state === 'DEPOT' ? 'status-depot' : 'status-origin')));
-                const pillLabel = isFault ? 'Falla GPS' : (stateLabels[state] || state);
+                const pillLabel = isFault ? 'Falla GPS' : (isWrongDir ? 'Contrasentido' : (stateLabels[state] || state));
                 const speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? v.speed_kmh : (v.last_speed_kmh || 0));
                 const isVisible = isBusVisibleByFilter(v);
                 const isChecked = busVisibility[busKey] !== false;
+                const cardClass = isFault ? 'card-fault' : (isWrongDir ? 'card-wrong-dir' : '');
+                const lineBadge = v.line_name ? `<span class="bus-line-badge">${v.line_name}</span>` : '';
 
                 return `
-                    <div class="bus-card ${isFault ? 'card-fault' : ''}" id="card-bus-${busKey}" style="display: ${isVisible ? 'block' : 'none'}; opacity: ${isChecked ? '1' : '0.5'};" onclick="focusBus('${busKey}')" title="Clic para centrar en radar">
+                    <div class="bus-card ${cardClass}" id="card-bus-${busKey}" style="display: ${isVisible ? 'block' : 'none'}; opacity: ${isChecked ? '1' : '0.5'};" onclick="focusBus('${busKey}')" title="Clic para centrar en radar">
                         <div class="bus-header">
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <input type="checkbox" id="chk-bus-${busKey}" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleBusVisibility('${busKey}')" style="cursor: pointer; accent-color: #38bdf8; width: 14px; height: 14px;">
-                                <span class="bus-title">🚍 Coche #${v.bus_id} (${v.license_plate})</span>
+                                <span class="bus-title">${isWrongDir ? '⚠️ ' : ''}🚍 Coche #${v.bus_id} (${v.license_plate})</span>
                             </div>
-                            <span class="status-pill ${pillClass}">${pillLabel}</span>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                ${lineBadge}
+                                <span class="status-pill ${pillClass}">${pillLabel}</span>
+                            </div>
                         </div>
-                        <div style="font-size: 11px; color: ${isFault ? '#ef4444' : '#38bdf8'}; margin: 4px 0 6px 0; font-weight: 500; display: flex; align-items: center; gap: 4px;">
-                            <span>${isFault ? '⚠️' : '📍'}</span>
+                        <div style="font-size: 11px; color: ${isFault ? '#ef4444' : (isWrongDir ? '#fbbf24' : '#38bdf8')}; margin: 4px 0 6px 0; font-weight: 500; display: flex; align-items: center; gap: 4px;">
+                            <span>${isFault ? '📡' : (isWrongDir ? '⚠️' : '📍')}</span>
                             <span id="card-status-text-${busKey}">${estadoEsp}</span>
                         </div>
                         ${!isFault ? `
@@ -3157,7 +3398,7 @@ async def live_map_view(request: Request):
                                 <span><strong id="card-prog-pct-${busKey}">${v.progress_percent || 0}%</strong> (<span id="card-prog-km-${busKey}">${v.distance_traveled_km || 0}</span> km)</span>
                             </div>
                             <div class="progress-bar-bg">
-                                <div class="progress-bar-fill" id="card-prog-bar-${busKey}" style="width: ${Math.min(v.progress_percent || 0, 100)}%;"></div>
+                                <div class="progress-bar-fill" id="card-prog-bar-${busKey}" style="width: ${Math.min(v.progress_percent || 0, 100)}%; background: ${isWrongDir ? '#f59e0b' : 'linear-gradient(90deg, #10b981, #38bdf8)'};"></div>
                             </div>
                         </div>
                         ` : ''}
@@ -3168,6 +3409,12 @@ async def live_map_view(request: Request):
                             <div>Último Ping: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};" id="card-ping-${busKey}">${v.last_ping_time ? v.last_ping_time.slice(11, 19) : '--'}</strong></div>
                         </div>
                         ${isFault ? `<div class="alert-box">📡 Alerta: Sin reporte GPS hace ${Math.round(v._minsAgo)} min (> ${gpsTimeoutMin}m)</div>` : ''}
+                        ${isWrongDir ? `
+                            <div class="alert-box" style="background: rgba(245, 158, 11, 0.2); border-color: #f59e0b; color: #fbbf24;">
+                                ⚠️ <b>IDRUTA EN CONTRASENTIDO:</b> Rumbo opuesto (${Math.round(v.heading_diff_deg || 180)}°).
+                                ${v.suggested_opposite_route ? `<br><b>Sugerido:</b> Asignar a Ramal ${v.suggested_opposite_route.toUpperCase()}` : ''}
+                            </div>
+                        ` : ''}
                         ${v.speed_alert && !isFault ? '<div class="alert-box">⚠️ ¡EXCESO DE VELOCIDAD (>70 km/h)!</div>' : ''}
                         ${v.deviation_alert && !isFault ? '<div class="alert-box">⚠️ ¡DESVÍO DE TRAZADO OFICIAL (>400m)!</div>' : ''}
                     </div>
@@ -3176,7 +3423,7 @@ async def live_map_view(request: Request):
         }
 
         /* -------------------------------------------------------------
-           Punto 4: Manejo de Visibilidad, Checkboxes y Botones Rápidos
+            Punto 4: Manejo de Visibilidad, Checkboxes y Botones Rápidos
         ------------------------------------------------------------- */
         function toggleBusVisibility(busKey) {
             busVisibility[busKey] = busVisibility[busKey] === false ? true : false;
@@ -3192,7 +3439,18 @@ async def live_map_view(request: Request):
         function setAllBusesVisibility(val) {
             const selectedRoute = document.getElementById('sel-route-filter')?.value || 'ALL';
             Object.values(activeVehicles).forEach(v => {
-                if (selectedRoute === 'ALL' || (v.route_id || '').toUpperCase().includes(selectedRoute.toUpperCase())) {
+                let matches = false;
+                if (selectedRoute === 'ALL') {
+                    matches = true;
+                } else if (selectedRoute.startsWith('LINE:')) {
+                    const targetLine = selectedRoute.substring(5).toUpperCase();
+                    matches = (v.line_name || '').toUpperCase().includes(targetLine);
+                } else if (selectedRoute === 'WRONG_DIR') {
+                    matches = !!v.wrong_direction_alert;
+                } else {
+                    matches = (v.route_id || '').toUpperCase().includes(selectedRoute.toUpperCase());
+                }
+                if (matches) {
                     busVisibility[getBusKey(v)] = val;
                 }
             });
@@ -3219,6 +3477,7 @@ async def live_map_view(request: Request):
             let inTerminalsCount = 0;
             let faultsCount = 0;
             let visibleCount = 0;
+            let wrongDirCount = 0;
 
             vehicles.forEach(v => {
                 let minsAgo = v.minutes_since_ping;
@@ -3241,6 +3500,10 @@ async def live_map_view(request: Request):
                     inTransitCount++;
                 }
 
+                if (v.wrong_direction_alert) {
+                    wrongDirCount++;
+                }
+
                 if (isBusVisibleByFilter(v)) {
                     visibleCount++;
                 }
@@ -3250,6 +3513,20 @@ async def live_map_view(request: Request):
             document.getElementById('m-transit').textContent = inTransitCount;
             document.getElementById('m-terminals').textContent = inTerminalsCount;
             document.getElementById('m-faults').textContent = faultsCount;
+            
+            const cardWrongDir = document.getElementById('m-card-wrong-dir');
+            const lblWrongDir = document.getElementById('m-wrong-dir');
+            const btnQuickWrongDir = document.getElementById('btn-quick-wrong-dir');
+            const lblQuickWrongDirCount = document.getElementById('lbl-wrong-dir-count');
+            if (cardWrongDir && lblWrongDir) {
+                lblWrongDir.textContent = wrongDirCount;
+                cardWrongDir.style.display = (wrongDirCount > 0) ? 'block' : 'none';
+            }
+            if (btnQuickWrongDir && lblQuickWrongDirCount) {
+                lblQuickWrongDirCount.textContent = wrongDirCount;
+                btnQuickWrongDir.style.display = (wrongDirCount > 0) ? 'inline-block' : 'none';
+            }
+
             const visCountEl = document.getElementById('lbl-visible-count');
             if (visCountEl) visCountEl.textContent = visibleCount;
             const totCountEl = document.getElementById('lbl-total-count');

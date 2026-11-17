@@ -7,6 +7,7 @@
         <field name="arch" type="xml">
             <list string="Rutas y Ramales">
                 <field name="code"/>
+                <field name="line_name" widget="badge"/>
                 <field name="name"/>
                 <field name="direction" widget="badge"/>
                 <field name="origin"/>
@@ -41,6 +42,7 @@
                         <group string="Trayecto y Sentido">
                             <field name="service_id"/>
                             <field name="concessionaire_id"/>
+                            <field name="line_name"/>
                             <field name="direction"/>
                             <field name="origin"/>
                             <field name="destination"/>
@@ -126,13 +128,16 @@
             <search string="Buscar Rutas">
                 <field name="name"/>
                 <field name="code"/>
+                <field name="line_name"/>
                 <field name="origin"/>
                 <field name="destination"/>
                 <filter string="Sentido Ida" name="inbound" domain="[('direction', '=', 'inbound')]"/>
                 <filter string="Sentido Vuelta" name="outbound" domain="[('direction', '=', 'outbound')]"/>
                 <filter string="Archivados" name="inactive" domain="[('active', '=', False)]"/>
                 <group expand="0" string="Agrupar Por">
+                    <filter string="Línea Comercial" name="group_line_name" context="{'group_by': 'line_name'}"/>
                     <filter string="Sentido" name="group_direction" context="{'group_by': 'direction'}"/>
+                    <filter string="Empresa Concesionaria" name="group_concessionaire" context="{'group_by': 'concessionaire_id'}"/>
                 </group>
             </search>
         </field>

@@ -51,6 +51,36 @@ PG_DB = os.getenv("PG_DB", "flota_db")
 PG_USER = os.getenv("PG_USER", "odoo")
 PG_PASS = os.getenv("PG_PASS", "odoo_password")
 
+# Pares de ramales opuestos (Ida <-> Vuelta)
+OPPOSITE_ROUTE_PAIRS: Dict[str, str] = {
+    # Automotores Guaraní - Línea 15
+    "004a": "004b", "004b": "004a",
+    "004c": "004d", "004d": "004c",
+    "004e": "004f", "004f": "004e",
+    "0050": "0051", "0051": "0050",
+    "01a0": "01a1", "01a1": "01a0",
+    "01ef": "01f0", "01f0": "01ef",
+    # Automotores Guaraní - Línea 47
+    "0052": "0053", "0053": "0052",
+    "0054": "0055", "0055": "0054",
+    "0056": "0057", "0057": "0056",
+    "0058": "0059", "0059": "0058",
+    "0185": "0186", "0186": "0185",
+    "01a2": "01a3", "01a3": "01a2",
+    # Consorcio Arapotí - Línea 20
+    "020c": "020d", "020d": "020c",
+    "020e": "020f", "020f": "020e",
+    "0210": "0211", "0211": "0210",
+    # San José Obrero - Línea 187
+    "0138": "0139", "0139": "0138",
+    "013a": "013b", "013b": "013a",
+}
+
+def get_opposite_route_code(route_code: str) -> Optional[str]:
+    if not route_code:
+        return None
+    return OPPOSITE_ROUTE_PAIRS.get(route_code.strip().lower())
+
 def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: Optional[str] = None) -> Dict[str, Any]:
     """Recopila rutas activas y calcula distancias relativas e intervalos entre buses con soporte multi-tenant."""
     routes_dict = {}
@@ -65,7 +95,8 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
         if agency_id:
             cur.execute("""
                 SELECT r.code, r.name, r.direction, r.origin, r.destination,
-                       COALESCE(s.total_km, r.distance_km, 18.0) as distance_km
+                       COALESCE(s.total_km, r.distance_km, 18.0) as distance_km,
+                       COALESCE(r.line_name, 'Línea General') as line_name
                 FROM transit_route r
                 JOIN transit_concessionaire c ON r.concessionaire_id = c.id
                 LEFT JOIN LATERAL (
@@ -78,12 +109,13 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
                     LIMIT 1
                 ) s ON TRUE
                 WHERE (c.agency_id = %s OR c.code = %s)
-                ORDER BY r.code;
+                ORDER BY r.line_name ASC, r.code ASC;
             """, (agency_id, agency_id))
         else:
             cur.execute("""
                 SELECT r.code, r.name, r.direction, r.origin, r.destination,
-                       COALESCE(s.total_km, r.distance_km, 18.0) as distance_km
+                       COALESCE(s.total_km, r.distance_km, 18.0) as distance_km,
+                       COALESCE(r.line_name, 'Línea General') as line_name
                 FROM transit_route r
                 LEFT JOIN LATERAL (
                     SELECT total_km
@@ -94,12 +126,13 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
                     ORDER BY version DESC
                     LIMIT 1
                 ) s ON TRUE
-                ORDER BY r.code;
+                ORDER BY r.line_name ASC, r.code ASC;
             """)
         for r in cur.fetchall():
             routes_dict[r['code']] = {
                 "route_id": r['code'],
                 "name": r['name'],
+                "line_name": r.get('line_name') or 'Línea General',
                 "direction": r['direction'],
                 "direction_label": "Ida" if r['direction'] == 'inbound' else ("Vuelta" if r['direction'] == 'outbound' else "Circular"),
                 "origin": r['origin'] or "Cabecera Origen",
@@ -108,6 +141,7 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
                 "buses": [],
                 "headways": [],
                 "bunching_count": 0,
+                "wrong_direction_count": 0,
                 "status": "NO_BUSES"
             }
 
@@ -316,6 +350,12 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
             "progress_percent": pct,
             "deviation_meters": round(float(b.get("deviation_meters") or 0.0), 1),
             "last_ping_time": b.get("last_ping_time"),
+            "line_name": routes_dict[r_code].get("line_name", ""),
+            "wrong_direction_alert": bool(b.get("wrong_direction_alert", False)),
+            "wrong_direction_reason": b.get("wrong_direction_reason", ""),
+            "suggested_opposite_route": b.get("suggested_opposite_route") or (get_opposite_route_code(r_code) if b.get("wrong_direction_alert") else ""),
+            "heading_diff_deg": b.get("heading_diff_deg"),
+            "route_bearing_deg": b.get("route_bearing_deg"),
             "is_bunching": False,
             "bunching_with": None,
             "bunching_gap_m": None,
@@ -442,6 +482,12 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
     except Exception as e:
         logger.debug(f"Error correlacionando Waze en Headway: {e}")
 
+    total_wrong_direction_alerts = 0
+    for r_code, r_data in routes_dict.items():
+        w_cnt = sum(1 for bus in r_data["buses"] if bus.get("wrong_direction_alert"))
+        r_data["wrong_direction_count"] = w_cnt
+        total_wrong_direction_alerts += w_cnt
+
     fin_summary = {}
     try:
         fin_summary = get_cached_financial_summary(redis_client, agency_id=agency_id or "0008")
@@ -452,6 +498,7 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
         "timestamp": datetime.now().isoformat(),
         "total_active_buses": total_active_buses,
         "total_bunching_alerts": total_bunching_alerts,
+        "total_wrong_direction_alerts": total_wrong_direction_alerts,
         "financial_summary": fin_summary,
         "routes": list(routes_dict.values())
     }
@@ -803,6 +850,66 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             box-shadow: 0 2px 10px rgba(239, 68, 68, 0.4);
         }
 
+        .filter-pill.wrong-dir-filter {
+            border-color: rgba(245, 158, 11, 0.4);
+            color: #fbbf24;
+        }
+
+        .filter-pill.wrong-dir-filter.active {
+            background: #d97706;
+            border-color: #fbbf24;
+            color: #fff;
+            box-shadow: 0 2px 10px rgba(245, 158, 11, 0.4);
+        }
+
+        .filter-pill.line-pill {
+            background: #1e293b;
+            border-color: #3b82f6;
+            color: #93c5fd;
+        }
+
+        .filter-pill.line-pill.active {
+            background: #2563eb;
+            color: #ffffff;
+            border-color: #60a5fa;
+            box-shadow: 0 2px 12px rgba(37, 99, 235, 0.4);
+        }
+
+        .line-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: linear-gradient(90deg, #1e293b, #0f172a);
+            border-left: 4px solid #3b82f6;
+            border-radius: 8px;
+            padding: 10px 16px;
+            margin: 24px 0 14px 0;
+            font-size: 14px;
+            font-weight: 800;
+            color: #f1f5f9;
+            letter-spacing: 0.05em;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .line-section-header .line-badge-count {
+            font-size: 11px;
+            background: #3b82f6;
+            color: #ffffff;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: 700;
+        }
+
+        .route-line-badge {
+            background: rgba(59, 130, 246, 0.2);
+            color: #93c5fd;
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
+
         /* Track Container Cards */
         .route-card {
             background: var(--bg-card);
@@ -1047,6 +1154,13 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             animation: bounce-alert 0.8s infinite alternate;
         }
 
+        .bus-marker.wrong-dir .bus-marker-bubble {
+            background: linear-gradient(135deg, #d97706, #b45309) !important;
+            border-color: #fbbf24 !important;
+            box-shadow: 0 0 16px rgba(245, 158, 11, 0.8) !important;
+            animation: bounce-alert 0.8s infinite alternate;
+        }
+
         @keyframes bounce-alert {
             0% { transform: translateY(0); }
             100% { transform: translateY(-4px); }
@@ -1063,6 +1177,15 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
 
         .bus-marker.bunching .bus-marker-pointer {
             border-top-color: #dc2626;
+        }
+
+        .bus-marker.wrong-dir .bus-marker-pointer {
+            border-top-color: #d97706 !important;
+        }
+
+        .kpi-card.kpi-wrong-dir.has-alerts {
+            border-color: #f59e0b;
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.35);
         }
 
         /* Headway Connector Bar */
@@ -1454,6 +1577,14 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             <div class="kpi-icon">🚨</div>
         </div>
 
+        <div class="kpi-card kpi-wrong-dir" id="kpi-wrong-dir-card" style="border-left: 3px solid #f59e0b;">
+            <div class="kpi-info">
+                <h4>IDRuta en Contrasentido</h4>
+                <div class="kpi-value" id="kpi-wrong-dir" style="color: #f59e0b;">0</div>
+            </div>
+            <div class="kpi-icon">⚠️</div>
+        </div>
+
         <div class="kpi-card kpi-buses">
             <div class="kpi-info">
                 <h4>Buses en Operación</h4>
@@ -1522,6 +1653,15 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                 <div>
                     <strong>PEGONAMIENTO CRÍTICO ACTIVO</strong>
                     <span id="modal-bunching-desc">Circulando a menos de 800m de la unidad líder.</span>
+                </div>
+            </div>
+
+            <!-- Alerta de IDRuta Invertido / Contrasentido en Modal -->
+            <div id="modal-wrong-dir-box" class="modal-bunching-alert" style="display: none; background: rgba(245, 158, 11, 0.18); border-color: #f59e0b; color: #fbbf24;">
+                <span class="modal-alert-icon">⚠️</span>
+                <div>
+                    <strong style="color: #f59e0b;">ALERTA: IDRUTA EN CONTRASENTIDO</strong>
+                    <div id="modal-wrong-dir-desc" style="font-size: 11px; color: #cbd5e1; margin-top: 2px;">El bus se desplaza en sentido contrario a la ruta configurada.</div>
                 </div>
             </div>
 
@@ -1736,15 +1876,22 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
         function filterRoute(code) {
             currentFilter = code;
             document.querySelectorAll('.filter-pill').forEach(el => {
-                const txt = el.textContent.toLowerCase();
-                if (code === 'all' && txt.includes('todos')) {
-                    el.classList.add('active');
-                } else if (code === 'bunching' && txt.includes('pegonamiento')) {
-                    el.classList.add('active');
-                } else if (code !== 'all' && code !== 'bunching' && txt.includes(code)) {
-                    el.classList.add('active');
+                const targetFilter = el.getAttribute('data-filter');
+                if (targetFilter) {
+                    el.classList.toggle('active', targetFilter === code);
                 } else {
-                    el.classList.remove('active');
+                    const txt = el.textContent.toLowerCase();
+                    if (code === 'all' && txt.includes('todos')) {
+                        el.classList.add('active');
+                    } else if (code === 'bunching' && txt.includes('pegonamiento')) {
+                        el.classList.add('active');
+                    } else if (code === 'wrong_dir' && txt.includes('contrasentido')) {
+                        el.classList.add('active');
+                    } else if (code !== 'all' && code !== 'bunching' && code !== 'wrong_dir' && txt.includes(code)) {
+                        el.classList.add('active');
+                    } else {
+                        el.classList.remove('active');
+                    }
                 }
             });
             if (latestDashboardData) {
@@ -1754,6 +1901,10 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
 
         function filterByBunchingOnly() {
             filterRoute('bunching');
+        }
+
+        function filterByWrongDirOnly() {
+            filterRoute('wrong_dir');
         }
 
         // --- FETCH Y RENDERIZADO DEL DASHBOARD ---
@@ -1774,8 +1925,23 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
 
         function renderDashboard(data) {
             const bunchingCount = data.total_bunching_alerts || 0;
+            const wrongDirCount = data.total_wrong_direction_alerts || 0;
             document.getElementById('kpi-bunching').textContent = bunchingCount;
             document.getElementById('kpi-buses').textContent = data.total_active_buses || 0;
+            
+            const kpiWrongDirEl = document.getElementById('kpi-wrong-dir');
+            if (kpiWrongDirEl) {
+                kpiWrongDirEl.textContent = wrongDirCount;
+            }
+            const kpiWrongDirCard = document.getElementById('kpi-wrong-dir-card');
+            if (kpiWrongDirCard) {
+                if (wrongDirCount > 0) {
+                    kpiWrongDirCard.classList.add('has-alerts');
+                } else {
+                    kpiWrongDirCard.classList.remove('has-alerts');
+                }
+            }
+
             const kpiRoutesEl = document.getElementById('kpi-routes');
             if (kpiRoutesEl) {
                 kpiRoutesEl.textContent = (data.routes || []).length;
@@ -1794,18 +1960,44 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                 kpiMonto.textContent = `Recaudación: Gs. ${Number(fin.brutoTotal).toLocaleString('es-PY')}`;
             }
 
-            // Renderizar dinámicamente los botones de filtro de ramal según la empresa
+            // Renderizar dinámicamente los botones de filtro de ramal agrupados por línea comercial
             const filterBar = document.getElementById('route-filter-bar');
             if (filterBar && Array.isArray(data.routes)) {
+                // Obtener líneas comerciales únicas
+                const uniqueLines = [];
+                data.routes.forEach(r => {
+                    const ln = r.line_name || 'Línea Regular';
+                    if (!uniqueLines.includes(ln)) uniqueLines.push(ln);
+                });
+
+                let linePillsHtml = '';
+                if (uniqueLines.length > 1 || (uniqueLines.length === 1 && uniqueLines[0] !== 'Línea Regular')) {
+                    linePillsHtml = uniqueLines.map(ln => {
+                        const countInLine = data.routes
+                            .filter(r => (r.line_name || 'Línea Regular') === ln)
+                            .reduce((acc, r) => acc + (r.buses ? r.buses.length : 0), 0);
+                        const isLineActive = (currentFilter === `LINE:${ln}`);
+                        return `<div class="filter-pill line-pill ${isLineActive ? 'active' : ''}" data-filter="LINE:${ln}" onclick="filterRoute('LINE:${ln}')">🚍 ${ln} (${countInLine})</div>`;
+                    }).join('');
+                }
+
+                const wrongDirPillHtml = wrongDirCount > 0 
+                    ? `<div class="filter-pill wrong-dir-filter ${currentFilter === 'wrong_dir' ? 'active' : ''}" data-filter="wrong_dir" onclick="filterRoute('wrong_dir')">⚠️ Contrasentido (${wrongDirCount})</div>`
+                    : '';
+
                 const routePillsHtml = data.routes.map(r => {
                     const rCode = String(r.route_id || '').toLowerCase();
                     const isActive = (currentFilter === rCode) ? 'active' : '';
                     const busCountBadge = (r.buses && r.buses.length > 0) ? ` (${r.buses.length})` : '';
-                    return `<div class="filter-pill ${isActive}" onclick="filterRoute('${rCode}')">Ramal ${rCode.toUpperCase()}${busCountBadge}</div>`;
+                    const linePrefix = r.line_name ? `${r.line_name.replace('Línea ', 'L')} - ` : '';
+                    return `<div class="filter-pill ${isActive}" data-filter="${rCode}" onclick="filterRoute('${rCode}')">${linePrefix}${rCode.toUpperCase()}${busCountBadge}</div>`;
                 }).join('');
+
                 filterBar.innerHTML = `
-                    <div class="filter-pill ${currentFilter === 'all' ? 'active' : ''}" onclick="filterRoute('all')">Todos los Ramales</div>
-                    <div class="filter-pill bunching-filter ${currentFilter === 'bunching' ? 'active' : ''}" id="pill-filter-bunching" onclick="filterRoute('bunching')">🚨 Con Pegonamiento</div>
+                    <div class="filter-pill ${currentFilter === 'all' ? 'active' : ''}" data-filter="all" onclick="filterRoute('all')">Todos los Ramales</div>
+                    <div class="filter-pill bunching-filter ${currentFilter === 'bunching' ? 'active' : ''}" data-filter="bunching" id="pill-filter-bunching" onclick="filterRoute('bunching')">🚨 Pegonamiento (${bunchingCount})</div>
+                    ${wrongDirPillHtml}
+                    ${linePillsHtml}
                     ${routePillsHtml}
                 `;
             }
@@ -1835,8 +2027,13 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
 
             if (currentFilter === 'bunching') {
                 filteredRoutes = filteredRoutes.filter(r => r.bunching_count > 0 || r.status === 'PEGONAMIENTO');
+            } else if (currentFilter === 'wrong_dir') {
+                filteredRoutes = filteredRoutes.filter(r => (r.wrong_direction_count || 0) > 0 || (r.buses || []).some(b => b.wrong_direction_alert));
+            } else if (currentFilter.startsWith('LINE:')) {
+                const targetLine = currentFilter.substring(5);
+                filteredRoutes = filteredRoutes.filter(r => (r.line_name || 'Línea Regular') === targetLine);
             } else if (currentFilter !== 'all') {
-                filteredRoutes = filteredRoutes.filter(r => r.route_id === currentFilter);
+                filteredRoutes = filteredRoutes.filter(r => String(r.route_id || '').toLowerCase() === currentFilter.toLowerCase());
             }
 
             if (filteredRoutes.length === 0) {
@@ -1856,155 +2053,202 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                 updateModalContent(busRegistry[selectedBusId]);
             }
 
-            let html = '';
+            // Agrupar ramales filtrados por Línea Comercial (Línea 15 vs Línea 47, etc.)
+            const routesByLine = {};
             filteredRoutes.forEach(r => {
-                const totalKm = r.distance_km;
-                const buses = r.buses || [];
-                const headways = r.headways || [];
-                const hasBunching = r.status === 'PEGONAMIENTO' || r.bunching_count > 0;
+                const ln = r.line_name || 'Línea Regular';
+                if (!routesByLine[ln]) routesByLine[ln] = [];
+                routesByLine[ln].push(r);
+            });
 
-                let statusBadge = '<span class="route-status-pill pill-empty">Sin buses</span>';
-                if (hasBunching) {
-                    statusBadge = `<span class="route-status-pill pill-bunching">🚨 ${r.bunching_count} Pegonamiento(s)</span>`;
-                } else if (r.status === 'ADVERTENCIA') {
-                    statusBadge = '<span class="route-status-pill pill-warning">⚠️ Intervalo Corto</span>';
-                } else if (r.status === 'OPTIMO') {
-                    statusBadge = '<span class="route-status-pill pill-optimal">✓ Intervalo Regular</span>';
-                } else if (r.status === 'UN_BUS') {
-                    statusBadge = '<span class="route-status-pill pill-optimal">1 Bus en Ruta</span>';
+            let html = '';
+            const lineNames = Object.keys(routesByLine);
+            const showLineHeaders = lineNames.length > 1 || (lineNames.length === 1 && lineNames[0] !== 'Línea Regular');
+
+            lineNames.forEach(lineName => {
+                const lineRoutes = routesByLine[lineName];
+                const totalBusesInLine = lineRoutes.reduce((acc, r) => acc + (r.buses ? r.buses.length : 0), 0);
+                const totalWrongDirInLine = lineRoutes.reduce((acc, r) => acc + (r.wrong_direction_count || 0), 0);
+                const totalBunchingInLine = lineRoutes.reduce((acc, r) => acc + (r.bunching_count || 0), 0);
+
+                if (showLineHeaders) {
+                    html += `
+                    <div class="line-section-header">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 16px;">🚍</span>
+                            <span>${lineName.toUpperCase()}</span>
+                            <span class="line-badge-count">${lineRoutes.length} Ramales</span>
+                            <span style="font-size: 11px; color: #94a3b8; font-weight: 500;">· ${totalBusesInLine} buses activos</span>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            ${totalWrongDirInLine > 0 ? `<span style="background: #d97706; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">⚠️ ${totalWrongDirInLine} en contrasentido</span>` : ''}
+                            ${totalBunchingInLine > 0 ? `<span style="background: #dc2626; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">🚨 ${totalBunchingInLine} pegonamiento(s)</span>` : ''}
+                        </div>
+                    </div>
+                    `;
                 }
 
-                html += `
-                <div class="route-card ${hasBunching ? 'bunching-card' : ''}">
-                    <div class="route-header">
-                        <div class="route-meta">
-                            <span class="route-id-badge">${r.route_id.toUpperCase()}</span>
-                            <span class="route-name">${r.name}</span>
-                            <span class="route-length">🛣️ ${totalKm} km · Sentido: ${r.direction_label}</span>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            ${r.waze_impact && r.waze_impact.total_delay_minutes > 0 ? `
-                                <span class="route-status-pill" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">
-                                    🚦 Waze: +${r.waze_impact.total_delay_minutes} min demora
-                                </span>
-                            ` : ''}
-                            ${statusBadge}
-                        </div>
-                    </div>
+                lineRoutes.forEach(r => {
+                    const totalKm = r.distance_km;
+                    const buses = r.buses || [];
+                    const headways = r.headways || [];
+                    const hasBunching = r.status === 'PEGONAMIENTO' || r.bunching_count > 0;
+                    const hasWrongDir = (r.wrong_direction_count || 0) > 0;
 
-                    <!-- Horizontal Track Visualizer -->
-                    <div class="track-wrapper">
-                        <div class="terminal-labels">
-                            <span>🏁 ${r.origin} (0.0 km)</span>
-                            <span>🎯 ${r.destination} (${totalKm} km)</span>
-                        </div>
+                    let statusBadge = '<span class="route-status-pill pill-empty">Sin buses</span>';
+                    if (hasBunching) {
+                        statusBadge = `<span class="route-status-pill pill-bunching">🚨 ${r.bunching_count} Pegonamiento(s)</span>`;
+                    } else if (r.status === 'ADVERTENCIA') {
+                        statusBadge = '<span class="route-status-pill pill-warning">⚠️ Intervalo Corto</span>';
+                    } else if (r.status === 'OPTIMO') {
+                        statusBadge = '<span class="route-status-pill pill-optimal">✓ Intervalo Regular</span>';
+                    } else if (r.status === 'UN_BUS') {
+                        statusBadge = '<span class="route-status-pill pill-optimal">1 Bus en Ruta</span>';
+                    }
 
-                        <div class="rail-track">
-                            <div class="rail-track-progress" style="width: 100%;"></div>
-
-                            <!-- Headway Connecting Segments -->
-                            ${headways.map(hw => {
-                                const isCrit = hw.severity === 'CRITICAL';
-                                const isTerminal = hw.severity === 'TERMINAL_WAIT';
-                                const isStopDwell = hw.severity === 'STOP_DWELL';
-                                const cls = isCrit ? 'critical' : (isTerminal ? 'terminal' : (isStopDwell ? 'stop_dwell' : (hw.severity === 'WARNING' ? 'warning' : 'optimal')));
-                                const badgePrefix = isCrit ? '🚨 Pegonamiento: ' : (isTerminal ? '🟡 Cabecera: ' : (isStopDwell ? '🚏 En Parada (Permitido): ' : (hw.severity === 'WARNING' ? '⚠️ Corto: ' : '')));
-                                return `
-                                    <div class="headway-segment ${cls}" style="left: ${hw.left_pct}%; width: ${hw.width_pct}%;">
-                                        <div class="headway-badge ${cls}">
-                                            ${badgePrefix}Δ ${hw.gap_km} km (${hw.est_minutes} min)
-                                        </div>
-                                    </div>
-                                `;
-                            }).join('')}
-
-                            <!-- Bus Markers on Track (Clickable) -->
-                            ${buses.map(b => {
-                                const isBunch = b.is_bunching;
-                                const hexId = String(b.bus_id || '');
-                                const decNum = parseInt(hexId, 16);
-                                const busDisplay = !isNaN(decNum) ? `${hexId} (${decNum})` : hexId;
-                                return `
-                                    <div class="bus-marker ${isBunch ? 'bunching' : ''}" 
-                                         style="left: ${b.progress_percent}%;" 
-                                         onclick="openBusModal('${b.bus_id}')"
-                                         title="Coche #${hexId} (${!isNaN(decNum) ? decNum : hexId}) | ${b.speed_kmh} km/h | Clic para ver detalles y ubicar en GPS">
-                                        <div class="bus-marker-bubble">
-                                            <span class="bus-bubble-id">${busDisplay}</span>
-                                            <span class="bus-bubble-time">(${b.speed_kmh}k)</span>
-                                            <span class="bus-bubble-icon">🚌</span>
-                                        </div>
-                                        <div class="bus-marker-pointer"></div>
-                                    </div>
-                                `;
-                            }).join('')}
+                    html += `
+                    <div class="route-card ${hasBunching ? 'bunching-card' : ''}" style="${hasWrongDir ? 'border-left: 4px solid #f59e0b;' : ''}">
+                        <div class="route-header">
+                            <div class="route-meta">
+                                ${r.line_name ? `<span class="route-line-badge">🚍 ${r.line_name}</span>` : ''}
+                                <span class="route-id-badge">${r.route_id.toUpperCase()}</span>
+                                <span class="route-name">${r.name}</span>
+                                <span class="route-length">🛣️ ${totalKm} km · Sentido: ${r.direction_label}</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                ${hasWrongDir ? `
+                                    <span class="route-status-pill" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5);">
+                                        ⚠️ ${r.wrong_direction_count} Contrasentido
+                                    </span>
+                                ` : ''}
+                                ${r.waze_impact && r.waze_impact.total_delay_minutes > 0 ? `
+                                    <span class="route-status-pill" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">
+                                        🚦 Waze: +${r.waze_impact.total_delay_minutes} min demora
+                                    </span>
+                                ` : ''}
+                                ${statusBadge}
+                            </div>
                         </div>
 
-                        <!-- Kilometer Ticks -->
-                        <div class="tick-marks">
-                            <span class="tick" style="left: 0%;">0 km</span>
-                            <span class="tick" style="left: 25%;">${(totalKm * 0.25).toFixed(1)} km</span>
-                            <span class="tick" style="left: 50%;">${(totalKm * 0.5).toFixed(1)} km</span>
-                            <span class="tick" style="left: 75%;">${(totalKm * 0.75).toFixed(1)} km</span>
-                            <span class="tick" style="left: 100%;">${totalKm} km</span>
-                        </div>
-                    </div>
+                        <!-- Horizontal Track Visualizer -->
+                        <div class="track-wrapper">
+                            <div class="terminal-labels">
+                                <span>🏁 ${r.origin} (0.0 km)</span>
+                                <span>🎯 ${r.destination} (${totalKm} km)</span>
+                            </div>
 
-                    <!-- Mini Bus Audit Table (Clickable Rows) -->
-                    ${buses.length > 0 ? `
-                    <div class="bus-table-box">
-                        <table class="bus-mini-table">
-                            <thead>
-                                <tr>
-                                    <th>Coche (Clic para inspeccionar)</th>
-                                    <th>Estado</th>
-                                    <th>Velocidad</th>
-                                    <th>Km en Shape</th>
-                                    <th>Progreso</th>
-                                    <th>Desvío del Eje</th>
-                                    <th>Último Ping</th>
-                                    <th>Validaciones Jaha</th>
-                                    <th>Estado de Intervalo</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${buses.map(b => `
-                                    <tr class="clickable-row ${b.is_bunching ? 'bunching-row' : ''}" onclick="openBusModal('${b.bus_id}')" title="Clic para ver ficha completa y ubicar en mapa">
-                                        <td><strong>🚌 ${formatBusHexDec(b.bus_id)}</strong> (${b.license_plate})</td>
-                                        <td><span style="background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">${b.state_label || 'En Circulación'}</span></td>
-                                        <td>${b.speed_kmh} km/h</td>
-                                        <td><strong>${b.distance_traveled_km} km</strong> / ${totalKm} km</td>
-                                        <td>
-                                            <div style="display: flex; align-items: center; gap: 8px;">
-                                                <div style="flex: 1; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; width: 60px;">
-                                                    <div style="width: ${b.progress_percent}%; height: 100%; background: ${b.is_bunching ? '#ef4444' : '#38bdf8'};"></div>
-                                                </div>
-                                                <span>${b.progress_percent}%</span>
+                            <div class="rail-track">
+                                <div class="rail-track-progress" style="width: 100%;"></div>
+
+                                <!-- Headway Connecting Segments -->
+                                ${headways.map(hw => {
+                                    const isCrit = hw.severity === 'CRITICAL';
+                                    const isTerminal = hw.severity === 'TERMINAL_WAIT';
+                                    const isStopDwell = hw.severity === 'STOP_DWELL';
+                                    const cls = isCrit ? 'critical' : (isTerminal ? 'terminal' : (isStopDwell ? 'stop_dwell' : (hw.severity === 'WARNING' ? 'warning' : 'optimal')));
+                                    const badgePrefix = isCrit ? '🚨 Pegonamiento: ' : (isTerminal ? '🟡 Cabecera: ' : (isStopDwell ? '🚏 En Parada (Permitido): ' : (hw.severity === 'WARNING' ? '⚠️ Corto: ' : '')));
+                                    return `
+                                        <div class="headway-segment ${cls}" style="left: ${hw.left_pct}%; width: ${hw.width_pct}%;">
+                                            <div class="headway-badge ${cls}">
+                                                ${badgePrefix}Δ ${hw.gap_km} km (${hw.est_minutes} min)
                                             </div>
-                                        </td>
-                                        <td>${b.deviation_meters} m</td>
-                                        <td>${b.last_ping_time ? b.last_ping_time.substring(11, 19) : '--:--'}</td>
-                                        <td><span style="background: rgba(16, 185, 129, 0.12); color: #34d399; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎫 ${(b.passengers_today || 0).toLocaleString('es-PY')} pas</span></td>
-                                        <td>
-                                            ${b.is_bunching 
-                                                ? '<span style="color: #f87171; font-weight: 700;">🚨 PEGONAMIENTO DETECTADO</span>' 
-                                                : (b.speed_kmh <= 5.0 && b.state !== 'AT_ORIGIN' && b.state !== 'AT_DESTINATION' && b.state !== 'GPS_FAULT'
-                                                    ? '<span style="color: #38bdf8; font-weight: 600;">🚏 En Parada (Permitido)</span>' 
-                                                    : (b.state === 'AT_ORIGIN' || b.state === 'AT_DESTINATION'
-                                                        ? '<span style="color: #fbbf24; font-weight: 600;">🟡 En Terminal / Cabecera</span>'
-                                                        : '<span style="color: #34d399;">✓ Intervalo Regular</span>'
-                                                      )
-                                                  )
-                                            }
-                                        </td>
+                                        </div>
+                                    `;
+                                }).join('')}
+
+                                <!-- Bus Markers on Track (Clickable) -->
+                                ${buses.map(b => {
+                                    const isBunch = b.is_bunching;
+                                    const isWrongDir = b.wrong_direction_alert;
+                                    const hexId = String(b.bus_id || '');
+                                    const decNum = parseInt(hexId, 16);
+                                    const busDisplay = !isNaN(decNum) ? `${hexId} (${decNum})` : hexId;
+                                    const wrongDirTooltip = isWrongDir ? ` | ⚠️ ALERTA CONTRASENTIDO: Se desplaza en sentido contrario a ruta ${r.route_id.toUpperCase()}${b.suggested_opposite_route ? ' (Sugerido: ' + b.suggested_opposite_route.toUpperCase() + ')' : ''}` : '';
+                                    return `
+                                        <div class="bus-marker ${isBunch ? 'bunching' : ''} ${isWrongDir ? 'wrong-dir' : ''}" 
+                                             style="left: ${b.progress_percent}%;" 
+                                             onclick="openBusModal('${b.bus_id}')"
+                                             title="Coche #${hexId} (${!isNaN(decNum) ? decNum : hexId}) | ${b.speed_kmh} km/h${wrongDirTooltip} | Clic para ver detalles y ubicar en GPS">
+                                            <div class="bus-marker-bubble">
+                                                <span class="bus-bubble-id">${busDisplay}</span>
+                                                <span class="bus-bubble-time">(${b.speed_kmh}k)</span>
+                                                <span class="bus-bubble-icon">${isWrongDir ? '⚠️' : '🚌'}</span>
+                                            </div>
+                                            <div class="bus-marker-pointer"></div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+
+                            <!-- Kilometer Ticks -->
+                            <div class="tick-marks">
+                                <span class="tick" style="left: 0%;">0 km</span>
+                                <span class="tick" style="left: 25%;">${(totalKm * 0.25).toFixed(1)} km</span>
+                                <span class="tick" style="left: 50%;">${(totalKm * 0.5).toFixed(1)} km</span>
+                                <span class="tick" style="left: 75%;">${(totalKm * 0.75).toFixed(1)} km</span>
+                                <span class="tick" style="left: 100%;">${totalKm} km</span>
+                            </div>
+                        </div>
+
+                        <!-- Mini Bus Audit Table (Clickable Rows) -->
+                        ${buses.length > 0 ? `
+                        <div class="bus-table-box">
+                            <table class="bus-mini-table">
+                                <thead>
+                                    <tr>
+                                        <th>Coche (Clic para inspeccionar)</th>
+                                        <th>Estado</th>
+                                        <th>Velocidad</th>
+                                        <th>Km en Shape</th>
+                                        <th>Progreso</th>
+                                        <th>Desvío del Eje</th>
+                                        <th>Último Ping</th>
+                                        <th>Validaciones Jaha</th>
+                                        <th>Estado de Intervalo</th>
                                     </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    ${buses.map(b => `
+                                        <tr class="clickable-row ${b.is_bunching ? 'bunching-row' : ''}" onclick="openBusModal('${b.bus_id}')" title="Clic para ver ficha completa y ubicar en mapa">
+                                            <td><strong>🚌 ${formatBusHexDec(b.bus_id)}</strong> (${b.license_plate})</td>
+                                            <td><span style="background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">${b.state_label || 'En Circulación'}</span></td>
+                                            <td>${b.speed_kmh} km/h</td>
+                                            <td><strong>${b.distance_traveled_km} km</strong> / ${totalKm} km</td>
+                                            <td>
+                                                <div style="display: flex; align-items: center; gap: 8px;">
+                                                    <div style="flex: 1; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; width: 60px;">
+                                                        <div style="width: ${b.progress_percent}%; height: 100%; background: ${b.wrong_direction_alert ? '#f59e0b' : (b.is_bunching ? '#ef4444' : '#38bdf8')};"></div>
+                                                    </div>
+                                                    <span>${b.progress_percent}%</span>
+                                                </div>
+                                            </td>
+                                            <td>${b.deviation_meters} m</td>
+                                            <td>${b.last_ping_time ? b.last_ping_time.substring(11, 19) : '--:--'}</td>
+                                            <td><span style="background: rgba(16, 185, 129, 0.12); color: #34d399; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎫 ${(b.passengers_today || 0).toLocaleString('es-PY')} pas</span></td>
+                                            <td>
+                                                ${b.wrong_direction_alert
+                                                    ? `<span style="color: #fbbf24; font-weight: 700;">⚠️ CONTRASENTIDO (${b.heading_diff_deg || 180}° opuesto${b.suggested_opposite_route ? ' · Sugerido: ' + b.suggested_opposite_route.toUpperCase() : ''})</span>`
+                                                    : (b.is_bunching 
+                                                        ? '<span style="color: #f87171; font-weight: 700;">🚨 PEGONAMIENTO DETECTADO</span>' 
+                                                        : (b.speed_kmh <= 5.0 && b.state !== 'AT_ORIGIN' && b.state !== 'AT_DESTINATION' && b.state !== 'GPS_FAULT'
+                                                            ? '<span style="color: #38bdf8; font-weight: 600;">🚏 En Parada (Permitido)</span>' 
+                                                            : (b.state === 'AT_ORIGIN' || b.state === 'AT_DESTINATION'
+                                                                ? '<span style="color: #fbbf24; font-weight: 600;">🟡 En Terminal / Cabecera</span>'
+                                                                : '<span style="color: #34d399;">✓ Intervalo Regular</span>'
+                                                              )
+                                                          )
+                                                      )
+                                                }
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        ` : '<div style="font-size: 12px; color: #64748b; padding-top: 6px;">No hay unidades transmitiendo en este ramal actualmente.</div>'}
                     </div>
-                    ` : '<div style="font-size: 12px; color: #64748b; padding-top: 6px;">No hay unidades transmitiendo en este ramal actualmente.</div>'}
-                </div>
-                `;
+                    `;
+                });
             });
 
             container.innerHTML = html;
@@ -2057,6 +2301,21 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                 bunchBox.style.display = 'none';
             }
 
+            // Alerta de IDRuta en Contrasentido
+            const wrongDirBox = document.getElementById('modal-wrong-dir-box');
+            if (wrongDirBox) {
+                if (b.wrong_direction_alert) {
+                    wrongDirBox.style.display = 'flex';
+                    const sugMsg = b.suggested_opposite_route 
+                        ? `<br/><span style="color: #fef08a; font-weight: 700;">💡 Sugerencia operativa: Cambiar al ramal de sentido opuesto <strong>${b.suggested_opposite_route.toUpperCase()}</strong> en el selector abajo.</span>`
+                        : '';
+                    document.getElementById('modal-wrong-dir-desc').innerHTML = 
+                        `<strong>${b.wrong_direction_reason || 'El bus se desplaza en sentido contrario a la ruta configurada.'}</strong> (Diferencia de rumbo: ${b.heading_diff_deg || 180}°).${sugMsg}`;
+                } else {
+                    wrongDirBox.style.display = 'none';
+                }
+            }
+
             // Datos de Billetaje Jaha
             const pax = b.passengers_today || 0;
             const rev = b.revenue_today || 0;
@@ -2078,7 +2337,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             selectedBusId = busId;
             updateModalContent(b);
 
-            // Poblar selector de reasignación con los ramales de la empresa
+            // Poblar selector de reasignación agrupado por Línea Comercial
             const sel = document.getElementById('modal-reassign-select');
             const statusEl = document.getElementById('modal-reassign-status');
             if (statusEl) statusEl.style.display = 'none';
@@ -2086,11 +2345,29 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             if (sel) {
                 if (latestDashboardData && Array.isArray(latestDashboardData.routes) && latestDashboardData.routes.length > 0) {
                     const curRoute = String(b.route_id || '').toLowerCase();
-                    sel.innerHTML = latestDashboardData.routes.map(r => {
-                        const rCode = String(r.route_id || '').toLowerCase();
-                        const isSelected = rCode === curRoute;
-                        return `<option value="${rCode}" ${isSelected ? 'selected' : ''}>${r.route_id.toUpperCase()} - ${r.name} (${r.direction_label})</option>`;
-                    }).join('');
+                    const sugOpposite = String(b.suggested_opposite_route || '').toLowerCase();
+
+                    // Agrupar opciones por Línea Comercial
+                    const byLine = {};
+                    latestDashboardData.routes.forEach(r => {
+                        const ln = r.line_name || 'Línea Regular';
+                        if (!byLine[ln]) byLine[ln] = [];
+                        byLine[ln].push(r);
+                    });
+
+                    let optHtml = '';
+                    for (const [ln, routes] of Object.entries(byLine)) {
+                        optHtml += `<optgroup label="🚍 ${ln}">`;
+                        routes.forEach(r => {
+                            const rCode = String(r.route_id || '').toLowerCase();
+                            const isCur = (rCode === curRoute);
+                            const isSug = (rCode === sugOpposite && !isCur);
+                            const sugTag = isSug ? ' ⚠️ [SUGERIDO POR SENTIDO]' : (isCur ? ' [ACTUAL]' : '');
+                            optHtml += `<option value="${rCode}" ${isCur ? 'selected' : ''}>${r.route_id.toUpperCase()} - ${r.name} (${r.direction_label})${sugTag}</option>`;
+                        });
+                        optHtml += `</optgroup>`;
+                    }
+                    sel.innerHTML = optHtml;
                 } else {
                     sel.innerHTML = `<option value="${b.route_id || ''}">${(b.route_id || '').toUpperCase()} - Actual</option>`;
                 }
