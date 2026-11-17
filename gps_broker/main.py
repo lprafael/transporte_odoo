@@ -465,8 +465,8 @@ class TelemetryPing(BaseModel):
 
     @property
     def effective_timestamp(self) -> str:
-        # Priorizar fecha_hora_procesamiento (hora local real de Asunción en la llegada a VMT)
-        return self.fecha_hora_procesamiento or self.fecha_hora or self.timestamp or datetime.now(timezone.utc).isoformat()
+        # Priorizar la estampa GPS original emitida por el satélite / módem a bordo
+        return self.fecha_hora or self.fecha_hora_procesamiento or self.timestamp or datetime.now(timezone.utc).isoformat()
 
 # ------------------------------------------------------------------------------
 # Motor Geodésico Espacial (Haversine & PostGIS)
@@ -1151,7 +1151,7 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
 
     # 2. Recuperar o Inicializar Estado (aislado por empresa)
     v_state = get_vehicle_state(bus_key, agency_id=agency)
-    raw_ping_time = str(ping.fecha_hora_procesamiento or ping.fecha_hora or ping.timestamp or now_iso).strip()
+    raw_ping_time = str(ping.fecha_hora or ping.fecha_hora_procesamiento or ping.timestamp or now_iso).strip()
     is_new_vehicle = v_state is None
 
     prev_lat = v_state.get("last_latitude") if v_state else None
@@ -1188,34 +1188,72 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
             "deviation_meters": 0.0,
         }
 
-    # 2.0 Deduplicación: Si el vehículo ya existía en Redis y coordenadas + timestamp son idénticos, omitir
-    if not is_new_vehicle and prev_lat is not None and prev_lon is not None:
-        is_same_coords = (
-            abs(float(prev_lat) - float(ping.latitude)) < 1e-7 and
-            abs(float(prev_lon) - float(ping.longitude)) < 1e-7
-        )
-        is_same_time = (
-            (prev_raw_time is not None and str(prev_raw_time) == raw_ping_time) or
-            (prev_time is not None and str(prev_time) == str(now_iso))
-        )
-        if is_same_coords and is_same_time:
-            return {
-                "status": "ignored",
-                "reason": "duplicate_ping",
-                "bus_id": bus_key,
-                "timestamp": now_iso
-            }
+    # 2.0 Monotonicidad Temporal y Deduplicación Estricta:
+    # Evita que pings rezagados o duplicados hagan retroceder o saltar la posición del bus (efecto elástico)
+    if not is_new_vehicle:
+        if prev_lat is not None and prev_lon is not None:
+            is_same_coords = (
+                abs(float(prev_lat) - float(ping.latitude)) < 1e-7 and
+                abs(float(prev_lon) - float(ping.longitude)) < 1e-7
+            )
+            is_same_time = (
+                (prev_raw_time is not None and str(prev_raw_time) == raw_ping_time) or
+                (prev_time is not None and str(prev_time) == str(now_iso))
+            )
+            if is_same_coords and is_same_time:
+                return {
+                    "status": "ignored",
+                    "reason": "duplicate_ping",
+                    "bus_id": bus_key,
+                    "timestamp": now_iso
+                }
 
-    # 2.1 Velocidad y Rumbo Nativos de la Telemetría Central (VMT)
-    # VMT app_monitoreo_mensajeoperativo provee 'velocidad' y 'rumbo' medidos directamente por el módem AVL
+        # Descartar paquetes fuera de orden (estampa satelital más antigua que la última procesada)
+        if prev_time and now_iso:
+            try:
+                curr_dt_chk = datetime.fromisoformat(str(now_iso).replace("Z", "+00:00"))
+                prev_dt_chk = datetime.fromisoformat(str(prev_time).replace("Z", "+00:00"))
+                if curr_dt_chk.tzinfo is None:
+                    curr_dt_chk = curr_dt_chk.replace(tzinfo=timezone.utc)
+                if prev_dt_chk.tzinfo is None:
+                    prev_dt_chk = prev_dt_chk.replace(tzinfo=timezone.utc)
+                if curr_dt_chk < prev_dt_chk:
+                    return {
+                        "status": "ignored",
+                        "reason": "out_of_order_ping",
+                        "bus_id": bus_key,
+                        "timestamp": now_iso
+                    }
+            except Exception:
+                pass
+
+    # 2.1 Velocidad y Rumbo Cinemático Geodésico Exacto (0.0° - 359.9°)
+    # VMT app_monitoreo_mensajeoperativo entrega rumbos truncados/plegados a [0, 180]°,
+    # lo cual invierte el ángulo cuando los buses viajan hacia el Oeste (~280°-320° en dirección Asunción).
+    # Calculamos el rumbo exacto a partir del vector cinemático real de desplazamiento.
     if speed is None or speed < 0:
         speed = 0.0
-    if heading is None or heading < 0:
-        heading = float(prev_heading or 0.0)
 
-    # Si el vehículo está detenido (< 1 km/h), preservar el último rumbo para evitar giros erráticos
-    if speed < 1.0 and prev_heading is not None and float(prev_heading) > 0:
+    kinematic_heading = None
+    if prev_lat is not None and prev_lon is not None:
+        try:
+            d_moved = haversine_meters(float(prev_lat), float(prev_lon), float(ping.latitude), float(ping.longitude))
+            # Con desplazamiento físico >= 5m y velocidad >= 2 km/h, el rumbo geodésico atan2 es exacto al 100%
+            if d_moved >= 5.0 and speed >= 2.0:
+                kinematic_heading = calculate_bearing_degrees(float(prev_lat), float(prev_lon), float(ping.latitude), float(ping.longitude))
+        except Exception as e:
+            logger.debug(f"Error cálculo rumbo cinemático: {e}")
+
+    if kinematic_heading is not None:
+        heading = kinematic_heading
+    elif speed < 2.0 and prev_heading is not None and float(prev_heading) > 0:
+        # Si el vehículo está detenido o en semáforo, conservar el último rumbo válido para no rotar la flecha
         heading = float(prev_heading)
+    elif prev_heading is not None and float(prev_heading) > 0:
+        heading = float(prev_heading)
+    else:
+        # Primer reporte sin historial previo: tomar el valor del módem
+        heading = float(ping.effective_heading or 0.0)
 
     ping.heading_deg = heading
 
@@ -1264,6 +1302,20 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
         total_km = progress["total_km"]
         dev_m = progress["deviation_meters"]
         matched_route = progress.get("matched_route_code")
+        route_bearing = progress.get("route_bearing_deg")
+
+        # Si aún no tenemos rumbo cinemático previo y el módem envió rumbo plegado [0, 180],
+        # desambiguar con la dirección oficial del trazado en ese punto
+        if kinematic_heading is None and prev_heading is None and route_bearing is not None and heading > 0.0:
+            cand1 = heading
+            cand2 = (heading + 180.0) % 360.0
+            diff1 = min(abs(cand1 - route_bearing), 360.0 - abs(cand1 - route_bearing))
+            diff2 = min(abs(cand2 - route_bearing), 360.0 - abs(cand2 - route_bearing))
+            if diff2 < diff1 and diff1 > 90.0:
+                heading = cand2
+                ping.heading_deg = heading
+                v_state["heading_deg"] = heading
+
         if matched_route and route_code in ("0000", "", "none", "depot", "taller"):
             v_state["route_id"] = matched_route
             route_code = matched_route.lower()
@@ -1330,15 +1382,7 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     heading_diff = None
 
     if route_code not in ("0000", "", "none", "depot", "taller") and route_bearing is not None and speed >= 7.0 and dev_m <= 400.0:
-        bus_h = heading
-        # Si el GPS no envía rumbo exacto o envía 0, estimar a partir del vector previo
-        if (bus_h is None or bus_h == 0.0) and prev_lat and prev_lon:
-            d_moved = haversine_meters(prev_lat, prev_lon, ping.latitude, ping.longitude)
-            if d_moved >= 10.0:
-                import math
-                y_b = math.sin(math.radians(ping.longitude - prev_lon)) * math.cos(math.radians(ping.latitude))
-                x_b = math.cos(math.radians(prev_lat)) * math.sin(math.radians(ping.latitude)) - math.sin(math.radians(prev_lat)) * math.cos(math.radians(ping.latitude)) * math.cos(math.radians(ping.longitude - prev_lon))
-                bus_h = (math.degrees(math.atan2(y_b, x_b)) + 360.0) % 360.0
+        bus_h = v_state.get("heading_deg") or heading
 
         if bus_h is not None and bus_h > 0.0:
             diff = abs(bus_h - route_bearing) % 360.0
@@ -1535,9 +1579,12 @@ def vmt_continuous_sync_worker():
                 bus_key = str(r["mean_id"]).strip()
                 if not bus_key:
                     continue
-                # Hora real de llegada al servidor VMT en Asunción
-                rec_dt = r.get("fecha_hora_procesamiento") or r.get("fecha_hora")
-                rec_iso = rec_dt.isoformat() if hasattr(rec_dt, "isoformat") else str(rec_dt)
+                # Estampas temporales: satelital GPS original emitida por el módem vs llegada al servidor VMT
+                gps_dt = r.get("fecha_hora")
+                proc_dt = r.get("fecha_hora_procesamiento")
+                gps_iso = gps_dt.isoformat() if hasattr(gps_dt, "isoformat") else str(gps_dt) if gps_dt else None
+                proc_iso = proc_dt.isoformat() if hasattr(proc_dt, "isoformat") else str(proc_dt) if proc_dt else None
+                rec_iso = gps_iso or proc_iso or datetime.now(timezone.utc).isoformat()
                 lat = float(r["latitude"])
                 lon = float(r["longitude"])
                 row_id = r.get("id")
@@ -1546,7 +1593,7 @@ def vmt_continuous_sync_worker():
 
                 # Punto 1: Deduplicación incremental en memoria por agencia y bus
                 cache_key = f"{ping_agency}_{bus_key}"
-                cache_sig = (row_id, round(lat, 6), round(lon, 6), rec_iso)
+                cache_sig = (row_id, round(lat, 6), round(lon, 6), gps_iso or proc_iso)
                 if _last_seen_vmt_pings.get(cache_key) == cache_sig:
                     continue
                 _last_seen_vmt_pings[cache_key] = cache_sig
@@ -1571,8 +1618,8 @@ def vmt_continuous_sync_worker():
                     longitude=lon,
                     velocidad=float(r["velocidad"] or 0.0),
                     rumbo=float(r["rumbo"] or 0.0),
-                    fecha_hora=rec_iso,
-                    fecha_hora_procesamiento=rec_iso
+                    fecha_hora=gps_iso or rec_iso,
+                    fecha_hora_procesamiento=proc_iso or rec_iso
                 )
 
                 process_telemetry_ping_internal(ping_obj)
@@ -3193,10 +3240,15 @@ async def live_map_view(request: Request):
             };
 
             const estadoEsp = isFault ? `Falla GPS (${Math.round(v._minsAgo)}m sin señal)` : (v.status_display || (stateLabels[state] || state));
-            // Rumbo y Velocidad directos de telemetría nativa VMT (sin cálculo artificial entre puntos)
-            let heading = isFault ? 0.0 : (v.heading_deg || v.heading_degrees || v.rumbo || 0.0);
+            // Rumbo cinemático geodésico exacto (0.0° - 359.9°) calculado por el backend y velocidad
+            let heading = isFault ? 0.0 : (v.heading_deg !== undefined && v.heading_deg !== null ? Number(v.heading_deg) : (v.heading_degrees || v.rumbo || 0.0));
             let speed = isFault ? 0.0 : ((v.speed_kmh !== undefined && v.speed_kmh !== null) ? Number(v.speed_kmh) : ((v.last_speed_kmh !== undefined && v.last_speed_kmh !== null) ? Number(v.last_speed_kmh) : ((v.velocidad !== undefined && v.velocidad !== null) ? Number(v.velocidad) : 0.0)));
             if (isNaN(speed)) speed = 0.0;
+
+            // Si el móvil está detenido (< 1.5 km/h) y ya tenía un rumbo previo, preservarlo para no rotar la flecha
+            if (speed < 1.5 && markers[busKey] && markers[busKey]._lastHeading !== undefined) {
+                heading = markers[busKey]._lastHeading;
+            }
 
             let popupContent = '';
             if (isFault) {
@@ -3259,6 +3311,7 @@ async def live_map_view(request: Request):
                 if (busCircles[busKey] && !map.hasLayer(busCircles[busKey])) busCircles[busKey].addTo(map);
 
                 marker.setIcon(icon).setPopupContent(popupContent);
+                marker._lastHeading = heading;
 
                 if (animate) {
                     const oldLatLng = marker.getLatLng();
@@ -3544,7 +3597,8 @@ async def live_map_view(request: Request):
             const urlParams = new URLSearchParams(window.location.search);
             const targetBus = urlParams.get('bus');
             if (targetBus && !window._hasAutoFocusedBus) {
-                const matchKey = Object.keys(markers).find(k => k === targetBus || k.endsWith(`_${targetBus}`));
+                const targetKey = (CURRENT_AGENCY ? `${CURRENT_AGENCY}_${targetBus}` : null);
+                const matchKey = (targetKey && markers[targetKey]) ? targetKey : Object.keys(markers).find(k => k === targetBus || k.endsWith(`_${targetBus}`));
                 if (matchKey && markers[matchKey]) {
                     window._hasAutoFocusedBus = true;
                     const m = markers[matchKey];
