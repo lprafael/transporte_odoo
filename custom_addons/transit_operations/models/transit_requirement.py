@@ -175,10 +175,11 @@ class TransitRequirement(models.Model):
             if rec.user_id.concessionaire_id:
                 solicitante_conc_ids.add(rec.user_id.concessionaire_id.id)
 
+            admin_user = self.env.ref('base.user_admin', raise_if_not_found=False)
             is_solicitante_admin = (
                 rec.user_id.has_group('transit_operations.group_transit_manager')
                 or rec.user_id._is_superuser()
-                or (rec.user_id.id == self.env.ref('base.user_admin', raise_if_not_found=False) and self.env.ref('base.user_admin').id)
+                or (admin_user and rec.user_id.id == admin_user.id)
             )
 
             if not is_solicitante_admin and rec.concessionaire_id.id not in solicitante_conc_ids:
