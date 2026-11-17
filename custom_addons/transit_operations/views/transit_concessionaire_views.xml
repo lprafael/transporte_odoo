@@ -116,6 +116,41 @@
                                 </list>
                             </field>
                         </page>
+                        <page string="💳 Billetaje Electrónico" name="billetaje">
+                            <group>
+                                <group string="Configuración de Acceso a la Plataforma">
+                                    <field name="billetaje_provider"/>
+                                    <field name="billetaje_user" invisible="billetaje_provider == 'none'"/>
+                                    <field name="billetaje_password" password="True" invisible="billetaje_provider == 'none'"/>
+                                    <field name="billetaje_eid" invisible="billetaje_provider != 'jaha'"/>
+                                    <field name="billetaje_active" widget="boolean_toggle" invisible="billetaje_provider == 'none'"/>
+                                </group>
+                                <group string="Estado de la Integración">
+                                    <field name="billetaje_last_status" widget="badge"
+                                           decoration-success="billetaje_last_status == 'connected'"
+                                           decoration-danger="billetaje_last_status == 'error'"
+                                           decoration-muted="billetaje_last_status == 'not_configured'"/>
+                                    <field name="billetaje_last_sync"/>
+                                    <div class="mt-2" invisible="billetaje_provider == 'none'">
+                                        <button name="action_test_billetaje_connection"
+                                                type="object"
+                                                string="🔌 Probar Conexión con Billetaje"
+                                                class="btn-primary me-2 mb-2"
+                                                icon="fa-plug"/>
+                                        <button name="action_sync_billetaje_now"
+                                                type="object"
+                                                string="🔄 Sincronizar Validadores Ahora"
+                                                class="btn-secondary mb-2"
+                                                icon="fa-refresh"
+                                                invisible="not billetaje_active"/>
+                                    </div>
+                                </group>
+                            </group>
+                            <group string="Diagnóstico y Logs del Conector" invisible="billetaje_provider == 'none'">
+                                <field name="billetaje_status_details" nolabel="1" readonly="1"
+                                       placeholder="Presione 'Probar Conexión con Billetaje' para verificar la autenticación en vivo..."/>
+                            </group>
+                        </page>
                     </notebook>
                 </sheet>
                 <chatter/>

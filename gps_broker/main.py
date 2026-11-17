@@ -1648,14 +1648,14 @@ def start_billetaje_poller_thread():
         # Primera sincronización tras 10s de arranque
         time.sleep(10)
         try:
-            sync_billetaje_all(redis_client, agency_id="0008")
+            sync_billetaje_all(redis_client)
         except Exception as e:
             logger.debug(f"Aviso sync inicial Billetaje: {e}")
 
         while True:
             try:
                 time.sleep(60)
-                sync_billetaje_all(redis_client, agency_id="0008")
+                sync_billetaje_all(redis_client)
             except Exception as e:
                 logger.debug(f"Aviso en loop Billetaje: {e}")
                 time.sleep(30)

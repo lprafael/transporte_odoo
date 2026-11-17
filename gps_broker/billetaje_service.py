@@ -128,8 +128,50 @@ class BilletajeConnector:
                     self.session = None
         return None
 
-# Instancia singleton del conector
-_connector = BilletajeConnector()
+# Instancias de conectores por empresa (Multi-Tenant)
+_connectors: Dict[str, BilletajeConnector] = {}
+_connectors_lock = threading.Lock()
+
+def get_connector(username: str = BILLETAJE_USER, password: str = BILLETAJE_PASS, eid: int = BILLETAJE_EID) -> BilletajeConnector:
+    key = f"{username}:{eid}"
+    with _connectors_lock:
+        if key not in _connectors:
+            _connectors[key] = BilletajeConnector(username=username, password=password, eid=eid)
+        else:
+            conn = _connectors[key]
+            if conn.password != password:
+                conn.password = password
+                with conn._lock:
+                    conn.session = None
+        return _connectors[key]
+
+# Instancia por defecto compatible
+_connector = get_connector()
+
+def get_db_billetaje_concessionaires() -> List[Dict[str, Any]]:
+    """Consulta en transit_concessionaire (flota_db) las empresas con integración de billetaje activa."""
+    try:
+        from admin_service import get_db_connection
+        from psycopg2.extras import RealDictCursor
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, name, code, agency_id, billetaje_provider, 
+                   billetaje_user, billetaje_password, billetaje_eid, billetaje_active
+            FROM transit_concessionaire
+            WHERE active = true 
+              AND billetaje_active = true 
+              AND billetaje_provider = 'jaha'
+              AND billetaje_user IS NOT NULL 
+              AND billetaje_password IS NOT NULL;
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.debug(f"Aviso consultando credenciales de billetaje en DB: {e}")
+        return []
 
 def resolve_route_from_validator(identificacion: str, sentido: str) -> Optional[str]:
     """Mapea la cadena de identificación del validador y el sentido a nuestro código de ruta oficial."""
@@ -168,25 +210,21 @@ def resolve_route_from_validator(identificacion: str, sentido: str) -> Optional[
 
     return None
 
-def sync_billetaje_all(redis_client, agency_id: str = "0008") -> Dict[str, Any]:
-    """Sincroniza en Redis:
-    1. getMonitoreoPorEmpresa (Ramal oficial del validador por bus)
-    2. getMonitoreoPorEmpresaProductividadPorUnidad (Pasajeros cobrados y recaudación por bus)
-    3. getNetoAndComision (Totales diarios)
-    """
+def sync_billetaje_for_concessionaire(redis_client, agency_id: str, username: str, password: str, eid: int) -> Dict[str, Any]:
+    """Sincroniza datos de billetaje en Redis para una empresa concesionaria específica."""
+    connector = get_connector(username, password, eid)
     res = {
         "status": "success",
+        "agency_id": agency_id,
         "units_synced": 0,
         "productivity_synced": 0,
         "financial_summary": {},
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
-    eid = BILLETAJE_EID
-
     # 1. Monitoreo en Tiempo Real de Validadores
     url_mon = f"{BILLETAJE_BASE_URL}/api1/api/v1/getMonitoreoPorEmpresa?empresa={eid}"
-    mon_data = _connector.fetch_json(url_mon)
+    mon_data = connector.fetch_json(url_mon)
     if isinstance(mon_data, list):
         for item in mon_data:
             dec_unit = str(item.get("unidad") or "").strip()
@@ -212,6 +250,7 @@ def sync_billetaje_all(redis_client, agency_id: str = "0008") -> Dict[str, Any]:
             unit_info = {
                 "unit_dec": dec_unit,
                 "unit_hex": hex_id,
+                "agency_id": agency_id,
                 "identificacion": ident,
                 "sentido": sentido,
                 "tipo_servicio": tipo_srv,
@@ -255,7 +294,7 @@ def sync_billetaje_all(redis_client, agency_id: str = "0008") -> Dict[str, Any]:
 
     # 2. Productividad y Pasajeros por Unidad
     url_prod = f"{BILLETAJE_BASE_URL}/api1/api/v1/getMonitoreoPorEmpresaProductividadPorUnidad?empresa={eid}"
-    prod_data = _connector.fetch_json(url_prod)
+    prod_data = connector.fetch_json(url_prod)
     if isinstance(prod_data, list):
         for p in prod_data:
             dec_unit = str(p.get("unidad") or "").strip()
@@ -275,6 +314,7 @@ def sync_billetaje_all(redis_client, agency_id: str = "0008") -> Dict[str, Any]:
             prod_info = {
                 "unit_dec": dec_unit,
                 "unit_hex": hex_id,
+                "agency_id": agency_id,
                 "passengers_today": pax_count,
                 "revenue_today": amount,
                 "trips_today": trips,
@@ -294,7 +334,7 @@ def sync_billetaje_all(redis_client, agency_id: str = "0008") -> Dict[str, Any]:
     # 3. Resumen Financiero Diario
     today_str = datetime.now().strftime("%Y-%m-%d")
     url_fin = f"{BILLETAJE_BASE_URL}/getNetoAndComision?fechaInicio={today_str}&fechaFin={today_str}"
-    fin_data = _connector.fetch_json(url_fin)
+    fin_data = connector.fetch_json(url_fin)
     if isinstance(fin_data, dict) and fin_data.get("cantidad") is not None:
         res["financial_summary"] = fin_data
         if redis_client:
@@ -304,11 +344,55 @@ def sync_billetaje_all(redis_client, agency_id: str = "0008") -> Dict[str, Any]:
                 pass
 
     logger.info(
-        f"✅ Sincronización Billetaje Jaha completada: {res['units_synced']} validadores, "
+        f"✅ [{agency_id}] Sincronización Billetaje Jaha completada: {res['units_synced']} validadores, "
         f"{res['productivity_synced']} unidades con pasajes cobrados hoy. "
         f"Total pasajes hoy: {res['financial_summary'].get('cantidad', '--')}."
     )
     return res
+
+def sync_billetaje_all(redis_client, agency_id: Optional[str] = None) -> Dict[str, Any]:
+    """Sincroniza para una agencia específica o para todas las que tengan credenciales en BD."""
+    db_configs = get_db_billetaje_concessionaires()
+
+    if agency_id and agency_id != "all":
+        target_cfg = next((c for c in db_configs if c.get("agency_id") == agency_id), None)
+        if target_cfg:
+            return sync_billetaje_for_concessionaire(
+                redis_client,
+                agency_id=target_cfg["agency_id"],
+                username=target_cfg["billetaje_user"],
+                password=target_cfg["billetaje_password"],
+                eid=int(target_cfg.get("billetaje_eid") or BILLETAJE_EID)
+            )
+        else:
+            return sync_billetaje_for_concessionaire(
+                redis_client,
+                agency_id=agency_id,
+                username=BILLETAJE_USER,
+                password=BILLETAJE_PASS,
+                eid=BILLETAJE_EID
+            )
+
+    if db_configs:
+        results = {}
+        for cfg in db_configs:
+            ag = cfg.get("agency_id") or "0008"
+            results[ag] = sync_billetaje_for_concessionaire(
+                redis_client,
+                agency_id=ag,
+                username=cfg["billetaje_user"],
+                password=cfg["billetaje_password"],
+                eid=int(cfg.get("billetaje_eid") or BILLETAJE_EID)
+            )
+        return {"status": "success", "companies": results}
+    else:
+        return sync_billetaje_for_concessionaire(
+            redis_client,
+            agency_id="0008",
+            username=BILLETAJE_USER,
+            password=BILLETAJE_PASS,
+            eid=BILLETAJE_EID
+        )
 
 def get_cached_billetaje_prod(redis_client, bus_id: str, agency_id: str = "004B") -> Dict[str, Any]:
     """Obtiene los pasajes y recaudación del día para un bus desde Redis."""
