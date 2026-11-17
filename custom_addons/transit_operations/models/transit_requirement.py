@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from odoo import api, fields, models, _
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 
 class TransitRequirement(models.Model):
     _name = 'transit.requirement'
@@ -21,12 +21,31 @@ class TransitRequirement(models.Model):
         default='Nuevo',
         tracking=True
     )
+    is_transit_manager = fields.Boolean(
+        string='Es Administrador Global',
+        compute='_compute_is_transit_manager'
+    )
+
+    def _compute_is_transit_manager(self):
+        is_mgr = self.env.is_superuser() or self.env.user.has_group('transit_operations.group_transit_manager')
+        for rec in self:
+            rec.is_transit_manager = is_mgr
+
     user_id = fields.Many2one(
         'res.users',
         string='Usuario Solicitante',
         default=lambda self: self.env.user,
         required=True,
-        tracking=True
+        tracking=True,
+        domain="""[
+            ('share', '=', False),
+            ('active', '=', True),
+            '|',
+                ('id', '=', uid),
+                '|',
+                    ('concessionaire_id', '=', concessionaire_id),
+                    ('concessionaire_ids', 'in', concessionaire_id)
+        ] if concessionaire_id else [('id', '=', uid)]"""
     )
     assigned_id = fields.Many2one(
         'res.users',
@@ -98,6 +117,92 @@ class TransitRequirement(models.Model):
         readonly=True
     )
     color = fields.Integer(string='Índice de Color', compute='_compute_color')
+
+    @api.onchange('concessionaire_id')
+    def _onchange_concessionaire_id_filter_user(self):
+        """Al cambiar o seleccionar la empresa concesionaria, restringe los usuarios solicitantes a su propio personal."""
+        if self.concessionaire_id:
+            user_conc_ids = set(self.user_id.concessionaire_ids.ids)
+            if self.user_id.concessionaire_id:
+                user_conc_ids.add(self.user_id.concessionaire_id.id)
+
+            current_user_conc_ids = set(self.env.user.concessionaire_ids.ids)
+            if self.env.user.concessionaire_id:
+                current_user_conc_ids.add(self.env.user.concessionaire_id.id)
+
+            is_cur_user_in_conc = self.concessionaire_id.id in current_user_conc_ids
+            is_cur_user_admin = self.env.user.has_group('transit_operations.group_transit_manager') or self.env.is_superuser()
+
+            if is_cur_user_in_conc:
+                self.user_id = self.env.user
+            elif self.concessionaire_id.id not in user_conc_ids and not (self.user_id.has_group('transit_operations.group_transit_manager') or self.user_id._is_superuser()):
+                matching_user = self.env['res.users'].search([
+                    ('active', '=', True),
+                    ('share', '=', False),
+                    '|', ('concessionaire_id', '=', self.concessionaire_id.id),
+                         ('concessionaire_ids', 'in', self.concessionaire_id.id)
+                ], limit=1)
+                self.user_id = matching_user or (self.env.user if is_cur_user_admin else False)
+
+            return {
+                'domain': {
+                    'user_id': [
+                        ('share', '=', False),
+                        ('active', '=', True),
+                        '|', ('id', '=', self.env.uid),
+                        '|', ('concessionaire_id', '=', self.concessionaire_id.id),
+                             ('concessionaire_ids', 'in', self.concessionaire_id.id)
+                    ]
+                }
+            }
+        else:
+            return {
+                'domain': {
+                    'user_id': [('id', '=', self.env.uid)]
+                }
+            }
+
+    @api.constrains('user_id', 'concessionaire_id')
+    def _check_user_concessionaire_consistency(self):
+        """Valida que un usuario solo pueda registrar solicitudes a su nombre o a nombre de colaboradores de su empresa."""
+        is_global_mgr = self.env.is_superuser() or self.env.user.has_group('transit_operations.group_transit_manager')
+        for rec in self:
+            if not rec.user_id or not rec.concessionaire_id:
+                continue
+
+            # El usuario solicitante debe pertenecer a la empresa de la solicitud (o ser administrador global)
+            solicitante_conc_ids = set(rec.user_id.concessionaire_ids.ids)
+            if rec.user_id.concessionaire_id:
+                solicitante_conc_ids.add(rec.user_id.concessionaire_id.id)
+
+            is_solicitante_admin = (
+                rec.user_id.has_group('transit_operations.group_transit_manager')
+                or rec.user_id._is_superuser()
+                or (rec.user_id.id == self.env.ref('base.user_admin', raise_if_not_found=False) and self.env.ref('base.user_admin').id)
+            )
+
+            if not is_solicitante_admin and rec.concessionaire_id.id not in solicitante_conc_ids:
+                raise ValidationError(
+                    _(
+                        "Violación de Seguridad Multi-Tenant: El usuario solicitante '%(user)s' no pertenece a la empresa concesionaria '%(company)s'. Solo puede cargar solicitudes a su propio nombre o a nombre de colaboradores de su misma empresa.",
+                        user=rec.user_id.name,
+                        company=rec.concessionaire_id.name
+                    )
+                )
+
+            # Si el usuario que está guardando el registro NO es administrador global:
+            if not is_global_mgr:
+                current_user_conc_ids = set(self.env.user.concessionaire_ids.ids)
+                if self.env.user.concessionaire_id:
+                    current_user_conc_ids.add(self.env.user.concessionaire_id.id)
+
+                if rec.concessionaire_id.id not in current_user_conc_ids:
+                    raise ValidationError(
+                        _(
+                            "Acceso Denegado: No tiene permisos para registrar o gestionar requerimientos en nombre de la empresa '%(company)s'.",
+                            company=rec.concessionaire_id.name
+                        )
+                    )
 
     @api.depends('stage', 'priority')
     def _compute_color(self):

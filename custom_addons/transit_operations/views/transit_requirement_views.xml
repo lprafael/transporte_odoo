@@ -172,13 +172,18 @@
                     </div>
                     <group>
                         <group string="Datos del Requerimiento">
-                            <field name="concessionaire_id" options="{'no_create': True}"/>
+                            <field name="is_transit_manager" invisible="1"/>
+                            <field name="concessionaire_id" 
+                                   options="{'no_create': True, 'no_open': True}"
+                                   readonly="not is_transit_manager and concessionaire_id"/>
                             <field name="category"/>
                             <field name="module_affected"/>
                             <field name="priority" widget="priority"/>
                         </group>
                         <group string="Seguimiento y Responsables">
-                            <field name="user_id" options="{'no_create': True}"/>
+                            <field name="user_id" 
+                                   options="{'no_create': True, 'no_open': True}"
+                                   domain="[('share', '=', False), '|', ('id', '=', uid), '|', ('concessionaire_id', '=', concessionaire_id), ('concessionaire_ids', 'in', concessionaire_id)] if concessionaire_id else [('id', '=', uid)]"/>
                             <field name="assigned_id" options="{'no_create': True}" groups="transit_operations.group_transit_manager"/>
                             <field name="date_submitted"/>
                             <field name="date_resolved" invisible="not date_resolved"/>
@@ -215,7 +220,8 @@
         <field name="search_view_id" ref="view_transit_requirement_search"/>
         <field name="context">{
             'search_default_group_by_stage': 1,
-            'default_category': 'adjustment'
+            'default_category': 'adjustment',
+            'default_user_id': uid
         }</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
