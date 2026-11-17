@@ -8,12 +8,34 @@ detecta pegonamiento (buses muy juntos) y genera la interfaz visual interactiva.
 import os
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger("headway_service")
+
+def is_inside_terminal_or_depot(lat, lon, terminal_stops: List[Dict[str, Any]]) -> bool:
+    """Verifica si las coordenadas dadas caen dentro del radio de alguna terminal, parada cabecera o depósito."""
+    if lat is None or lon is None or not terminal_stops:
+        return False
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+        if lat_f == 0.0 and lon_f == 0.0:
+            return False
+        for t in terminal_stops:
+            t_lat = t.get("lat")
+            t_lon = t.get("lon")
+            rad = float(t.get("radius_meters") or 150)
+            if t_lat is not None and t_lon is not None:
+                dy = (lat_f - float(t_lat)) * 111000.0
+                dx = (lon_f - float(t_lon)) * 100000.0
+                if (dx * dx + dy * dy) <= (rad * rad):
+                    return True
+    except Exception:
+        pass
+    return False
 
 try:
     from billetaje_service import get_cached_billetaje_prod, get_cached_financial_summary
@@ -32,8 +54,9 @@ PG_PASS = os.getenv("PG_PASS", "odoo_password")
 def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: Optional[str] = None) -> Dict[str, Any]:
     """Recopila rutas activas y calcula distancias relativas e intervalos entre buses con soporte multi-tenant."""
     routes_dict = {}
+    terminal_stops = []
     
-    # 1. Obtener catálogo oficial de ramales desde PostgreSQL
+    # 1. Obtener catálogo oficial de ramales y paradas cabecera/terminal desde PostgreSQL
     try:
         conn = psycopg2.connect(
             host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2
@@ -87,6 +110,16 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
                 "bunching_count": 0,
                 "status": "NO_BUSES"
             }
+
+        # Cargar terminales / cabeceras / cocheras para filtrado espacial preciso
+        cur.execute("""
+            SELECT id, stop_code, name, stop_type, radius_meters,
+                   ST_Y(geom) as lat, ST_X(geom) as lon
+            FROM transit_stop
+            WHERE stop_type IN ('origin', 'destination', 'terminal', 'depot')
+               OR radius_meters >= 100;
+        """)
+        terminal_stops = [dict(row) for row in cur.fetchall()]
         cur.close()
         conn.close()
     except Exception as e:
@@ -205,7 +238,7 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
         state = b.get("state") or b.get("current_state") or "IN_TRANSIT"
         is_gps_fault = b.get("is_gps_fault", False)
 
-        # Comprobar antigüedad del último ping (si lleva >30 min sin reportar, no está circulando)
+        # Comprobar antigüedad del último ping (si lleva >15 min sin reportar, está inactivo / fuera de servicio)
         last_ping = b.get("last_ping_time", "")
         if last_ping:
             try:
@@ -214,10 +247,10 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
                 mins_ago = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
-                if mins_ago > 30.0:
+                if mins_ago > 15.0:
                     is_gps_fault = True
             except Exception:
-                pass
+                is_gps_fault = True
         else:
             is_gps_fault = True
 
@@ -234,14 +267,19 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
         else:
             pct = 0.0
 
+        lat_val = b.get("last_latitude") if b.get("last_latitude") is not None else b.get("latitude")
+        lon_val = b.get("last_longitude") if b.get("last_longitude") is not None else b.get("longitude")
+        is_in_terminal_area = is_inside_terminal_or_depot(lat_val, lon_val, terminal_stops)
+
         # 🛑 Detección estricta de Cabecera / Terminal / Depósito / No Circulando:
         is_at_terminal = (
             state in ("AT_ORIGIN", "AT_DESTINATION", "DEPOT", "GPS_FAULT") or
             is_gps_fault or
-            (pct <= 2.0 and speed < 5.0) or
-            (pct >= 98.0 and speed < 5.0) or
-            (total_km > 0 and (total_km - dist_km) <= 0.4 and speed < 5.0) or
-            (dist_km <= 0.4 and speed < 5.0)
+            (is_in_terminal_area and speed < 8.0) or
+            (pct <= 3.0 and speed < 5.0) or
+            (pct >= 97.0 and speed < 5.0) or
+            (total_km > 0 and (total_km - dist_km) <= 0.6 and speed < 5.0) or
+            (dist_km <= 0.6 and speed < 5.0)
         )
 
         # Excluir del tablero lineal los buses que están en cabecera o sin circulación activa
@@ -329,31 +367,39 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
             est_minutes = round(gap_km * 2.4, 1)
 
             # 🛑 Obviar los pegonamientos en las terminales / cabeceras (espera o regulación programada)
+            b_lead_in_term = is_inside_terminal_or_depot(b_leader.get("latitude"), b_leader.get("longitude"), terminal_stops)
+            b_trail_in_term = is_inside_terminal_or_depot(b_trailer.get("latitude"), b_trailer.get("longitude"), terminal_stops)
+
             is_terminal_wait = (
+                b_lead_in_term or b_trail_in_term or
                 b_leader.get("state") in ("AT_ORIGIN", "AT_DESTINATION", "DEPOT", "GPS_FAULT") or
                 b_trailer.get("state") in ("AT_ORIGIN", "AT_DESTINATION", "DEPOT", "GPS_FAULT") or
-                b_leader.get("progress_percent", 0.0) <= 4.0 or b_leader.get("progress_percent", 0.0) >= 96.0 or
-                b_trailer.get("progress_percent", 0.0) <= 4.0 or b_trailer.get("progress_percent", 0.0) >= 96.0 or
-                b_leader.get("distance_traveled_km", 0.0) <= 0.6 or
-                b_trailer.get("distance_traveled_km", 0.0) <= 0.6 or
-                (total_km > 0 and (total_km - b_leader.get("distance_traveled_km", 0.0)) <= 0.6) or
-                (total_km > 0 and (total_km - b_trailer.get("distance_traveled_km", 0.0)) <= 0.6)
+                b_leader.get("progress_percent", 0.0) <= 6.0 or b_leader.get("progress_percent", 0.0) >= 94.0 or
+                b_trailer.get("progress_percent", 0.0) <= 6.0 or b_trailer.get("progress_percent", 0.0) >= 94.0 or
+                b_leader.get("distance_traveled_km", 0.0) <= 2.2 or
+                b_trailer.get("distance_traveled_km", 0.0) <= 2.2 or
+                (total_km > 0 and (total_km - b_leader.get("distance_traveled_km", 0.0)) <= 1.0) or
+                (total_km > 0 and (total_km - b_trailer.get("distance_traveled_km", 0.0)) <= 1.0)
             )
 
-            # 🛑 Obviar pegonamiento si un bus está operando en parada de pasajeros (detenido a <= 5 km/h)
-            # y el coche que viene detrás aún se encuentra a una distancia prudencial (gap >= 250m)
+            # 🚏 Pegonamiento permitido en paradas (ascenso/descenso de pasajeros o espera operativa):
+            # En las paradas los buses se juntan de forma natural y permitida.
+            # Si ambos coches están detenidos (<= 5 km/h) o al menos uno está operando detenido en parada,
+            # NO constituye pegonamiento en servicio.
             is_stop_dwell = (
-                (b_leader.get("speed_kmh", 0.0) <= 5.0 or b_trailer.get("speed_kmh", 0.0) <= 5.0) and
-                gap_km >= 0.25
+                (b_leader.get("speed_kmh", 0.0) <= 5.0 or b_trailer.get("speed_kmh", 0.0) <= 5.0)
             )
 
             # Clasificación de Intervalo y Detección Real de Pegonamiento
             if is_terminal_wait:
                 severity = "TERMINAL_WAIT"  # 🟡 En espera en cabecera / terminal (obviar pegonamiento)
             elif is_stop_dwell:
-                severity = "STOP_DWELL"     # 🚏 En parada (ascenso/descenso de pasajeros a distancia prudencial)
-            elif gap_km < 0.30:             # 🚨 Pegonamiento real en calle (< 300 metros = en la misma cuadra pegados)
-                severity = "CRITICAL" # 🚨 Pegonamiento real en ruta
+                severity = "STOP_DWELL"     # 🚏 En parada (permitido: coincidencia en parada de pasajeros)
+                b_leader["is_at_stop"] = True
+                b_trailer["is_at_stop"] = True
+            elif gap_km < 0.35 and (b_leader.get("speed_kmh", 0.0) > 5.0 and b_trailer.get("speed_kmh", 0.0) > 5.0):
+                # 🚨 Pegonamiento real en calle (< 350 metros y AMBOS en movimiento en la vía pública)
+                severity = "CRITICAL"
                 b_leader["is_bunching"] = True
                 b_trailer["is_bunching"] = True
                 b_leader["bunching_with"] = b_trailer["bus_id"]
@@ -366,7 +412,7 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
                 total_bunching_alerts += 1
                 r_data["status"] = "PEGONAMIENTO"
             elif gap_km <= 0.80:
-                severity = "WARNING"  # ⚠️ Intervalo corto (300m - 800m) - Precaución preventiva pero no pegonamiento crítico
+                severity = "WARNING"  # ⚠️ Intervalo corto (350m - 800m) - Precaución preventiva pero no pegonamiento crítico
                 if r_data["status"] != "PEGONAMIENTO":
                     r_data["status"] = "ADVERTENCIA"
             elif gap_km <= 5.5:
@@ -1862,7 +1908,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                                 const isTerminal = hw.severity === 'TERMINAL_WAIT';
                                 const isStopDwell = hw.severity === 'STOP_DWELL';
                                 const cls = isCrit ? 'critical' : (isTerminal ? 'terminal' : (isStopDwell ? 'stop_dwell' : (hw.severity === 'WARNING' ? 'warning' : 'optimal')));
-                                const badgePrefix = isCrit ? '🚨 Pegonamiento: ' : (isTerminal ? '🟡 Cabecera: ' : (isStopDwell ? '🚏 En Parada: ' : (hw.severity === 'WARNING' ? '⚠️ Corto: ' : '')));
+                                const badgePrefix = isCrit ? '🚨 Pegonamiento: ' : (isTerminal ? '🟡 Cabecera: ' : (isStopDwell ? '🚏 En Parada (Permitido): ' : (hw.severity === 'WARNING' ? '⚠️ Corto: ' : '')));
                                 return `
                                     <div class="headway-segment ${cls}" style="left: ${hw.left_pct}%; width: ${hw.width_pct}%;">
                                         <div class="headway-badge ${cls}">
@@ -1943,7 +1989,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                                             ${b.is_bunching 
                                                 ? '<span style="color: #f87171; font-weight: 700;">🚨 PEGONAMIENTO DETECTADO</span>' 
                                                 : (b.speed_kmh <= 5.0 && b.state !== 'AT_ORIGIN' && b.state !== 'AT_DESTINATION' && b.state !== 'GPS_FAULT'
-                                                    ? '<span style="color: #38bdf8; font-weight: 600;">🚏 En Parada (Operando)</span>' 
+                                                    ? '<span style="color: #38bdf8; font-weight: 600;">🚏 En Parada (Permitido)</span>' 
                                                     : (b.state === 'AT_ORIGIN' || b.state === 'AT_DESTINATION'
                                                         ? '<span style="color: #fbbf24; font-weight: 600;">🟡 En Terminal / Cabecera</span>'
                                                         : '<span style="color: #34d399;">✓ Intervalo Regular</span>'
