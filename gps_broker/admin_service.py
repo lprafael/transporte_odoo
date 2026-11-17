@@ -40,9 +40,9 @@ def list_concessionaires() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Error listando concesionarias en PG: {e}")
         return [
-            {"id": 1, "name": "Consorcio Arapotí (Línea 20)", "code": "004B", "short_name": "Arapotí"},
-            {"id": 2, "name": "Master Bus S.A.", "code": "005B", "short_name": "Master Bus"},
-            {"id": 3, "name": "Transportes San Lorenzo S.R.L. (Línea 27)", "code": "CONC-SL01", "short_name": "San Lorenzo"}
+            {"id": 4, "name": "Consorcio Arapotí (Línea 20)", "code": "004B", "short_name": "Arapotí"},
+            {"id": 14, "name": "Automotores Guaraní S.R.L. (Líneas 15 / 47)", "code": "0008", "short_name": "Guaraní"},
+            {"id": 15, "name": "San José Obrero S.A. (Línea 187)", "code": "002A", "short_name": "San José Obrero"}
         ]
 
 def list_system_users() -> List[Dict[str, Any]]:
