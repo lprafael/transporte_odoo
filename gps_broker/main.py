@@ -234,6 +234,80 @@ def save_vehicle_state(bus_id: str, state: Dict[str, Any], agency_id: Optional[s
         except Exception as e:
             logger.debug(f"Redis set error: {e}")
 
+_pg_thread_local = threading.local()
+
+def _get_thread_pg_conn():
+    conn = getattr(_pg_thread_local, "conn", None)
+    if conn is None or conn.closed:
+        conn = psycopg2.connect(
+            host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2
+        )
+        conn.autocommit = True
+        _pg_thread_local.conn = conn
+    return conn
+
+_VEHICLE_INFO_CACHE: Dict[Tuple[str, str], Dict[str, str]] = {}
+_VEHICLE_CACHE_LAST_LOAD: float = 0.0
+
+def get_cached_vehicle_metadata(agency_id: str, bus_id: str) -> Optional[Dict[str, str]]:
+    global _VEHICLE_INFO_CACHE, _VEHICLE_CACHE_LAST_LOAD
+    now_ts = time.time()
+    if (now_ts - _VEHICLE_CACHE_LAST_LOAD > 300) or not _VEHICLE_INFO_CACHE:
+        try:
+            conn = _get_thread_pg_conn()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT COALESCE(c.agency_id, '004B'), v.bus_internal_number, v.license_plate
+                FROM fleet_vehicle v
+                JOIN transit_concessionaire c ON v.concessionaire_id = c.id
+                WHERE v.active = true;
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            new_cache = {}
+            for ag, num, plate in rows:
+                if not num:
+                    continue
+                ag_str = str(ag).strip().upper()
+                num_str = str(num).strip()
+                plate_str = str(plate or "").strip()
+                try:
+                    num_int = int(num_str)
+                    hex_5 = f"{num_int:05x}"
+                    hex_short = f"{num_int:x}"
+                except Exception:
+                    hex_5 = ""
+                    hex_short = ""
+
+                info = {
+                    "bus_number": num_str,
+                    "license_plate": plate_str,
+                    "hex_5": hex_5,
+                    "bus_display": f"Coche {num_str} (#{hex_5})" if hex_5 else f"Coche {num_str}"
+                }
+                new_cache[(ag_str, num_str.lower())] = info
+                if hex_5:
+                    new_cache[(ag_str, hex_5.lower())] = info
+                    new_cache[(ag_str, hex_short.lower())] = info
+                if plate_str:
+                    new_cache[(ag_str, plate_str.lower())] = info
+                # Global lookup across agencies
+                new_cache[("ALL", num_str.lower())] = info
+                if hex_5:
+                    new_cache[("ALL", hex_5.lower())] = info
+                if plate_str:
+                    new_cache[("ALL", plate_str.lower())] = info
+            _VEHICLE_INFO_CACHE = new_cache
+            _VEHICLE_CACHE_LAST_LOAD = now_ts
+        except Exception as e:
+            logger.debug(f"Error loading vehicle metadata cache: {e}")
+
+    if not bus_id:
+        return None
+    clean_bus = str(bus_id).strip().lower()
+    ag_key = str(agency_id or "").strip().upper()
+    return _VEHICLE_INFO_CACHE.get((ag_key, clean_bus)) or _VEHICLE_INFO_CACHE.get(("ALL", clean_bus))
+
 def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
     lat = v.get("last_latitude") if v.get("last_latitude") is not None else v.get("latitude")
     lon = v.get("last_longitude") if v.get("last_longitude") is not None else v.get("longitude")
@@ -278,10 +352,32 @@ def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
     checkpoints = v.get("crossed_checkpoints", [])
     if isinstance(checkpoints, set):
         checkpoints = list(checkpoints)
+
+    bus_raw = str(v.get("bus_id") or "").strip()
+    agency_val = str(v.get("agency_id") or "004B").strip()
+    meta = get_cached_vehicle_metadata(agency_val, bus_raw)
+
+    bus_num = meta.get("bus_number") if meta else (v.get("bus_number") or "")
+    if not bus_num and bus_raw:
+        try:
+            bus_num = str(int(bus_raw, 16))
+        except Exception:
+            bus_num = bus_raw
+
+    plate = v.get("license_plate")
+    if (not plate or plate.startswith("COCHE-")) and meta and meta.get("license_plate"):
+        plate = meta["license_plate"]
+    if not plate:
+        plate = f"COCHE-{bus_num or bus_raw}"
+
+    bus_disp = f"Coche {bus_num} (#{bus_raw})" if (bus_num and bus_num.lower() != bus_raw.lower() and bus_raw.replace("0", "")) else (f"Coche {bus_num}" if bus_num else bus_raw)
+
     return {
         "vehicle_key": f"{v.get('agency_id', '004B')}_{v.get('bus_id')}",
         "bus_id": v.get("bus_id"),
-        "license_plate": v.get("license_plate") or f"COCHE-{v.get('bus_id')}",
+        "bus_number": bus_num,
+        "bus_display": bus_disp,
+        "license_plate": plate,
         "agency_id": v.get("agency_id", "004B"),
         "route_id": v.get("route_id", ""),
         "state": state,
@@ -489,18 +585,6 @@ def calculate_bearing_degrees(lat1: float, lon1: float, lat2: float, lon2: float
     x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(delta_lambda)
     bearing = math.degrees(math.atan2(y, x))
     return round((bearing + 360.0) % 360.0, 1)
-
-_pg_thread_local = threading.local()
-
-def _get_thread_pg_conn():
-    conn = getattr(_pg_thread_local, "conn", None)
-    if conn is None or conn.closed:
-        conn = psycopg2.connect(
-            host=PG_HOST, port=PG_PORT, dbname=PG_DB, user=PG_USER, password=PG_PASS, connect_timeout=2
-        )
-        conn.autocommit = True
-        _pg_thread_local.conn = conn
-    return conn
 
 def get_bus_active_dispatch(bus_id: str, agency_id: str = None) -> Optional[Dict[str, Any]]:
     """Consulta si el vehículo tiene un despacho activo en Odoo hoy para fijar su ramal oficial."""
@@ -2550,13 +2634,23 @@ async def live_map_view(request: Request):
         .legend-line { width: 20px; height: 4px; border-radius: 2px; }
 
         /* Estilos de Marcadores Direccionales SVG con Badge de Velocidad */
+        .custom-bus-icon {
+            overflow: visible !important;
+            background: transparent !important;
+            border: none !important;
+        }
         .bus-marker-wrap {
             display: flex;
             flex-direction: column;
             align-items: center;
-            position: relative;
+            justify-content: center;
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
             user-select: none;
             pointer-events: auto;
+            white-space: nowrap;
         }
         .bus-speed-badge {
             background: rgba(15, 23, 42, 0.95);
@@ -2593,12 +2687,27 @@ async def live_map_view(request: Request):
             background: #0f172a;
             color: #ffffff;
             border: 1px solid #475569;
-            border-radius: 5px;
-            font-size: 9px;
+            border-radius: 6px;
+            font-size: 10px;
             font-weight: 700;
-            padding: 1px 4px;
+            padding: 2px 6px;
             margin-top: 2px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+            white-space: nowrap;
+            letter-spacing: 0.2px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        .bus-number-badge strong {
+            color: #ffffff;
+            font-weight: 800;
+        }
+        .bus-number-badge .hex-tag {
+            color: #94a3b8;
+            font-size: 8.5px;
+            font-weight: 500;
         }
         .bus-speed-badge.wrong-dir {
             background: #d97706;
@@ -2731,8 +2840,11 @@ async def live_map_view(request: Request):
                         <option value="ALL">Todos los Ramales</option>
                     </select>
                 </div>
+                <div style="margin-top: 6px;">
+                    <input type="text" id="txt-bus-search" placeholder="🔍 Buscar Coche (ej. 38, 76), Placa o ID..." oninput="onBusSearchChange()" style="background: #1e293b; color: #f8fafc; border: 1px solid #334155; padding: 5px 8px; border-radius: 6px; font-size: 11px; outline: none; width: 100%; box-sizing: border-box;">
+                </div>
 
-                <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px;">
                     <span style="font-size: 11px; color: #cbd5e1;">Buses: <strong id="lbl-visible-count" style="color: #38bdf8;">0</strong> / <span id="lbl-total-count">0</span></span>
                     <div style="display: flex; gap: 4px;">
                         <button type="button" class="btn-quick-filter" id="btn-quick-wrong-dir" style="background: #d97706; display: none;" onclick="filterOnlyWrongDir()" title="Filtrar buses con IDRuta en contrasentido">⚠️ Contrasentido (<span id="lbl-wrong-dir-count">0</span>)</button>
@@ -3065,6 +3177,32 @@ async def live_map_view(request: Request):
         }
 
         /* -------------------------------------------------------------
+           Formateo Inteligente de Coche / Bus (Número Interno + Hex GPS)
+        ------------------------------------------------------------- */
+        function formatBusInfo(v) {
+            if (!v) return { num: '?', hex: '?', badgeHtml: '?', badgeText: '?', shortText: '' };
+            const hex = String(v.bus_id || '').trim();
+            let num = v.bus_number ? String(v.bus_number).trim() : '';
+            if (!num && hex) {
+                if (/^[0-9a-fA-F]+$/.test(hex)) {
+                    const dec = parseInt(hex, 16);
+                    if (!isNaN(dec)) num = String(dec);
+                }
+            }
+            if (!num) num = hex;
+            const isDifferent = hex && (hex.toLowerCase() !== num.toLowerCase()) && (hex.replace(/^0+/, '') !== num);
+            return {
+                num: num,
+                hex: hex,
+                badgeHtml: isDifferent 
+                    ? `<strong>Coche ${num}</strong><span class="hex-tag">(#${hex})</span>` 
+                    : `<strong>Coche ${num}</strong>`,
+                badgeText: isDifferent ? `Coche ${num} (#${hex})` : `Coche ${num}`,
+                shortText: `Coche ${num}`
+            };
+        }
+
+        /* -------------------------------------------------------------
            Punto 3: Icono SVG Direccional Rotativo + Badge de Velocidad
         ------------------------------------------------------------- */
         function createBusDivIcon(v, markerColor, heading, speed) {
@@ -3073,6 +3211,7 @@ async def live_map_view(request: Request):
             const isOverSpeed = speed > 70.0;
             const isWrongDir = !!v.wrong_direction_alert;
             const headingDeg = Math.round(heading || 0);
+            const bInfo = formatBusInfo(v);
 
             const iconHtml = `
                 <div class="bus-marker-wrap ${isWrongDir ? 'wrong-dir' : ''}">
@@ -3086,7 +3225,7 @@ async def live_map_view(request: Request):
                         </svg>
                         `}
                     </div>
-                    <div class="bus-number-badge">${isWrongDir ? '⚠️ #' : '#'}${v.bus_id}</div>
+                    <div class="bus-number-badge" title="${bInfo.badgeText} · Placa: ${v.license_plate || '--'}">${isWrongDir ? '⚠️ ' : ''}${bInfo.badgeHtml}</div>
                 </div>
             `;
             return L.divIcon({
@@ -3153,9 +3292,23 @@ async def live_map_view(request: Request):
         }
 
         /* -------------------------------------------------------------
-           Punto 4: Verificación de Visibilidad por Filtro de Ramal y Checkbox
+           Punto 4: Verificación de Visibilidad por Filtro de Ramal, Búsqueda y Checkbox
         ------------------------------------------------------------- */
         function isBusVisibleByFilter(v) {
+            const searchInput = document.getElementById('txt-bus-search');
+            if (searchInput && searchInput.value.trim()) {
+                const q = searchInput.value.trim().toLowerCase();
+                const bInfo = formatBusInfo(v);
+                const matchNum = bInfo.num.toLowerCase().includes(q);
+                const matchHex = bInfo.hex.toLowerCase().includes(q);
+                const matchPlate = (v.license_plate || '').toLowerCase().includes(q);
+                const matchRoute = (v.route_id || '').toLowerCase().includes(q);
+                const matchLine = (v.line_name || '').toLowerCase().includes(q);
+                if (!matchNum && !matchHex && !matchPlate && !matchRoute && !matchLine) {
+                    return false;
+                }
+            }
+
             const selectedRoute = document.getElementById('sel-route-filter')?.value || 'ALL';
             const showFaults = document.getElementById('chk-show-faults')?.checked ?? true;
             if (v._isFault && !showFaults) return false;
@@ -3177,6 +3330,10 @@ async def live_map_view(request: Request):
             if (busVisibility[busKey] === false) return false;
 
             return true;
+        }
+
+        function onBusSearchChange() {
+            updateUI(false);
         }
 
         /* -------------------------------------------------------------
@@ -3250,6 +3407,7 @@ async def live_map_view(request: Request):
                 heading = markers[busKey]._lastHeading;
             }
 
+            const bInfo = formatBusInfo(v);
             let popupContent = '';
             if (isFault) {
                 popupContent = `
@@ -3258,7 +3416,13 @@ async def live_map_view(request: Request):
                             <span>📡⚠️</span>
                             <span>COMUNICAR FALLA DE GPS</span>
                         </div>
-                        <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
+                        <div style="font-size: 13px; font-weight: 800; color: #ffffff; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+                            <span>🚍 Coche ${bInfo.num}</span>
+                            <span style="font-size: 10px; font-weight: 600; color: #94a3b8; background: #1e293b; padding: 2px 6px; border-radius: 4px; border: 1px solid #334155;">ID: #${bInfo.hex}</span>
+                        </div>
+                        <div style="font-size: 11px; color: #cbd5e1; margin-bottom: 6px;">
+                            Placa: <b style="color: #38bdf8;">${v.license_plate || '--'}</b>
+                        </div>
                         Ramal: <b>${v.route_id || '--'}</b> (${v.agency_id || '004B'})<br>
                         Estado: <b style="color: #ef4444;">Sin señal GPS hace ${Math.round(v._minsAgo)} min</b><br>
                         Velocidad: <b>0.0 km/h (Detenido / Sin transmisión)</b><br>
@@ -3280,8 +3444,14 @@ async def live_map_view(request: Request):
                 popupContent = `
                     <div style="min-width: 210px;">
                         ${wrongDirBanner}
-                        <b>🚍 Coche #${v.bus_id} (${v.license_plate})</b><br>
-                        ${v.line_name ? `Línea: <b style="color: #38bdf8;">${v.line_name}</b><br>` : ''}
+                        <div style="font-size: 13px; font-weight: 800; color: #ffffff; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+                            <span>🚍 Coche ${bInfo.num}</span>
+                            <span style="font-size: 10px; font-weight: 600; color: #94a3b8; background: #1e293b; padding: 2px 6px; border-radius: 4px; border: 1px solid #334155;">ID: #${bInfo.hex}</span>
+                        </div>
+                        <div style="font-size: 11px; color: #cbd5e1; margin-bottom: 6px;">
+                            Placa: <b style="color: #38bdf8;">${v.license_plate || '--'}</b>
+                            ${v.line_name ? ` · Línea: <b style="color: #fbbf24;">${v.line_name}</b>` : ''}
+                        </div>
                         Ramal: <b>${v.route_id}</b> (${v.agency_id})<br>
                         Estado: <b style="color: ${v.wrong_direction_alert ? '#f59e0b' : markerColor};">${v.wrong_direction_alert ? '⚠️ En Contrasentido' : estadoEsp}</b><br>
                         Rumbo: <b>${Math.round(heading)}°</b> | Velocidad: <b>${speed.toFixed(1)} km/h</b><br>
@@ -3394,14 +3564,23 @@ async def live_map_view(request: Request):
             } else {
                 card.classList.remove('card-wrong-dir');
             }
+
+            const bInfo = formatBusInfo(v);
+            const titleEl = card.querySelector('.bus-title');
+            if (titleEl) {
+                titleEl.innerHTML = `${v.wrong_direction_alert ? '⚠️ ' : ''}🚍 Coche ${bInfo.num} <span style="font-size: 10px; color: #94a3b8; font-weight: normal;">(#${bInfo.hex})</span> <span style="font-size: 11px; color: #38bdf8; font-weight: 600;">(${v.license_plate})</span>`;
+            }
         }
 
         function renderFullSidebarList() {
             const listEl = document.getElementById('bus-list');
             const vehicles = Object.values(activeVehicles).sort((a, b) => {
-                const numA = parseInt(a.bus_id, 10) || 0;
-                const numB = parseInt(b.bus_id, 10) || 0;
-                return numA - numB;
+                const infoA = formatBusInfo(a);
+                const infoB = formatBusInfo(b);
+                const numA = parseInt(infoA.num, 10) || 0;
+                const numB = parseInt(infoB.num, 10) || 0;
+                if (numA !== numB) return numA - numB;
+                return (infoA.hex || '').localeCompare(infoB.hex || '');
             });
 
             const stateLabels = {
@@ -3427,13 +3606,14 @@ async def live_map_view(request: Request):
                 const isChecked = busVisibility[busKey] !== false;
                 const cardClass = isFault ? 'card-fault' : (isWrongDir ? 'card-wrong-dir' : '');
                 const lineBadge = v.line_name ? `<span class="bus-line-badge">${v.line_name}</span>` : '';
+                const bInfo = formatBusInfo(v);
 
                 return `
                     <div class="bus-card ${cardClass}" id="card-bus-${busKey}" style="display: ${isVisible ? 'block' : 'none'}; opacity: ${isChecked ? '1' : '0.5'};" onclick="focusBus('${busKey}')" title="Clic para centrar en radar">
                         <div class="bus-header">
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <input type="checkbox" id="chk-bus-${busKey}" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleBusVisibility('${busKey}')" style="cursor: pointer; accent-color: #38bdf8; width: 14px; height: 14px;">
-                                <span class="bus-title">${isWrongDir ? '⚠️ ' : ''}🚍 Coche #${v.bus_id} (${v.license_plate})</span>
+                                <span class="bus-title">${isWrongDir ? '⚠️ ' : ''}🚍 Coche ${bInfo.num} <span style="font-size: 10px; color: #94a3b8; font-weight: normal;">(#${bInfo.hex})</span> <span style="font-size: 11px; color: #38bdf8; font-weight: 600;">(${v.license_plate})</span></span>
                             </div>
                             <div style="display: flex; align-items: center; gap: 6px;">
                                 ${lineBadge}
@@ -3598,7 +3778,14 @@ async def live_map_view(request: Request):
             const targetBus = urlParams.get('bus');
             if (targetBus && !window._hasAutoFocusedBus) {
                 const targetKey = (CURRENT_AGENCY ? `${CURRENT_AGENCY}_${targetBus}` : null);
-                const matchKey = (targetKey && markers[targetKey]) ? targetKey : Object.keys(markers).find(k => k === targetBus || k.endsWith(`_${targetBus}`));
+                let matchKey = (targetKey && markers[targetKey]) ? targetKey : Object.keys(markers).find(k => k === targetBus || k.endsWith(`_${targetBus}`));
+                if (!matchKey) {
+                    const foundEntry = Object.entries(activeVehicles).find(([k, v]) => {
+                        const bInfo = formatBusInfo(v);
+                        return bInfo.num === targetBus || bInfo.hex.toLowerCase() === targetBus.toLowerCase() || (v.license_plate && v.license_plate.toLowerCase() === targetBus.toLowerCase());
+                    });
+                    if (foundEntry) matchKey = foundEntry[0];
+                }
                 if (matchKey && markers[matchKey]) {
                     window._hasAutoFocusedBus = true;
                     const m = markers[matchKey];

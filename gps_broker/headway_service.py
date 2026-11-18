@@ -2254,17 +2254,20 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             container.innerHTML = html;
         }
 
-        // Número de bus en hexadecimal con su equivalente decimal entre paréntesis
+        // Número interno de coche (con identificador telemático hex entre paréntesis)
         function formatBusHexDec(busId) {
-            const hexId = String(busId || '');
+            const hexId = String(busId || '').trim();
             const decNum = parseInt(hexId, 16);
-            return (hexId && !isNaN(decNum)) ? `${hexId} (${decNum})` : hexId;
+            if (hexId && !isNaN(decNum) && String(decNum) !== hexId) {
+                return `Coche ${decNum} (#${hexId})`;
+            }
+            return hexId ? `Coche ${hexId}` : '';
         }
 
         // --- MODAL DE DETALLES Y UBICAR EN MAPA ---
         function updateModalContent(b) {
             if (!b) return;
-            document.getElementById('modal-bus-id').textContent = `Coche #${formatBusHexDec(b.bus_id)}`;
+            document.getElementById('modal-bus-id').textContent = formatBusHexDec(b.bus_id);
             document.getElementById('modal-bus-plate').textContent = `${b.license_plate} · Empresa ${b.agency_id}`;
             document.getElementById('modal-state').textContent = b.state_label || 'En Circulación';
             document.getElementById('modal-speed').textContent = `${b.speed_kmh} km/h`;
