@@ -372,6 +372,22 @@ def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
 
     bus_disp = f"Coche {bus_num} (#{bus_raw})" if (bus_num and bus_num.lower() != bus_raw.lower() and bus_raw.replace("0", "")) else (f"Coche {bus_num}" if bus_num else bus_raw)
 
+    # Billetaje Electrónico Jaha (Productividad, Pasajeros y Redondos)
+    pax = 0
+    trips = 0
+    pax_per_round = 0.0
+    rev = 0
+    if redis_client:
+        try:
+            from billetaje_service import get_cached_billetaje_prod
+            prod = get_cached_billetaje_prod(redis_client, v.get("bus_id"), agency_id=v.get("agency_id", "0008"))
+            pax = int(prod.get("passengers_today") or 0)
+            trips = int(prod.get("trips_today") or 0)
+            rev = int(prod.get("revenue_today") or 0)
+            pax_per_round = round(pax / trips, 1) if trips > 0 else (float(pax) if pax > 0 else 0.0)
+        except Exception:
+            pass
+
     return {
         "vehicle_key": f"{v.get('agency_id', '004B')}_{v.get('bus_id')}",
         "bus_id": v.get("bus_id"),
@@ -412,7 +428,11 @@ def format_vehicle_for_client(v: Dict[str, Any]) -> Dict[str, Any]:
         "distance_traveled_km": v.get("distance_traveled_km", 0.0),
         "route_total_km": v.get("route_total_km", 0.0),
         "deviation_meters": v.get("deviation_meters", 0.0),
-        "crossed_checkpoints": checkpoints
+        "crossed_checkpoints": checkpoints,
+        "passengers_today": pax,
+        "trips_today": trips,
+        "pax_per_round": pax_per_round,
+        "revenue_today": rev
     }
 
 def get_all_active_vehicles(agency_filter: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -2985,6 +3005,15 @@ async def live_map_view(request: Request):
                 <div class="metric-card" id="m-card-wrong-dir" style="background: rgba(245, 158, 11, 0.2); border-color: #f59e0b; display: none;">
                     <span>⚠️ Contrasentido: </span><strong id="m-wrong-dir" style="color: #fbbf24;">0</strong>
                 </div>
+                <div class="metric-card" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4);" title="Total de pasajeros validados en el día (Billetaje Jaha)">
+                    <span>💳 Pasajeros: </span><strong id="m-pax" style="color: #34d399;">0</strong>
+                </div>
+                <div class="metric-card" style="background: rgba(14, 165, 233, 0.15); border-color: rgba(56, 189, 248, 0.4);" title="Vueltas operativas completadas en el día">
+                    <span>🔄 Redondos: </span><strong id="m-trips" style="color: #38bdf8;">0</strong>
+                </div>
+                <div class="metric-card" style="background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.4);" title="Promedio de pasajeros por redondo / vuelta registrada">
+                    <span>📊 Pax/Redondo: </span><strong id="m-pax-round" style="color: #fbbf24;">0.0</strong>
+                </div>
                 <div class="metric-card" style="background: rgba(2, 132, 199, 0.15); border-color: rgba(56, 189, 248, 0.4);">
                     <span>🚦 Waze: </span><strong id="m-waze" style="color: #38bdf8;">--</strong>
                 </div>
@@ -4045,6 +4074,15 @@ async def live_map_view(request: Request):
                         Progreso: <b>${v.progress_percent || 0}%</b> (${v.distance_traveled_km || 0} / ${v.route_total_km || 0} km)<br>
                         Desvío Traza: <b>${Math.round(v.deviation_meters || 0)}m</b><br>
                         Geocerca Activa: <b style="color: ${circleColor};">${geofenceLabel}</b>
+                        <div style="margin-top: 6px; padding: 6px 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 6px; font-size: 11px;">
+                            <div style="font-weight: 700; color: #34d399; margin-bottom: 2px; display: flex; justify-content: space-between;">
+                                <span>💳 Billetaje Jaha</span>
+                                <span style="color: #94a3b8; font-weight: normal; font-size: 10px;">${v.trips_today > 0 ? `${v.trips_today} redondos` : '1er redondo'}</span>
+                            </div>
+                            <div>Pasajeros Hoy: <strong style="color:#ffffff;">${(v.passengers_today || 0).toLocaleString('es-PY')}</strong></div>
+                            <div>Vueltas Registradas: <strong style="color:#38bdf8;">${v.trips_today || 0} redondos</strong></div>
+                            <div>Pax / Redondo: <strong style="color:#fbbf24;">${v.trips_today > 0 ? `${v.pax_per_round || 0} pax/redondo` : `${v.passengers_today || 0} pax (en curso)`}</strong></div>
+                        </div>
                     </div>
                 `;
             }
@@ -4157,6 +4195,14 @@ async def live_map_view(request: Request):
             if (titleEl) {
                 titleEl.innerHTML = `${v.wrong_direction_alert ? '⚠️ ' : ''}🚍 Coche ${bInfo.num} <span style="font-size: 10px; color: #94a3b8; font-weight: normal;">(#${bInfo.hex})</span> <span style="font-size: 11px; color: #38bdf8; font-weight: 600;">(${v.license_plate})</span>`;
             }
+
+            const billEl = document.getElementById(`card-billetaje-${busKey}`);
+            if (billEl) {
+                const p = (v.passengers_today || 0).toLocaleString('es-PY');
+                const t = v.trips_today > 0 ? `${v.trips_today} redondos` : '1er redondo';
+                const r = v.trips_today > 0 ? `${v.pax_per_round || 0} pax/red` : `${v.passengers_today || 0} pax`;
+                billEl.innerHTML = `<span style="color: #34d399; font-weight: 700;">💳 ${p} pax</span> <span style="color: #38bdf8; font-weight: 600;">🔄 ${t}</span> <span style="color: #fbbf24; font-weight: 800;">📊 ${r}</span>`;
+            }
         }
 
         function renderFullSidebarList() {
@@ -4227,6 +4273,11 @@ async def live_map_view(request: Request):
                             <div>Velocidad: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};" id="card-speed-${busKey}">${speed} km/h</strong></div>
                             <div>Desvío Traza: <strong style="color:${v.deviation_alert ? '#ef4444':'#34d399'};" id="card-dev-${busKey}">${Math.round(v.deviation_meters || 0)}m</strong></div>
                             <div>Último Ping: <strong style="color:${isFault ? '#ef4444' : '#f8fafc'};" id="card-ping-${busKey}">${v.last_ping_time ? v.last_ping_time.slice(11, 19) : '--'}</strong></div>
+                        </div>
+                        <div class="bus-billetaje-strip" id="card-billetaje-${busKey}" style="margin: 6px 0; padding: 4px 8px; background: rgba(15, 23, 42, 0.7); border: 1px solid #1e293b; border-radius: 6px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color: #34d399; font-weight: 700;">💳 ${(v.passengers_today || 0).toLocaleString('es-PY')} pax</span>
+                            <span style="color: #38bdf8; font-weight: 600;">🔄 ${v.trips_today > 0 ? `${v.trips_today} redondos` : '1er redondo'}</span>
+                            <span style="color: #fbbf24; font-weight: 800;">📊 ${v.trips_today > 0 ? `${v.pax_per_round || 0} pax/red` : `${v.passengers_today || 0} pax`}</span>
                         </div>
                         ${isFault ? `<div class="alert-box">📡 Alerta: Sin reporte GPS hace ${Math.round(v._minsAgo)} min (> ${gpsTimeoutMin}m)</div>` : ''}
                         ${isWrongDir ? `
@@ -4302,6 +4353,8 @@ async def live_map_view(request: Request):
             let faultsCount = 0;
             let visibleCount = 0;
             let wrongDirCount = 0;
+            let totalPax = 0;
+            let totalTrips = 0;
 
             vehicles.forEach(v => {
                 let minsAgo = v.minutes_since_ping;
@@ -4330,6 +4383,8 @@ async def live_map_view(request: Request):
 
                 if (isBusVisibleByFilter(v)) {
                     visibleCount++;
+                    totalPax += Number(v.passengers_today || 0);
+                    totalTrips += Number(v.trips_today || 0);
                 }
             });
 
@@ -4337,6 +4392,16 @@ async def live_map_view(request: Request):
             document.getElementById('m-transit').textContent = inTransitCount;
             document.getElementById('m-terminals').textContent = inTerminalsCount;
             document.getElementById('m-faults').textContent = faultsCount;
+
+            const elPax = document.getElementById('m-pax');
+            if (elPax) elPax.textContent = totalPax.toLocaleString('es-PY');
+            const elTrips = document.getElementById('m-trips');
+            if (elTrips) elTrips.textContent = totalTrips.toLocaleString('es-PY');
+            const elPaxRound = document.getElementById('m-pax-round');
+            if (elPaxRound) {
+                const avgRound = totalTrips > 0 ? (totalPax / totalTrips).toFixed(1) : (totalPax > 0 ? totalPax.toFixed(0) : '0.0');
+                elPaxRound.textContent = avgRound;
+            }
             
             const cardWrongDir = document.getElementById('m-card-wrong-dir');
             const lblWrongDir = document.getElementById('m-wrong-dir');

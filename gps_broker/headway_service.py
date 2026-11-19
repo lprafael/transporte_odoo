@@ -375,15 +375,20 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
 
         # Datos de Billetaje Electrónico Jaha (Validaciones & Recaudación)
         try:
-            prod = get_cached_billetaje_prod(redis_client, b.get("bus_id"), agency_id=b.get("agency_id", "004B"))
-            bus_entry["passengers_today"] = prod.get("passengers_today", 0)
-            bus_entry["revenue_today"] = prod.get("revenue_today", 0)
-            bus_entry["trips_today"] = prod.get("trips_today", 0)
+            prod = get_cached_billetaje_prod(redis_client, b.get("bus_id"), agency_id=b.get("agency_id", agency_id or "0008"))
+            pax = int(prod.get("passengers_today") or 0)
+            trips = int(prod.get("trips_today") or 0)
+            pax_round = round(pax / trips, 1) if trips > 0 else (float(pax) if pax > 0 else 0.0)
+            bus_entry["passengers_today"] = pax
+            bus_entry["revenue_today"] = int(prod.get("revenue_today") or 0)
+            bus_entry["trips_today"] = trips
+            bus_entry["pax_per_round"] = pax_round
             bus_entry["validator_service"] = prod.get("service_type") or b.get("validator_service") or "DIFERENCIAL"
         except Exception:
             bus_entry["passengers_today"] = 0
             bus_entry["revenue_today"] = 0
             bus_entry["trips_today"] = 0
+            bus_entry["pax_per_round"] = 0.0
             bus_entry["validator_service"] = "DIFERENCIAL"
 
         routes_dict[r_code]["buses"].append(bus_entry)
@@ -396,6 +401,12 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
         buses = r_data["buses"]
         n = len(buses)
         
+        total_pax = sum(b.get("passengers_today", 0) for b in buses)
+        total_trips = sum(b.get("trips_today", 0) for b in buses)
+        r_data["total_passengers"] = total_pax
+        r_data["total_trips"] = total_trips
+        r_data["avg_pax_per_round"] = round(total_pax / total_trips, 1) if total_trips > 0 else (float(total_pax) if total_pax > 0 else 0.0)
+
         if n == 0:
             r_data["status"] = "SIN_BUSES"
         elif n == 1:
@@ -2214,7 +2225,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                                         <th>Progreso</th>
                                         <th>Desvío del Eje</th>
                                         <th>Último Ping</th>
-                                        <th>Validaciones Jaha</th>
+                                        <th>Billetaje Jaha (Pax / Redondo)</th>
                                         <th>Estado de Intervalo</th>
                                     </tr>
                                 </thead>
@@ -2235,7 +2246,12 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                                             </td>
                                             <td>${b.deviation_meters} m</td>
                                             <td>${b.last_ping_time ? b.last_ping_time.substring(11, 19) : '--:--'}</td>
-                                            <td><span style="background: rgba(16, 185, 129, 0.12); color: #34d399; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎫 ${(b.passengers_today || 0).toLocaleString('es-PY')} pas</span></td>
+                                            <td>
+                                                <span style="background: rgba(16, 185, 129, 0.12); color: #34d399; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎫 ${(b.passengers_today || 0).toLocaleString('es-PY')} pax</span>
+                                                <div style="font-size: 10px; color: ${b.trips_today > 0 ? '#fbbf24' : '#94a3b8'}; font-weight: 700; margin-top: 2px;">
+                                                    🔄 ${b.trips_today > 0 ? `${b.trips_today} redondos` : '1er redondo'} · <strong>${b.trips_today > 0 ? `${b.pax_per_round || 0} pax/red` : `${b.passengers_today || 0} pax`}</strong>
+                                                </div>
+                                            </td>
                                             <td>
                                                 ${b.wrong_direction_alert
                                                     ? `<span style="color: #fbbf24; font-weight: 700;">⚠️ CONTRASENTIDO (${b.heading_diff_deg || 180}° opuesto${b.suggested_opposite_route ? ' · Sugerido: ' + b.suggested_opposite_route.toUpperCase() : ''})</span>`
@@ -2334,12 +2350,13 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             const pax = b.passengers_today || 0;
             const rev = b.revenue_today || 0;
             const trips = b.trips_today || 0;
+            const pRound = b.pax_per_round !== undefined ? b.pax_per_round : (trips > 0 ? (pax / trips).toFixed(1) : pax);
             const srv = b.validator_service || 'DIFERENCIAL';
             const srvBadge = document.getElementById('modal-billetaje-srv-badge');
             if (srvBadge) srvBadge.textContent = srv;
             const bInfo = document.getElementById('modal-billetaje-info');
             if (bInfo) {
-                bInfo.innerHTML = `🎫 <strong>${pax.toLocaleString('es-PY')}</strong> pasajes cobrados hoy · <strong>Gs. ${rev.toLocaleString('es-PY')}</strong> recaudados · <strong>${trips}</strong> vueltas registradas`;
+                bInfo.innerHTML = `🎫 <strong>${pax.toLocaleString('es-PY')}</strong> pasajes cobrados hoy · 🔄 <strong>${trips > 0 ? `${trips} redondos completados` : '1er redondo en curso'}</strong> · 📊 Promedio: <strong style="color: #fbbf24;">${pRound} pax/redondo</strong> · Gs. ${rev.toLocaleString('es-PY')} recaudados`;
             }
         }
 
