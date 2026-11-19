@@ -153,7 +153,8 @@ OPPOSITE_ROUTE_PAIRS: Dict[str, str] = {
     "004a": "004b", "004b": "004a",
     "004c": "004d", "004d": "004c",
     "004e": "004f", "004f": "004e",
-    "0050": "0051", "0051": "0050",
+    # REQ-2026-0015: 0050 y 0051 (Línea 15-3: Ramal 31 Mcal. López y Ramal 32 Terminal) son circuitos
+    # circulares completos e independientes (71 km San Antonio -> San Antonio). No son Ida/Vuelta entre sí.
     "01a0": "01a1", "01a1": "01a0",
     "01ef": "01f0", "01f0": "01ef",
     # Automotores Guaraní - Línea 47
@@ -177,6 +178,18 @@ def get_opposite_route_code(route_code: str, agency_id: Optional[str] = None) ->
         return None
     clean = route_code.strip().lower()
     return OPPOSITE_ROUTE_PAIRS.get(clean)
+
+def is_circular_route(route_code: str) -> bool:
+    if not route_code:
+        return False
+    clean = route_code.strip().lower()
+    if clean in ("0050", "0051"):
+        return True
+    for r in routes_cache:
+        if str(r.get("code", "")).strip().lower() == clean:
+            if r.get("direction") == "circular":
+                return True
+    return False
 
 def get_route_line_name(route_code: str) -> str:
     clean = (route_code or "").strip().lower()
@@ -1508,7 +1521,13 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     wrong_dir_reason = ""
     heading_diff = None
 
-    if route_code not in ("0000", "", "none", "depot", "taller") and route_bearing is not None and speed >= 7.0 and dev_m <= 400.0:
+    # Las rutas circulares (ej. 0050 y 0051 de Línea 15-3) y las rutas sin par opuesto no son Ida/Vuelta;
+    # en el validador Jaha operan con Sentido: '-' (recorrido cerrado continuo sin contrasentido).
+    opposite_route = get_opposite_route_code(route_code)
+    has_opposite_route = bool(opposite_route)
+    is_circular = is_circular_route(route_code)
+
+    if (not is_circular) and has_opposite_route and route_code not in ("0000", "", "none", "depot", "taller") and route_bearing is not None and speed >= 7.0 and dev_m <= 400.0:
         bus_h = v_state.get("heading_deg") or heading
 
         if bus_h is not None and bus_h > 0.0:
@@ -1536,9 +1555,9 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
             v_state["wrong_direction_reason"] = wrong_dir_reason
             v_state["heading_diff_deg"] = heading_diff
             v_state["route_bearing_deg"] = round(route_bearing, 1) if route_bearing is not None else None
-            v_state["suggested_opposite_route"] = get_opposite_route_code(route_code)
+            v_state["suggested_opposite_route"] = opposite_route
     else:
-        if (heading_diff is not None and heading_diff < 80.0) or (speed < 5.0 and v_state.get("current_state") in ("AT_ORIGIN", "AT_DESTINATION", "DEPOT")):
+        if (heading_diff is not None and heading_diff < 80.0) or (speed < 5.0 and v_state.get("current_state") in ("AT_ORIGIN", "AT_DESTINATION", "DEPOT")) or is_circular or (not has_opposite_route):
             v_state["wrong_direction_consecutive"] = 0
             v_state["wrong_direction_alert"] = False
             v_state["wrong_direction_reason"] = ""

@@ -57,7 +57,7 @@ OPPOSITE_ROUTE_PAIRS: Dict[str, str] = {
     "004a": "004b", "004b": "004a",
     "004c": "004d", "004d": "004c",
     "004e": "004f", "004f": "004e",
-    "0050": "0051", "0051": "0050",
+    # REQ-2026-0015: 0050 y 0051 (Línea 15-3: Ramal 31 Mcal. López y Ramal 32 Terminal) son circuitos circulares
     "01a0": "01a1", "01a1": "01a0",
     "01ef": "01f0", "01f0": "01ef",
     # Automotores Guaraní - Línea 47
