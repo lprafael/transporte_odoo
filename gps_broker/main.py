@@ -1080,7 +1080,15 @@ def hydrate_active_fleet_from_postgis(force: bool = False) -> int:
         now_utc = datetime.now(timezone.utc)
         for r in rows:
             bus_key = str(r["mean_id"])
+            agency_val = r["agency_id"] or "004B"
             route_code = (r["route_id"] or "020f").lower()
+            if redis_client:
+                try:
+                    locked = redis_client.get(f"vehicle_route_lock:{agency_val}:{bus_key}") or redis_client.get(f"vehicle_route_lock:{bus_key}")
+                    if locked:
+                        route_code = (locked.decode("utf-8") if isinstance(locked, bytes) else str(locked)).strip().lower()
+                except Exception:
+                    pass
             plate = r["license_plate"] or f"COCHE-{bus_key}"
             lat = float(r["latitude"])
             lon = float(r["longitude"])
@@ -1354,8 +1362,26 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
     v_state["heading_deg"] = heading
     v_state["is_gps_fault"] = False
     v_state["minutes_since_ping"] = 0.0
-    if ping.route_id:
+    bus_key = str(v_state.get("bus_id") or ping.bus_internal_code or "").strip()
+    agency_key = str(v_state.get("agency_id") or ping.agency_id or "004B").strip()
+
+    # Comprobar si existe bloqueo manual de ramal en Redis para este bus (operador reasignó)
+    locked_route = None
+    if bus_key and redis_client:
+        try:
+            locked = redis_client.get(f"vehicle_route_lock:{agency_key}:{bus_key}") or redis_client.get(f"vehicle_route_lock:{bus_key}")
+            if locked:
+                locked_route = (locked.decode("utf-8") if isinstance(locked, bytes) else str(locked)).strip().lower()
+        except Exception:
+            pass
+
+    if locked_route:
+        v_state["route_id"] = locked_route
+        v_state["route_locked"] = True
+        ping.route_id = locked_route
+    elif ping.route_id:
         v_state["route_id"] = ping.route_id
+
     if ping.agency_id:
         v_state["agency_id"] = ping.agency_id
     if ping.odometer_km:
@@ -1370,9 +1396,6 @@ def process_telemetry_ping_internal(ping: TelemetryPing, background_tasks: Optio
         insert_telemetry_to_pg(ping)
 
     # 4. Cálculo PostGIS de Progreso en Ruta y Desvío Exacto
-    bus_key = str(v_state.get("bus_id") or ping.bus_internal_code or "").strip()
-    agency_key = str(v_state.get("agency_id") or ping.agency_id or "004B").strip()
-
     progress = calculate_shape_progress(
         ping.latitude, ping.longitude, v_state.get("route_id", "020f"), agency_key, bus_id=bus_key
     )
@@ -2130,11 +2153,17 @@ async def api_headway_reassign_route(payload: RouteReassignPayload, request: Req
         except Exception as e:
             logger.debug(f"Aviso bloqueo Redis: {e}")
 
-    # 3. Actualizar estado del bus en Redis / memoria inmediatamente
+    # 3. Actualizar estado del bus en Redis / memoria inmediatamente y limpiar alertas de contrasentido
     v_state = get_vehicle_state(bus_id, agency_id=agency_id)
     if v_state:
         v_state["route_id"] = new_route_code
         v_state["route_locked"] = True
+        v_state["wrong_direction_alert"] = False
+        v_state["wrong_direction_consecutive"] = 0
+        v_state["wrong_direction_reason"] = ""
+        v_state["suggested_opposite_route"] = None
+        v_state["heading_diff_deg"] = 0.0
+        v_state["line_name"] = get_route_line_name(new_route_code)
         lat = v_state.get("latitude")
         lon = v_state.get("longitude")
         if lat and lon:
@@ -2144,7 +2173,15 @@ async def api_headway_reassign_route(payload: RouteReassignPayload, request: Req
                 v_state["distance_traveled_km"] = prog["distance_traveled_km"]
                 v_state["route_total_km"] = prog["total_km"]
                 v_state["deviation_meters"] = prog["deviation_meters"]
+                v_state["deviation_alert"] = prog["deviation_meters"] > MAX_DEVIATION_METERS
+        v_state["status_display"] = "Circulando (Ramal Reasignado)"
         save_vehicle_state(bus_id, v_state, agency_id=agency_id)
+        # Difundir de inmediato por WebSocket a clientes de /map y /headway
+        try:
+            formatted = format_vehicle_for_client(v_state)
+            await ws_manager.broadcast_json({"type": "update", "vehicles": [formatted]})
+        except Exception as ws_err:
+            logger.debug(f"Aviso broadcast reassign: {ws_err}")
 
     # 4. Actualizar despacho activo en Odoo (transit_dispatch)
     candidates = [bus_id, bus_id.lstrip("0")]
@@ -3981,8 +4018,14 @@ async def live_map_view(request: Request):
                         ⚠️ ALERTA: IDRUTA EN CONTRASENTIDO<br>
                         <span style="font-weight: 500; font-size: 10px; color: #e2e8f0;">
                             ${v.wrong_direction_reason || 'Circulando en sentido opuesto a la ruta.'}
-                            ${v.suggested_opposite_route ? '<br><b>Sugerido:</b> Ramal ' + v.suggested_opposite_route.toUpperCase() : ''}
                         </span>
+                        ${v.suggested_opposite_route ? `
+                            <div style="margin-top: 6px;">
+                                <button type="button" onclick="quickReassignBusRoute('${v.bus_id}', '${v.agency_id}', '${v.suggested_opposite_route}')" style="width: 100%; background: #f59e0b; color: #0f172a; border: none; padding: 5px 8px; border-radius: 4px; font-size: 11px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+                                    ⚡ Cambiar a Ramal ${v.suggested_opposite_route.toUpperCase()} (1 Clic)
+                                </button>
+                            </div>
+                        ` : ''}
                     </div>
                 ` : '';
                 popupContent = `
@@ -4189,7 +4232,13 @@ async def live_map_view(request: Request):
                         ${isWrongDir ? `
                             <div class="alert-box" style="background: rgba(245, 158, 11, 0.2); border-color: #f59e0b; color: #fbbf24;">
                                 ⚠️ <b>IDRUTA EN CONTRASENTIDO:</b> Rumbo opuesto (${Math.round(v.heading_diff_deg || 180)}°).
-                                ${v.suggested_opposite_route ? `<br><b>Sugerido:</b> Asignar a Ramal ${v.suggested_opposite_route.toUpperCase()}` : ''}
+                                ${v.suggested_opposite_route ? `
+                                    <div style="margin-top: 6px;">
+                                        <button type="button" onclick="event.stopPropagation(); quickReassignBusRoute('${v.bus_id}', '${v.agency_id}', '${v.suggested_opposite_route}')" style="width: 100%; background: #f59e0b; color: #0f172a; border: none; padding: 5px 8px; border-radius: 4px; font-size: 11px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+                                            ⚡ Corregir a Ramal ${v.suggested_opposite_route.toUpperCase()} (1 Clic)
+                                        </button>
+                                    </div>
+                                ` : ''}
                             </div>
                         ` : ''}
                         ${v.speed_alert && !isFault ? '<div class="alert-box">⚠️ ¡EXCESO DE VELOCIDAD (>70 km/h)!</div>' : ''}
@@ -4351,6 +4400,38 @@ async def live_map_view(request: Request):
                 const m = markers[busKey];
                 map.setView(m.getLatLng(), 16, { animate: true });
                 m.openPopup();
+            }
+        }
+
+        async function quickReassignBusRoute(busId, agencyId, newRoute) {
+            if (!busId || !newRoute) return;
+            const bKey = String(busId);
+            try {
+                const res = await fetch('/api/v1/headway/reassign_route', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bus_id: bKey,
+                        agency_id: agencyId || '0008',
+                        new_route_code: newRoute
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    if (activeVehicles[bKey]) {
+                        activeVehicles[bKey].route_id = newRoute.toLowerCase();
+                        activeVehicles[bKey].wrong_direction_alert = false;
+                        activeVehicles[bKey].wrong_direction_reason = '';
+                        activeVehicles[bKey].suggested_opposite_route = null;
+                        renderOrUpdateVehicleMarker(activeVehicles[bKey], false);
+                        updateVehicleCardInSidebar(activeVehicles[bKey]);
+                    }
+                    applyRouteAndVisibilityFilters();
+                } else {
+                    alert(`Error reasignando ramal: ${data.detail || data.message || 'Fallo desconocido'}`);
+                }
+            } catch (err) {
+                alert(`Error de red al reasignar: ${err.message}`);
             }
         }
 

@@ -265,6 +265,17 @@ def get_headway_data(redis_client=None, active_vehicles_memory=None, agency_id: 
 
     # 3. Asignar buses a sus ramales (SOLO UNIDADES EN CIRCULACIÓN)
     for b in active_buses:
+        b_bus_id = str(b.get("bus_id") or "")
+        b_agency = str(b.get("agency_id") or agency_id or "0008")
+        if redis_client and b_bus_id:
+            try:
+                locked = redis_client.get(f"vehicle_route_lock:{b_agency}:{b_bus_id}") or redis_client.get(f"vehicle_route_lock:{b_bus_id}")
+                if locked:
+                    locked_r = (locked.decode("utf-8") if isinstance(locked, bytes) else str(locked)).strip().lower()
+                    b["route_id"] = locked_r
+                    b["route_locked"] = True
+            except Exception:
+                pass
         r_code = (b.get("route_id") or "").lower()
         if r_code not in routes_dict:
             continue
@@ -2310,7 +2321,7 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                 if (b.wrong_direction_alert) {
                     wrongDirBox.style.display = 'flex';
                     const sugMsg = b.suggested_opposite_route 
-                        ? `<br/><span style="color: #fef08a; font-weight: 700;">💡 Sugerencia operativa: Cambiar al ramal de sentido opuesto <strong>${b.suggested_opposite_route.toUpperCase()}</strong> en el selector abajo.</span>`
+                        ? `<br/><div style="margin-top: 8px;"><button type="button" onclick="quickApplySuggestedRoute('${b.suggested_opposite_route}')" style="background: #f59e0b; color: #0f172a; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 800; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(245, 158, 11, 0.4); transition: transform 0.1s;">⚡ Aplicar Sugerencia: Cambiar al Ramal ${b.suggested_opposite_route.toUpperCase()} (1 Clic)</button></div>`
                         : '';
                     document.getElementById('modal-wrong-dir-desc').innerHTML = 
                         `<strong>${b.wrong_direction_reason || 'El bus se desplaza en sentido contrario a la ruta configurada.'}</strong> (Diferencia de rumbo: ${b.heading_diff_deg || 180}°).${sugMsg}`;
@@ -2365,8 +2376,10 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                             const rCode = String(r.route_id || '').toLowerCase();
                             const isCur = (rCode === curRoute);
                             const isSug = (rCode === sugOpposite && !isCur);
-                            const sugTag = isSug ? ' ⚠️ [SUGERIDO POR SENTIDO]' : (isCur ? ' [ACTUAL]' : '');
-                            optHtml += `<option value="${rCode}" ${isCur ? 'selected' : ''}>${r.route_id.toUpperCase()} - ${r.name} (${r.direction_label})${sugTag}</option>`;
+                            // Si el coche está en contrasentido y hay sugerencia operativa, preseleccionarla automáticamente
+                            const isSelected = (b.wrong_direction_alert && sugOpposite) ? isSug : isCur;
+                            const sugTag = isSug ? ' ⚡ [SUGERIDO POR SENTIDO]' : (isCur ? ' [ACTUAL]' : '');
+                            optHtml += `<option value="${rCode}" ${isSelected ? 'selected' : ''}>${r.route_id.toUpperCase()} - ${r.name} (${r.direction_label})${sugTag}</option>`;
                         });
                         optHtml += `</optgroup>`;
                     }
@@ -2377,6 +2390,14 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
             }
 
             document.getElementById('bus-modal').style.display = 'flex';
+        }
+
+        function quickApplySuggestedRoute(routeCode) {
+            const sel = document.getElementById('modal-reassign-select');
+            if (sel && routeCode) {
+                sel.value = routeCode.toLowerCase();
+            }
+            executeRouteReassign();
         }
 
         async function executeRouteReassign() {
@@ -2411,6 +2432,11 @@ def get_headway_html(user: Optional[Dict[str, Any]] = None) -> str:
                     statusEl.textContent = `✓ ${data.message || 'Ramal reasignado correctamente'}`;
                     b.route_id = newRoute;
                     b.route_name = data.route_name || newRoute.toUpperCase();
+                    b.wrong_direction_alert = false;
+                    b.wrong_direction_reason = '';
+                    b.suggested_opposite_route = null;
+                    const wrongDirBox = document.getElementById('modal-wrong-dir-box');
+                    if (wrongDirBox) wrongDirBox.style.display = 'none';
                     await fetchHeadwayData();
                     setTimeout(() => {
                         closeBusModal();
