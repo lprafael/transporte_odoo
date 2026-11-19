@@ -2605,6 +2605,197 @@ async def live_map_view(request: Request):
         .sidebar-filters { padding: 10px 14px; background: #0f172a; border-bottom: 1px solid #1f2937; display: flex; flex-direction: column; gap: 8px; }
         .btn-quick-filter { background: #0284c7; color: white; border: none; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; transition: background 0.15s; }
         .btn-quick-filter:hover { background: #0369a1; }
+
+        /* Multi-Select de Ramales y Presets */
+        .route-multiselect-container {
+            position: relative;
+            width: 100%;
+        }
+        .btn-route-trigger {
+            width: 100%;
+            background: #1e293b;
+            color: #f8fafc;
+            border: 1px solid #334155;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-sizing: border-box;
+            user-select: none;
+        }
+        .btn-route-trigger:hover {
+            border-color: #38bdf8;
+            background: #243248;
+        }
+        .btn-route-trigger.open {
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+        }
+        .route-multi-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
+            z-index: 1050;
+            display: none;
+            flex-direction: column;
+            max-height: 380px;
+            overflow: hidden;
+        }
+        .route-multi-dropdown.open {
+            display: flex;
+        }
+        .route-dropdown-header {
+            padding: 8px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .route-search-input {
+            width: 100%;
+            background: #0b1120;
+            border: 1px solid #334155;
+            color: #f8fafc;
+            padding: 5px 8px;
+            border-radius: 5px;
+            font-size: 11px;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .route-search-input:focus {
+            border-color: #38bdf8;
+        }
+        .route-dropdown-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+        }
+        .btn-link-action {
+            background: none;
+            border: none;
+            color: #38bdf8;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            padding: 2px 4px;
+        }
+        .btn-link-action:hover {
+            text-decoration: underline;
+        }
+        .route-dropdown-list {
+            overflow-y: auto;
+            max-height: 280px;
+            padding: 6px;
+        }
+        .route-group-header {
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #94a3b8;
+            padding: 6px 6px 2px 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+            margin-bottom: 4px;
+        }
+        .route-checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 6px;
+            border-radius: 5px;
+            cursor: pointer;
+            user-select: none;
+            font-size: 11px;
+            color: #e2e8f0;
+            transition: background 0.1s;
+        }
+        .route-checkbox-item:hover {
+            background: #1e293b;
+        }
+        .route-checkbox-item input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+            accent-color: #38bdf8;
+        }
+        .route-color-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .route-chips-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
+            max-height: 80px;
+            overflow-y: auto;
+        }
+        .route-chip {
+            background: rgba(56, 189, 248, 0.15);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #38bdf8;
+            font-size: 10px;
+            font-weight: 700;
+            border-radius: 4px;
+            padding: 2px 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .route-chip .chip-remove {
+            cursor: pointer;
+            font-weight: bold;
+            opacity: 0.7;
+        }
+        .route-chip .chip-remove:hover {
+            opacity: 1;
+            color: #f87171;
+        }
+        .route-presets-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
+        }
+        .btn-preset-chip {
+            background: #1e293b;
+            color: #cbd5e1;
+            border: 1px solid #334155;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 10.5px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .btn-preset-chip:hover {
+            background: #243248;
+            border-color: #38bdf8;
+            color: #f8fafc;
+        }
+        .btn-preset-chip.active {
+            background: #0284c7 !important;
+            border-color: #38bdf8 !important;
+            color: #ffffff !important;
+            box-shadow: 0 0 8px rgba(2, 132, 199, 0.5);
+        }
         
         .bus-list { flex: 1; overflow-y: auto; padding: 10px; }
         .bus-card { background: #1f2937; border: 1px solid #374151; border-radius: 10px; padding: 12px; margin-bottom: 8px; transition: all 0.2s ease; cursor: pointer; }
@@ -2832,19 +3023,47 @@ async def live_map_view(request: Request):
                 <span id="route-count" style="font-size: 11px; color: #38bdf8;">__AGENCY_ID__</span>
             </div>
 
-            <!-- Controles de Filtro de Ramal y Visibilidad Rápida -->
+            <!-- Controles de Filtro Multi-Ramal, Presets y Visibilidad Rápida -->
             <div class="sidebar-filters">
-                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                    <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Ramal:</span>
-                    <select id="sel-route-filter" onchange="onRouteFilterChange()" style="background: #1e293b; color: #f8fafc; border: 1px solid #334155; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; outline: none; cursor: pointer; flex: 1; max-width: 240px;">
-                        <option value="ALL">Todos los Ramales</option>
-                    </select>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Seleccionar Ramales:</span>
+                        <span id="lbl-route-stats" style="font-size: 10px; color: #38bdf8; font-weight: 600;">Todos los Ramales</span>
+                    </div>
+
+                    <!-- Dropdown Multi-Select con Buscador -->
+                    <div class="route-multiselect-container" id="route-multiselect-container">
+                        <button type="button" class="btn-route-trigger" id="btn-route-trigger" onclick="toggleRouteDropdown()">
+                            <span id="lbl-selected-routes-text">🚍 Todos los Ramales (Clic para filtrar)</span>
+                            <span id="icon-route-dropdown-arrow" style="font-size: 9px; transition: transform 0.2s;">▼</span>
+                        </button>
+                        
+                        <div class="route-multi-dropdown" id="route-multi-dropdown">
+                            <div class="route-dropdown-header">
+                                <input type="text" id="txt-filter-routes" class="route-search-input" placeholder="🔍 Buscar ramal (ej. Salinas, IPS, Caaguazú)..." oninput="filterRouteDropdownItems()">
+                                <div class="route-dropdown-actions">
+                                    <button type="button" class="btn-link-action" onclick="selectAllRoutes()">✓ Marcar Todos</button>
+                                    <button type="button" class="btn-link-action" style="color: #94a3b8;" onclick="clearAllRouteSelections()">✕ Desmarcar Todos</button>
+                                </div>
+                            </div>
+                            <div class="route-dropdown-list" id="route-dropdown-list">
+                                <!-- Elementos con checkboxes generados dinámicamente -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Presets Rápidos por Grupo Operativo -->
+                    <div class="route-presets-bar" id="route-presets-bar"></div>
+
+                    <!-- Tags / Chips Activos -->
+                    <div class="route-chips-container" id="route-chips-container" style="display: none;"></div>
                 </div>
-                <div style="margin-top: 6px;">
+
+                <div style="margin-top: 4px;">
                     <input type="text" id="txt-bus-search" placeholder="🔍 Buscar Coche (ej. 38, 76), Placa o ID..." oninput="onBusSearchChange()" style="background: #1e293b; color: #f8fafc; border: 1px solid #334155; padding: 5px 8px; border-radius: 6px; font-size: 11px; outline: none; width: 100%; box-sizing: border-box;">
                 </div>
 
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
                     <span style="font-size: 11px; color: #cbd5e1;">Buses: <strong id="lbl-visible-count" style="color: #38bdf8;">0</strong> / <span id="lbl-total-count">0</span></span>
                     <div style="display: flex; gap: 4px;">
                         <button type="button" class="btn-quick-filter" id="btn-quick-wrong-dir" style="background: #d97706; display: none;" onclick="filterOnlyWrongDir()" title="Filtrar buses con IDRuta en contrasentido">⚠️ Contrasentido (<span id="lbl-wrong-dir-count">0</span>)</button>
@@ -2946,75 +3165,402 @@ async def live_map_view(request: Request):
             return `hsl(${h}, 85%, 55%)`;
         }
 
-        function filterOnlyWrongDir() {
-            const sel = document.getElementById('sel-route-filter');
-            if (sel) {
-                if (sel.value === 'WRONG_DIR') {
-                    sel.value = 'ALL';
-                } else {
-                    let opt = sel.querySelector('option[value="WRONG_DIR"]');
-                    if (!opt) {
-                        opt = document.createElement('option');
-                        opt.value = 'WRONG_DIR';
-                        opt.textContent = '⚠️ Solo Buses en Contrasentido';
-                        sel.insertBefore(opt, sel.children[1]);
-                    }
-                    sel.value = 'WRONG_DIR';
-                }
-                applyRouteAndVisibilityFilters();
+        let allRawFeatures = [];
+        let operationalRamales = [];
+        let selectedRouteCodes = new Set();
+        let activePresetId = 'ALL';
+        let isOnlyWrongDirActive = false;
+
+        function toggleRouteDropdown(forceClose = false) {
+            const dropdown = document.getElementById('route-multi-dropdown');
+            const trigger = document.getElementById('btn-route-trigger');
+            if (!dropdown || !trigger) return;
+            if (forceClose || dropdown.classList.contains('open')) {
+                dropdown.classList.remove('open');
+                trigger.classList.remove('open');
+            } else {
+                dropdown.classList.add('open');
+                trigger.classList.add('open');
+                const search = document.getElementById('txt-filter-routes');
+                if (search) search.focus();
             }
         }
 
-        function populateRouteDropdown(features) {
-            const sel = document.getElementById('sel-route-filter');
-            if (!sel || !features) return;
-            const currentVal = sel.value;
-            sel.innerHTML = '<option value="ALL">Todos los Ramales</option>';
-            
-            // Agrupar features por línea comercial (line_name)
+        document.addEventListener('click', (e) => {
+            const container = document.getElementById('route-multiselect-container');
+            if (container && !container.contains(e.target)) {
+                toggleRouteDropdown(true);
+            }
+        });
+
+        function filterOnlyWrongDir() {
+            isOnlyWrongDirActive = !isOnlyWrongDirActive;
+            const btn = document.getElementById('btn-quick-wrong-dir');
+            if (btn) {
+                btn.style.boxShadow = isOnlyWrongDirActive ? '0 0 10px #f59e0b' : 'none';
+                btn.style.outline = isOnlyWrongDirActive ? '2px solid #ffffff' : 'none';
+            }
+            applyRouteAndVisibilityFilters();
+        }
+
+        function populateMultiRouteFilter(features) {
+            if (!features || features.length === 0) return;
+            allRawFeatures = features;
+
+            const ramalesMap = {};
             const byLine = {};
-            const seen = new Set();
+
             features.forEach(f => {
-                const code = f.properties.route_code;
-                const name = f.properties.route_name || code;
-                const lineName = f.properties.line_name || 'Línea Regular';
-                if (code && !seen.has(code.toLowerCase())) {
-                    seen.add(code.toLowerCase());
-                    if (!byLine[lineName]) byLine[lineName] = [];
-                    byLine[lineName].push({ code: code.toUpperCase(), name: name });
+                const p = f.properties || {};
+                const code = (p.route_code || '').trim().toLowerCase();
+                if (!code) return;
+                const rawName = p.route_name || code.toUpperCase();
+                const lineName = p.line_name || 'Línea Regular';
+
+                const cleanName = rawName.replace(/^(Ramal\\s+[\\w\\d]+\\s*-\\s*)/i, '').trim() || rawName;
+                const ramalKey = `${lineName}:::${cleanName.toLowerCase()}`;
+
+                if (!ramalesMap[ramalKey]) {
+                    ramalesMap[ramalKey] = {
+                        id: ramalKey,
+                        name: rawName,
+                        cleanName: cleanName,
+                        lineName: lineName,
+                        codes: [],
+                        color: getRouteColor(code)
+                    };
+                }
+                if (!ramalesMap[ramalKey].codes.includes(code)) {
+                    ramalesMap[ramalKey].codes.push(code);
+                }
+
+                if (!byLine[lineName]) byLine[lineName] = [];
+                if (!byLine[lineName].includes(ramalesMap[ramalKey])) {
+                    byLine[lineName].push(ramalesMap[ramalKey]);
                 }
             });
 
-            // Si hay más de una línea comercial, agregar opción para filtrar toda la línea
-            const lineNames = Object.keys(byLine);
-            if (lineNames.length > 1) {
-                const groupFilter = document.createElement('optgroup');
-                groupFilter.label = '⚡ Filtrar Línea Completa';
-                lineNames.forEach(ln => {
-                    const opt = document.createElement('option');
-                    opt.value = 'LINE:' + ln;
-                    opt.textContent = `🚍 Toda la ${ln} (${byLine[ln].length} ramales)`;
-                    groupFilter.appendChild(opt);
-                });
-                sel.appendChild(groupFilter);
+            operationalRamales = Object.values(ramalesMap);
+
+            const listEl = document.getElementById('route-dropdown-list');
+            if (listEl) {
+                listEl.innerHTML = Object.keys(byLine).map(ln => {
+                    const ramalesInLine = byLine[ln];
+                    const itemsHtml = ramalesInLine.map(r => {
+                        const isChecked = selectedRouteCodes.size === 0 || r.codes.some(c => selectedRouteCodes.has(c));
+                        const codesLabel = r.codes.map(c => c.toUpperCase()).join(' / ');
+                        return `
+                            <label class="route-checkbox-item" data-search="${r.name.toLowerCase()} ${r.cleanName.toLowerCase()} ${r.codes.join(' ')}">
+                                <input type="checkbox" id="chk-ramal-${encodeURIComponent(r.id)}" onchange="onRamalCheckboxChange('${r.id}', this.checked)" ${isChecked ? 'checked' : ''}>
+                                <span class="route-color-dot" style="background: ${r.color};"></span>
+                                <span style="flex:1;">
+                                    <b>${r.name}</b>
+                                    <small style="color: #94a3b8; font-size: 10px; margin-left: 4px;">(${codesLabel})</small>
+                                </span>
+                            </label>
+                        `;
+                    }).join('');
+
+                    return `
+                        <div class="route-group-section" data-line="${ln.toLowerCase()}">
+                            <div class="route-group-header">
+                                <span>🚍 ${ln}</span>
+                                <button type="button" class="btn-link-action" onclick="toggleLineRoutes('${ln}')">Marcar Toda</button>
+                            </div>
+                            ${itemsHtml}
+                        </div>
+                    `;
+                }).join('');
             }
 
-            // Ramales organizados por grupos de línea
-            lineNames.forEach(ln => {
-                const optGroup = document.createElement('optgroup');
-                optGroup.label = `🚍 ${ln}`;
-                byLine[ln].forEach(item => {
-                    const opt = document.createElement('option');
-                    opt.value = item.code;
-                    opt.textContent = `${item.code} - ${item.name}`;
-                    optGroup.appendChild(opt);
+            renderOperationalPresets(byLine);
+            updateRouteFilterUI();
+        }
+
+        function renderOperationalPresets(byLine) {
+            const presetsBar = document.getElementById('route-presets-bar');
+            if (!presetsBar) return;
+
+            const lines = Object.keys(byLine);
+            const hasL15 = lines.some(l => l.includes('15'));
+            const hasL47 = lines.some(l => l.includes('47'));
+            const hasL20 = lines.some(l => l.includes('20'));
+            const hasL187 = lines.some(l => l.includes('187'));
+
+            const presets = [
+                { id: 'ALL', label: '🌐 Todos', title: 'Ver todos los ramales de la empresa' }
+            ];
+
+            if (hasL15 && hasL47) {
+                presets.push(
+                    {
+                        id: '15_2',
+                        label: '⚡ 15-2: Salinas / Caag.',
+                        title: 'Línea 15-2: Ramales Salinas y Caaguazú',
+                        keywords: ['salinas', 'caaguazu']
+                    },
+                    {
+                        id: '15_3',
+                        label: '⚡ 15-3: Mcal. López / Term.',
+                        title: 'Línea 15-3: Ramales Mariscal López y Terminal',
+                        keywords: ['mcal', 'terminal']
+                    },
+                    {
+                        id: '47_MAIN',
+                        label: '⚡ L-47: IPS / Villeta / M4',
+                        title: 'Línea 47: Ramales IPS, Villeta y Mercado 4',
+                        keywords: ['ips', 'villeta', 'guarambar', 'mercado 4']
+                    },
+                    {
+                        id: '15_1',
+                        label: '⚡ 15-1: Petropar',
+                        title: 'Línea 15-1: Ramal Petropar',
+                        keywords: ['petropar']
+                    },
+                    {
+                        id: 'LINE_15',
+                        label: '🚍 Toda L-15',
+                        title: 'Monitorear toda la Línea 15',
+                        lineKeyword: '15'
+                    },
+                    {
+                        id: 'LINE_47',
+                        label: '🚍 Toda L-47',
+                        title: 'Monitorear toda la Línea 47',
+                        lineKeyword: '47'
+                    }
+                );
+            } else if (hasL20) {
+                presets.push(
+                    { id: '20_TRONCAL', label: '⚡ Troncal (020C/D)', title: 'Troncal San Lorenzo - Asunción', keywords: ['020c', '020d'] },
+                    { id: '20_VARIANTE', label: '⚡ Variante (020E/F)', title: 'Variante Mcal. Estigarribia', keywords: ['020e', '020f'] },
+                    { id: '20_LUQUE', label: '⚡ Luque (0210/1)', title: 'Ramal Luque - Asunción', keywords: ['0210', '0211'] }
+                );
+            } else if (hasL187) {
+                presets.push(
+                    { id: '187_IPS', label: '⚡ Nva. Italia - IPS', title: 'Ramal IPS', keywords: ['0138', '0139', 'ips'] },
+                    { id: '187_ANTONIO', label: '⚡ Nva. Italia - S. Antonio', title: 'Ramal San Antonio', keywords: ['013a', '013b', 'antonio'] }
+                );
+            } else {
+                lines.forEach(ln => {
+                    presets.push({
+                        id: 'LINE_' + ln.replace(/\\s+/g, '_'),
+                        label: `🚍 ${ln}`,
+                        title: `Toda la ${ln}`,
+                        lineKeyword: ln
+                    });
                 });
-                sel.appendChild(optGroup);
+            }
+
+            window._OPERATIONAL_PRESETS = presets;
+
+            presetsBar.innerHTML = presets.map(p => `
+                <button type="button" class="btn-preset-chip ${p.id === activePresetId ? 'active' : ''}" id="btn-preset-${p.id}" onclick="applyOperationalPreset('${p.id}')" title="${p.title}">${p.label}</button>
+            `).join('');
+        }
+
+        function applyOperationalPreset(presetId) {
+            activePresetId = presetId;
+            const presets = window._OPERATIONAL_PRESETS || [];
+            const p = presets.find(x => x.id === presetId);
+
+            if (!p || presetId === 'ALL') {
+                selectedRouteCodes.clear();
+            } else {
+                const targetCodes = new Set();
+                operationalRamales.forEach(r => {
+                    let matches = false;
+                    if (p.lineKeyword && r.lineName.toLowerCase().includes(p.lineKeyword.toLowerCase())) {
+                        matches = true;
+                    }
+                    if (p.keywords) {
+                        const str = `${r.name} ${r.cleanName} ${r.codes.join(' ')}`.toLowerCase();
+                        if (p.keywords.some(k => str.includes(k.toLowerCase()))) {
+                            matches = true;
+                        }
+                    }
+                    if (matches) {
+                        r.codes.forEach(c => targetCodes.add(c));
+                    }
+                });
+                selectedRouteCodes = targetCodes;
+            }
+
+            updateRouteFilterUI();
+            applyRouteAndVisibilityFilters();
+        }
+
+        function toggleLineRoutes(lineName) {
+            const lineLower = lineName.toLowerCase();
+            const ramalesInLine = operationalRamales.filter(r => r.lineName.toLowerCase() === lineLower);
+            const lineCodes = [].concat(...ramalesInLine.map(r => r.codes));
+
+            const allSelected = lineCodes.length > 0 && lineCodes.every(c => selectedRouteCodes.has(c));
+
+            if (selectedRouteCodes.size === 0) {
+                selectedRouteCodes = new Set(lineCodes);
+            } else if (allSelected) {
+                lineCodes.forEach(c => selectedRouteCodes.delete(c));
+            } else {
+                lineCodes.forEach(c => selectedRouteCodes.add(c));
+            }
+
+            activePresetId = null;
+            updateRouteFilterUI();
+            applyRouteAndVisibilityFilters();
+        }
+
+        function onRamalCheckboxChange(ramalId, isChecked) {
+            const ramal = operationalRamales.find(r => r.id === ramalId);
+            if (!ramal) return;
+
+            if (selectedRouteCodes.size === 0) {
+                if (!isChecked) {
+                    selectedRouteCodes = new Set([].concat(...operationalRamales.map(r => r.codes)));
+                    ramal.codes.forEach(c => selectedRouteCodes.delete(c));
+                } else {
+                    selectedRouteCodes = new Set(ramal.codes);
+                }
+            } else {
+                if (isChecked) {
+                    ramal.codes.forEach(c => selectedRouteCodes.add(c));
+                } else {
+                    ramal.codes.forEach(c => selectedRouteCodes.delete(c));
+                }
+            }
+
+            activePresetId = null;
+            updateRouteFilterUI();
+            applyRouteAndVisibilityFilters();
+        }
+
+        function removeRamalFromSelection(ramalId) {
+            const ramal = operationalRamales.find(r => r.id === ramalId);
+            if (ramal) {
+                ramal.codes.forEach(c => selectedRouteCodes.delete(c));
+            }
+            activePresetId = null;
+            updateRouteFilterUI();
+            applyRouteAndVisibilityFilters();
+        }
+
+        function selectAllRoutes() {
+            selectedRouteCodes.clear();
+            activePresetId = 'ALL';
+            updateRouteFilterUI();
+            applyRouteAndVisibilityFilters();
+        }
+
+        function clearAllRouteSelections() {
+            selectedRouteCodes = new Set(['__NONE__']);
+            activePresetId = 'NONE';
+            updateRouteFilterUI();
+            applyRouteAndVisibilityFilters();
+        }
+
+        function updateRouteFilterUI() {
+            const isAll = (activePresetId === 'ALL' || selectedRouteCodes.size === 0);
+            const isNone = (activePresetId === 'NONE' || selectedRouteCodes.has('__NONE__'));
+            const triggerText = document.getElementById('lbl-selected-routes-text');
+            const statsText = document.getElementById('lbl-route-stats');
+            const chipsContainer = document.getElementById('route-chips-container');
+
+            if (isAll) {
+                if (triggerText) triggerText.innerHTML = `🚍 Todos los Ramales (${operationalRamales.length} activos)`;
+                if (statsText) statsText.textContent = 'Todos activos';
+            } else if (isNone) {
+                if (triggerText) triggerText.innerHTML = `🚍 Ningún ramal seleccionado`;
+                if (statsText) statsText.textContent = '0 activos';
+            } else {
+                const activeRamales = operationalRamales.filter(r => r.codes.some(c => selectedRouteCodes.has(c)));
+                if (triggerText) triggerText.innerHTML = `🚍 <strong>${activeRamales.length} ramal(es)</strong> (${selectedRouteCodes.size} variantes)`;
+                if (statsText) statsText.textContent = `${activeRamales.length} activos`;
+            }
+
+            operationalRamales.forEach(r => {
+                const chk = document.getElementById(`chk-ramal-${encodeURIComponent(r.id)}`);
+                if (chk) {
+                    if (isAll) {
+                        chk.checked = true;
+                    } else if (isNone) {
+                        chk.checked = false;
+                    } else {
+                        chk.checked = r.codes.some(c => selectedRouteCodes.has(c));
+                    }
+                }
             });
 
-            if (currentVal) {
-                sel.value = currentVal;
+            const presetButtons = document.querySelectorAll('.btn-preset-chip');
+            presetButtons.forEach(btn => {
+                btn.classList.toggle('active', btn.id === `btn-preset-${activePresetId}`);
+            });
+
+            if (chipsContainer) {
+                if (isAll) {
+                    chipsContainer.style.display = 'none';
+                    chipsContainer.innerHTML = '';
+                } else if (isNone) {
+                    chipsContainer.style.display = 'flex';
+                    chipsContainer.innerHTML = `
+                        <span style="font-size: 10px; color: #94a3b8; font-style: italic;">Ningún ramal seleccionado. Marque al menos uno o use Todos.</span>
+                        <button type="button" class="btn-link-action" style="color: #38bdf8; font-size: 10px;" onclick="selectAllRoutes()">Restablecer Todos</button>
+                    `;
+                } else {
+                    const activeRamales = operationalRamales.filter(r => r.codes.some(c => selectedRouteCodes.has(c)));
+                    chipsContainer.style.display = 'flex';
+                    chipsContainer.innerHTML = activeRamales.map(r => `
+                        <span class="route-chip" style="border-left: 3px solid ${r.color};">
+                            <span>${r.name}</span>
+                            <span class="chip-remove" onclick="removeRamalFromSelection('${r.id}')" title="Quitar ramal">✕</span>
+                        </span>
+                    `).join('') + `
+                        <button type="button" class="btn-link-action" style="color: #ef4444; font-size: 10px; margin-left: 4px;" onclick="selectAllRoutes()" title="Restablecer a todos">Restablecer Todos</button>
+                    `;
+                }
             }
+
+            updateShapeLayersStyle();
+        }
+
+        function filterRouteDropdownItems() {
+            const q = (document.getElementById('txt-filter-routes')?.value || '').trim().toLowerCase();
+            const items = document.querySelectorAll('.route-checkbox-item');
+            items.forEach(el => {
+                const searchTxt = el.getAttribute('data-search') || '';
+                el.style.display = (!q || searchTxt.includes(q)) ? 'flex' : 'none';
+            });
+            const groups = document.querySelectorAll('.route-group-section');
+            groups.forEach(g => {
+                const visibleChild = g.querySelector('.route-checkbox-item[style*="display: flex"]');
+                g.style.display = (!q || visibleChild) ? 'block' : 'none';
+            });
+        }
+
+        function updateShapeLayersStyle() {
+            if (!shapeLayers || shapeLayers.length === 0) return;
+            const isFilterActive = selectedRouteCodes && selectedRouteCodes.size > 0 && !selectedRouteCodes.has('__NONE__');
+            const isNone = selectedRouteCodes && selectedRouteCodes.has('__NONE__');
+
+            shapeLayers.forEach(layer => {
+                layer.eachLayer(subLayer => {
+                    if (subLayer.feature && subLayer.feature.properties) {
+                        const code = (subLayer.feature.properties.route_code || '').toLowerCase();
+                        const isSelected = !isFilterActive || selectedRouteCodes.has(code);
+                        if (isNone) {
+                            subLayer.setStyle({ color: '#334155', weight: 1, opacity: 0.1 });
+                        } else {
+                            subLayer.setStyle({
+                                color: isSelected ? getRouteColor(code) : '#475569',
+                                weight: isSelected ? (isFilterActive ? 5 : 4) : 1.5,
+                                opacity: isSelected ? 0.9 : 0.15
+                            });
+                            if (isSelected && isFilterActive) {
+                                subLayer.bringToFront();
+                            }
+                        }
+                    }
+                });
+            });
         }
 
         function updateLegendRoutes(features) {
@@ -3078,7 +3624,7 @@ async def live_map_view(request: Request):
             shapeLayers.push(layer);
 
             if (!isHistorical && geojson.features.length > 0) {
-                populateRouteDropdown(geojson.features);
+                populateMultiRouteFilter(geojson.features);
                 updateLegendRoutes(geojson.features);
                 if (!hasFittedMap) {
                     try {
@@ -3137,8 +3683,12 @@ async def live_map_view(request: Request):
         async function loadHistoricalShape() {
             const dateVal = document.getElementById('hist-date').value;
             if (!dateVal) return;
-            const selRoute = document.getElementById('sel-route-filter').value;
-            const rCode = (selRoute && selRoute !== 'ALL') ? selRoute.toLowerCase() : (window.firstRouteCode || '0138');
+            let rCode = '004c';
+            if (selectedRouteCodes && selectedRouteCodes.size > 0 && !selectedRouteCodes.has('__NONE__')) {
+                rCode = Array.from(selectedRouteCodes)[0];
+            } else if (window.firstRouteCode) {
+                rCode = window.firstRouteCode;
+            }
             const agId = CURRENT_AGENCY || '002A';
             try {
                 const res = await fetch(`/api/v1/shapes/history?route_code=${rCode}&agency_id=${agId}&date=${dateVal}`);
@@ -3309,21 +3859,15 @@ async def live_map_view(request: Request):
                 }
             }
 
-            const selectedRoute = document.getElementById('sel-route-filter')?.value || 'ALL';
             const showFaults = document.getElementById('chk-show-faults')?.checked ?? true;
             if (v._isFault && !showFaults) return false;
 
-            if (selectedRoute !== 'ALL') {
-                if (selectedRoute.startsWith('LINE:')) {
-                    const targetLine = selectedRoute.substring(5).toUpperCase();
-                    const busLine = (v.line_name || '').toUpperCase();
-                    if (!busLine.includes(targetLine)) return false;
-                } else if (selectedRoute === 'WRONG_DIR') {
-                    if (!v.wrong_direction_alert) return false;
-                } else {
-                    const busRoute = (v.route_id || '').toUpperCase();
-                    if (!busRoute.includes(selectedRoute.toUpperCase())) return false;
-                }
+            if (isOnlyWrongDirActive && !v.wrong_direction_alert) return false;
+
+            if (selectedRouteCodes && selectedRouteCodes.size > 0) {
+                if (selectedRouteCodes.has('__NONE__')) return false;
+                const busRoute = (v.route_id || '').trim().toLowerCase();
+                if (!selectedRouteCodes.has(busRoute)) return false;
             }
 
             const busKey = getBusKey(v);
@@ -3670,18 +4214,16 @@ async def live_map_view(request: Request):
         }
 
         function setAllBusesVisibility(val) {
-            const selectedRoute = document.getElementById('sel-route-filter')?.value || 'ALL';
             Object.values(activeVehicles).forEach(v => {
-                let matches = false;
-                if (selectedRoute === 'ALL') {
-                    matches = true;
-                } else if (selectedRoute.startsWith('LINE:')) {
-                    const targetLine = selectedRoute.substring(5).toUpperCase();
-                    matches = (v.line_name || '').toUpperCase().includes(targetLine);
-                } else if (selectedRoute === 'WRONG_DIR') {
-                    matches = !!v.wrong_direction_alert;
-                } else {
-                    matches = (v.route_id || '').toUpperCase().includes(selectedRoute.toUpperCase());
+                let matches = true;
+                if (selectedRouteCodes && selectedRouteCodes.size > 0 && !selectedRouteCodes.has('__NONE__')) {
+                    const busRoute = (v.route_id || '').trim().toLowerCase();
+                    matches = selectedRouteCodes.has(busRoute);
+                } else if (selectedRouteCodes && selectedRouteCodes.has('__NONE__')) {
+                    matches = false;
+                }
+                if (isOnlyWrongDirActive && !v.wrong_direction_alert) {
+                    matches = false;
                 }
                 if (matches) {
                     busVisibility[getBusKey(v)] = val;
